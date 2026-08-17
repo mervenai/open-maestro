@@ -1,0 +1,21 @@
+# Default vendor-neutral model aliases.
+# Override in ~/.open-maestro/models.yaml or .open-maestro/models.yaml.
+
+models:
+  default: smart
+  fast: fast
+  smart: smart
+  reasoning: reasoning
+
+providers:
+  kimi-cli:
+    provider: kimi
+    cli: kimi
+    api_base: https://api.kimi.com/coding/v1
+  claude-cli:
+    provider: anthropic
+    cli: claude
+    api_base: https://api.anthropic.com/v1
+  openai-sdk:
+    provider: openai
+    api_base: https://api.openai.com/v1

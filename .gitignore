@@ -1,0 +1,10 @@
+.venv/
+.open-maestro/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.pyc
+.kuzu-memory/
+.DS_Store
+dist/
+installpackage/*.whl

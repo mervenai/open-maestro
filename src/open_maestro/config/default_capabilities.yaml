@@ -1,0 +1,317 @@
+# Default vendor-neutral model capability registry.
+# Override or extend in ~/.open-maestro/capabilities.yaml or
+# .open-maestro/capabilities.yaml.
+#
+# Capabilities are approximate and should be updated as providers release new
+# models.  Users can add new entries, override identifiers for a runtime, or
+# tweak capability flags without changing code.
+
+models:
+  kimi-coding-fast:
+    name: "Kimi for Coding"
+    provider: kimi
+    aliases: [fast, default]
+    identifiers:
+      kimi-cli: kimi-code/kimi-for-coding
+    capabilities:
+      tier: fast
+      tool_use: true
+      vision: false
+      computer_use: false
+      reasoning: light
+      coding_strength: high
+      max_context_tokens: 256000
+      max_output_tokens: 16384
+      latency_hint: low
+      cost_level: low
+      relative_cost: 3.0
+
+  kimi-k3:
+    name: "Kimi K3"
+    provider: kimi
+    aliases: [smart, reasoning]
+    identifiers:
+      kimi-cli: kimi-code/k3
+    capabilities:
+      tier: premium
+      tool_use: true
+      vision: false
+      computer_use: false
+      reasoning: deep
+      coding_strength: high
+      max_context_tokens: 256000
+      max_output_tokens: 16384
+      latency_hint: medium
+      cost_level: medium
+      relative_cost: 3.5
+
+  claude-haiku:
+    name: "Claude Haiku 4.5"
+    provider: anthropic
+    aliases: [fast]
+    identifiers:
+      claude-cli: claude-haiku-4-5-20251001
+    capabilities:
+      tier: fast
+      tool_use: true
+      vision: true
+      computer_use: false
+      reasoning: light
+      coding_strength: medium
+      max_context_tokens: 200000
+      max_output_tokens: 8192
+      latency_hint: low
+      cost_level: low
+      relative_cost: 2.0
+
+  claude-sonnet:
+    name: "Claude Sonnet 4.6"
+    provider: anthropic
+    aliases: [smart, default]
+    identifiers:
+      claude-cli: claude-sonnet-4-6
+    capabilities:
+      tier: standard
+      tool_use: true
+      vision: true
+      computer_use: false
+      reasoning: light
+      coding_strength: high
+      max_context_tokens: 200000
+      max_output_tokens: 16384
+      latency_hint: medium
+      cost_level: medium
+      relative_cost: 4.0
+
+  claude-opus:
+    name: "Claude Opus 4.7"
+    provider: anthropic
+    aliases: [reasoning]
+    identifiers:
+      claude-cli: claude-opus-4-7
+    capabilities:
+      tier: premium
+      tool_use: true
+      vision: true
+      computer_use: false
+      reasoning: deep
+      coding_strength: high
+      max_context_tokens: 200000
+      max_output_tokens: 16384
+      latency_hint: high
+      cost_level: high
+      relative_cost: 8.0
+
+  openai-gpt4o-mini:
+    name: "GPT-4o mini"
+    provider: openai
+    aliases: [fast]
+    identifiers:
+      openai-sdk: gpt-4o-mini
+    capabilities:
+      tier: fast
+      tool_use: true
+      vision: true
+      computer_use: false
+      reasoning: light
+      coding_strength: medium
+      max_context_tokens: 128000
+      max_output_tokens: 16384
+      latency_hint: low
+      cost_level: low
+      relative_cost: 1.0
+
+  openai-gpt4o:
+    name: "GPT-4o"
+    provider: openai
+    aliases: [smart, default]
+    identifiers:
+      openai-sdk: gpt-4o
+    capabilities:
+      tier: standard
+      tool_use: true
+      vision: true
+      computer_use: false
+      reasoning: light
+      coding_strength: high
+      max_context_tokens: 128000
+      max_output_tokens: 16384
+      latency_hint: medium
+      cost_level: medium
+      relative_cost: 4.0
+
+  openai-o3-mini:
+    name: "o3-mini"
+    provider: openai
+    aliases: [reasoning]
+    identifiers:
+      openai-sdk: o3-mini
+    capabilities:
+      tier: reasoning
+      tool_use: true
+      vision: false
+      computer_use: false
+      reasoning: deep
+      coding_strength: high
+      max_context_tokens: 200000
+      max_output_tokens: 100000
+      latency_hint: high
+      cost_level: medium
+      relative_cost: 6.0
+
+  qwen-plus:
+    name: "Qwen Plus"
+    provider: alibaba
+    aliases: [smart, default]
+    identifiers:
+      openai-sdk: qwen-plus
+    capabilities:
+      tier: standard
+      tool_use: true
+      vision: true
+      computer_use: false
+      reasoning: light
+      coding_strength: high
+      max_context_tokens: 131072
+      max_output_tokens: 8192
+      latency_hint: medium
+      cost_level: medium
+      relative_cost: 2.5
+
+  qwen-max:
+    name: "Qwen Max"
+    provider: alibaba
+    aliases: [reasoning]
+    identifiers:
+      openai-sdk: qwen-max
+    capabilities:
+      tier: premium
+      tool_use: true
+      vision: true
+      computer_use: false
+      reasoning: deep
+      coding_strength: high
+      max_context_tokens: 131072
+      max_output_tokens: 8192
+      latency_hint: high
+      cost_level: medium
+      relative_cost: 4.0
+
+  qwen-coder-plus:
+    name: "Qwen Coder Plus"
+    provider: alibaba
+    aliases: [fast]
+    identifiers:
+      openai-sdk: qwen-coder-plus
+    capabilities:
+      tier: fast
+      tool_use: true
+      vision: false
+      computer_use: false
+      reasoning: light
+      coding_strength: high
+      max_context_tokens: 131072
+      max_output_tokens: 8192
+      latency_hint: low
+      cost_level: low
+      relative_cost: 2.0
+
+  # Local models served via Ollama's OpenAI-compatible endpoint.
+  # Set OPENAI_BASE_URL=http://localhost:11434/v1 to use them through the
+  # openai-sdk runtime, or let Maestro probe OLLAMA_HOST automatically.
+  ollama-llama3-3:
+    name: "Ollama Llama 3.3"
+    provider: ollama
+    aliases: [local, fast]
+    identifiers:
+      openai-sdk: llama3.3
+    capabilities:
+      tier: fast
+      tool_use: true
+      vision: false
+      computer_use: false
+      reasoning: light
+      coding_strength: medium
+      max_context_tokens: 128000
+      max_output_tokens: 8192
+      latency_hint: medium
+      cost_level: low
+      relative_cost: 0.1
+
+  ollama-qwen2-5-coder:
+    name: "Ollama Qwen 2.5 Coder"
+    provider: ollama
+    aliases: [local, fast]
+    identifiers:
+      openai-sdk: qwen2.5-coder
+    capabilities:
+      tier: fast
+      tool_use: true
+      vision: false
+      computer_use: false
+      reasoning: light
+      coding_strength: high
+      max_context_tokens: 131072
+      max_output_tokens: 8192
+      latency_hint: medium
+      cost_level: low
+      relative_cost: 0.1
+
+  ollama-qwen3-8b:
+    name: "Ollama Qwen 3 8B"
+    provider: ollama
+    aliases: [local, fast]
+    identifiers:
+      openai-sdk: qwen3:8b
+    capabilities:
+      tier: fast
+      tool_use: true
+      vision: false
+      computer_use: false
+      reasoning: light
+      coding_strength: high
+      max_context_tokens: 131072
+      max_output_tokens: 8192
+      latency_hint: medium
+      cost_level: low
+      relative_cost: 0.08
+
+  ollama-llama3-1-8b:
+    name: "Ollama Llama 3.1 8B"
+    provider: ollama
+    aliases: [local]
+    identifiers:
+      openai-sdk: llama3.1:8b
+    capabilities:
+      tier: fast
+      tool_use: true
+      vision: false
+      computer_use: false
+      reasoning: light
+      coding_strength: medium
+      max_context_tokens: 128000
+      max_output_tokens: 8192
+      latency_hint: low
+      cost_level: low
+      relative_cost: 0.05
+
+  # Generic local OpenAI-compatible endpoint (vLLM, LM Studio, etc.).
+  # Availability depends on OPENAI_BASE_URL being reachable.
+  local-openai-generic:
+    name: "Local OpenAI-compatible"
+    provider: local
+    aliases: [local]
+    identifiers:
+      openai-sdk: local-model
+    capabilities:
+      tier: standard
+      tool_use: true
+      vision: false
+      computer_use: false
+      reasoning: light
+      coding_strength: high
+      max_context_tokens: 128000
+      max_output_tokens: 8192
+      latency_hint: medium
+      cost_level: low
+      relative_cost: 0.1
