@@ -98,6 +98,7 @@ class InteractiveState:
     dry_run_next: bool = False
     reasoning: bool = False
     fast: bool = False
+    chain: bool = False
     turn: int = 0
 
 
@@ -120,6 +121,7 @@ def _banner(session_id: str | None = None) -> str:
         "  /memory <query>   recall relevant memories from project memory\n"
         "  /reasoning        toggle reasoning preference\n"
         "  /fast             toggle fast/cheap preference\n"
+        "  /chain            toggle multi-agent chain mode\n"
         "  /reset            clear conversation history\n"
         "  /help             show this message\n"
         "  /exit, /quit      leave interactive mode\n"
@@ -266,6 +268,10 @@ async def _handle_command(
     if cmd == "fast":
         state.fast = not state.fast
         return f"Fast/cheap preference: {'on' if state.fast else 'off'}."
+
+    if cmd == "chain":
+        state.chain = not state.chain
+        return f"Multi-agent chain mode: {'on' if state.chain else 'off'}."
 
     if cmd == "agent":
         if not args:
@@ -495,6 +501,7 @@ async def run_interactive(args: Any) -> int:
         model=args.model,
         reasoning=args.reasoning,
         fast=args.fast,
+        chain=getattr(args, "chain", False),
     )
 
     print(_banner(session_id=state.session_id))
@@ -622,6 +629,8 @@ async def run_interactive(args: Any) -> int:
                         session_id=state.session_id,
                         resume=state.session_id is not None,
                         dry_run=dry_run,
+                        chain=state.chain,
+                        runtime_config=runtime_config,
                     )
             else:
                 result = await pm.handle(
@@ -638,6 +647,8 @@ async def run_interactive(args: Any) -> int:
                     session_id=state.session_id,
                     resume=state.session_id is not None,
                     dry_run=dry_run,
+                    chain=state.chain,
+                    runtime_config=runtime_config,
                 )
         except Exception as exc:
             logger.exception("Task handling failed")

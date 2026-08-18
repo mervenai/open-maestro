@@ -31,6 +31,8 @@ class MonitorState:
     tokens_budget: int | None = None
     context_threshold: str | None = None
     active_tool: str | None = None
+    chain_step: int | None = None
+    chain_total: int | None = None
     recent_events: list[dict[str, Any]] = field(default_factory=list)
 
     def update(self, event_type: str, payload: dict[str, Any]) -> None:
@@ -74,3 +76,9 @@ class MonitorState:
             self.tokens_used = payload.get("tokens_used")
         elif event_type == "session.saved":
             self.session_id = payload.get("session_id") or self.session_id
+        elif event_type == "chain.step_started":
+            self.chain_step = payload.get("step", self.chain_step)
+            self.chain_total = payload.get("total", self.chain_total)
+            self.agent_id = payload.get("agent_id") or self.agent_id
+        elif event_type == "chain.step_completed":
+            self.chain_step = payload.get("step", self.chain_step)

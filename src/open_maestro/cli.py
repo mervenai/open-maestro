@@ -313,6 +313,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Print the selected agent, task profile, and resolved model without invoking an LLM",
     )
     parser.add_argument(
+        "--chain",
+        action="store_true",
+        help="Decompose the task into a multi-agent chain (research → engineer → QA, etc.)",
+    )
+    parser.add_argument(
         "--stream",
         action="store_true",
         help="Stream live events to stderr during execution",
@@ -765,6 +770,8 @@ async def main_async() -> int:
                 resume=resume,
                 fork=fork,
                 dry_run=dry_run,
+                chain=args.chain,
+                runtime_config=runtime_config,
             )
     else:
         result = await pm.handle(
@@ -782,6 +789,8 @@ async def main_async() -> int:
             resume=resume,
             fork=fork,
             dry_run=dry_run,
+            chain=args.chain,
+            runtime_config=runtime_config,
         )
     print(result.text)
     if not dry_run and result.session_id:

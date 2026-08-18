@@ -5,7 +5,7 @@ workstations for a team of engineers.
 
 ## Current state (read this first)
 
-Open Maestro **1.3.0** is a functional multi-agent orchestration layer with:
+Open Maestro **1.4.0** is a functional multi-agent orchestration layer with:
 
 - Vendor-agnostic agent routing across Claude, Kimi, and OpenAI-compatible models
 - Model arbitration that picks the cheapest capable backend for a task
@@ -38,23 +38,23 @@ Build the wheel once and share it with the team:
 ```bash
 cd /Users/jj/dev/open-maestro
 python -m build --wheel
-# Share dist/open_maestro-1.3.0-py3-none-any.whl
+# Share dist/open_maestro-1.4.0-py3-none-any.whl
 ```
 
 Each engineer runs the install script:
 
 ```bash
-./install-ubuntu.sh /path/to/open_maestro-1.3.0-py3-none-any.whl
+./install-ubuntu.sh /path/to/open_maestro-1.4.0-py3-none-any.whl
 ```
 
 To also install SDK runtimes and their Python dependencies:
 
 ```bash
 # openai-sdk runtime (cloud OpenAI, Azure, Ollama, vLLM, DashScope, etc.)
-OPENAI=1 ./install-ubuntu.sh /path/to/open_maestro-1.3.0-py3-none-any.whl
+OPENAI=1 ./install-ubuntu.sh /path/to/open_maestro-1.4.0-py3-none-any.whl
 
 # All SDK runtimes
-OPENAI=1 CLAUDE_SDK=1 KIMI_ACP=1 ./install-ubuntu.sh /path/to/open_maestro-1.3.0-py3-none-any.whl
+OPENAI=1 CLAUDE_SDK=1 KIMI_ACP=1 ./install-ubuntu.sh /path/to/open_maestro-1.4.0-py3-none-any.whl
 ```
 
 The `OPENAI=1` flag installs the `openai` package, which is required for the
@@ -131,7 +131,7 @@ claude auth login
 > Anthropic API key. Install the SDK extra and set the key:
 >
 > ```bash
-> CLAUDE_SDK=1 ./install-ubuntu.sh /path/to/open_maestro-1.3.0-py3-none-any.whl
+> CLAUDE_SDK=1 ./install-ubuntu.sh /path/to/open_maestro-1.4.0-py3-none-any.whl
 > export ANTHROPIC_API_KEY="sk-ant-..."
 > ```
 >
@@ -253,9 +253,9 @@ The output shows the selected runtime and resolved model.
 
 ## Live activity monitor
 
-Maestro 1.3.0 adds a lightweight live monitor (`--monitor`) that shows the
+Maestro 1.3.0 added a lightweight live monitor (`--monitor`) that shows the
 current agent, runtime, model, task, context usage, and recent events while a
-prompt is executing.
+prompt is executing. v1.4.0 adds chain progress when `--chain` is used.
 
 Use it in one-shot mode:
 
@@ -272,6 +272,33 @@ maestro --monitor --interactive
 The monitor renders a Rich panel that updates in real time and disappears once
 the turn completes. It is useful for watching which agent/runtime Maestro chose,
 what tool is currently running, and whether context pressure is rising.
+
+## Multi-agent chains
+
+v1.4.0 can decompose a single request into a chain of specialist agents. The
+planner is LLM-driven with fallback to predefined patterns:
+
+- `implement` / `build` / `create` → research → engineer → QA
+- `fix` / `debug` → research → engineer → QA
+- `analyze` / `evaluate` / `report` → research → documentation
+
+Use `--chain` in one-shot mode:
+
+```bash
+maestro --chain "implement a CSV parser for the import flow"
+```
+
+Or toggle it in interactive mode:
+
+```bash
+maestro --interactive
+> /chain
+Multi-agent chain mode: on.
+> implement a CSV parser for the import flow
+```
+
+Each step picks the cheapest capable model independently, and the final response
+is grouped by agent. Chains are capped at 5 steps.
 
 ## Additional integrations
 
@@ -439,17 +466,23 @@ When you release a new wheel:
 
 ```bash
 maestro --version          # note old version
-./install-ubuntu.sh /path/to/open_maestro-1.3.0-py3-none-any.whl
+./install-ubuntu.sh /path/to/open_maestro-1.4.0-py3-none-any.whl
 maestro --version          # confirm new version
 ```
 
 User-level config, sources, and memory in `~/.open-maestro/` are preserved.
 
-### Upgrading to v1.3.0 (schema migration)
+### Upgrading to v1.4.0
 
-v1.3.0 uses a new milestone schema: **epics contain milestones**. Old
-`.open-maestro/milestones.yaml` files created by v1.0/v1.1 will be rejected with
-a clear error. To migrate each project:
+v1.4.0 is backward-compatible with v1.3.0 milestone files. The main additions are
+multi-agent chains (`--chain` / `/chain`) and per-step model arbitration. After
+upgrading the wheel, run `maestro --version` to confirm `1.4.0`.
+
+### Upgrading from v1.2.x or earlier (schema migration)
+
+v1.3.0+ uses a new milestone schema: **epics contain milestones**. Old
+`.open-maestro/milestones.yaml` files created by v1.0/v1.1/v1.2 will be rejected
+with a clear error. To migrate each project:
 
 ```bash
 cd ~/projects/YourProject
@@ -471,7 +504,7 @@ Running the install script again will replace the venv contents while keeping
 your config, sources, and memory:
 
 ```bash
-./install-ubuntu.sh /path/to/open_maestro-1.3.0-py3-none-any.whl
+./install-ubuntu.sh /path/to/open_maestro-1.4.0-py3-none-any.whl
 ```
 
 Use the same feature flags you used the first time (e.g. `OPENAI=1`) so the
@@ -485,7 +518,7 @@ in `~/.open-maestro/` — user config, agent sources, memory databases, and logs
 
 ```bash
 rm -rf ~/.open-maestro/venv
-./install-ubuntu.sh /path/to/open_maestro-1.3.0-py3-none-any.whl
+./install-ubuntu.sh /path/to/open_maestro-1.4.0-py3-none-any.whl
 ```
 
 ## Troubleshooting
@@ -541,7 +574,7 @@ models:
 - Streaming output and progress indicators are functional but minimal.
 - Vision support depends on the chosen model and runtime.
 - The remote dashboard receiver endpoint is implemented in the Merven core on
-  `staging.merven.ai`; Maestro 1.3.0 ships the publishing client only.
+  `staging.merven.ai`; Maestro ships the publishing client only.
 
 ## Getting help
 

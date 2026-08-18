@@ -27,6 +27,7 @@ from open_maestro.context.budget import ContextBudget
 from open_maestro.context.monitor import ContextMonitor, ContextSnapshot
 from open_maestro.events.bus import EventBus
 from open_maestro.milestones import format_prompt_context
+from open_maestro.orchestrator.chain import ChainExecutor, ChainPlanner
 from open_maestro.runtime.base import AgentConfig, AgentResult, AgentRuntime
 from open_maestro.runtime.latency import record_result
 from open_maestro.security.policy import PermissionPolicy, evaluate
@@ -107,6 +108,8 @@ class ProjectManager:
         resume: bool = False,
         fork: bool = False,
         dry_run: bool = False,
+        chain: bool = False,
+        runtime_config: AgentConfig | None = None,
     ) -> AgentResult:
         """Handle a user task by delegating to the best specialist agent."""
         profile = task_profile or TaskProfiler.from_prompt(prompt)
@@ -203,8 +206,52 @@ class ProjectManager:
         # 6. Assemble enriched prompt
         ctx.enriched_prompt = self._build_prompt(ctx)
 
-        # 7. Dry run: return the plan without invoking the runtime.
-        if dry_run:
+        # 7. Chain execution: decompose the task into multiple specialist steps.
+        executed_as_chain = False
+        if chain and not resume and not fork:
+            executed_as_chain = True
+            planner = ChainPlanner(
+                runtime=self.runtime,
+                registry=self.registry,
+                model=resolved_model or "fast",
+            )
+            plan = await planner.plan(
+                prompt,
+                first_agent=ctx.selected_agent,
+                profile=profile,
+            )
+            if dry_run:
+                return AgentResult(
+                    text=ChainExecutor.format_plan(plan),
+                    metadata={
+                        "selected_agent": ctx.selected_agent.id,
+                        "chain": True,
+                        "dry_run": True,
+                    },
+                )
+            executor = ChainExecutor(
+                registry=self.registry,
+                event_bus=self.event_bus,
+                base_config=runtime_config or AgentConfig(),
+            )
+            result = await executor.execute(
+                plan,
+                original_prompt=prompt,
+                base_profile=profile,
+                memories=ctx.memories,
+                code_results=ctx.code_results,
+                allowed_tools=allowed_tools,
+                blocked_tools=blocked_tools,
+                permission_mode=permission_mode,
+                deny_dangerous=deny_dangerous,
+                max_turns=max_turns,
+                mcp_servers=mcp_servers,
+            )
+            # Placeholder config for session persistence; real models are in metadata.
+            config = AgentConfig(model=model or resolved_model)
+
+        # 8. Dry run: return the plan without invoking the runtime.
+        if dry_run and not executed_as_chain:
             plan = self._format_plan(
                 ctx, profile, resolved_model, self.runtime.runtime_name
             )
@@ -218,51 +265,52 @@ class ProjectManager:
                 },
             )
 
-        # 8. Handoff: if the task requires writing but the selected agent is
+        # 9. Handoff: if the task requires writing but the selected agent is
         #    read-only, run the read-only agent first for analysis, then delegate
         #    the writing step to a mutating agent.
-        needs_handoff = (
-            not dry_run
-            and _task_requires_writing(prompt)
-            and _agent_is_read_only(ctx.selected_agent)
-        )
-        if needs_handoff:
-            result, config = await self._run_with_handoff(
-                ctx,
-                profile,
-                resolved_model,
-                prompt=prompt,
-                allowed_tools=allowed_tools,
-                blocked_tools=blocked_tools,
-                permission_mode=permission_mode,
-                deny_dangerous=deny_dangerous,
-                max_turns=max_turns,
-                mcp_servers=mcp_servers,
-                session_id=session_id,
-                resume=resume,
-                fork=fork,
+        if not executed_as_chain:
+            needs_handoff = (
+                not dry_run
+                and _task_requires_writing(prompt)
+                and _agent_is_read_only(ctx.selected_agent)
             )
-        else:
-            result, config = await self._execute_agent(
-                ctx,
-                profile,
-                resolved_model,
-                prompt=ctx.enriched_prompt,
-                agent=ctx.selected_agent,
-                allowed_tools=allowed_tools,
-                blocked_tools=blocked_tools,
-                permission_mode=permission_mode,
-                deny_dangerous=deny_dangerous,
-                max_turns=max_turns,
-                mcp_servers=mcp_servers,
-                session_id=session_id,
-                resume=resume,
-                fork=fork,
-                dry_run=dry_run,
-            )
+            if needs_handoff:
+                result, config = await self._run_with_handoff(
+                    ctx,
+                    profile,
+                    resolved_model,
+                    prompt=prompt,
+                    allowed_tools=allowed_tools,
+                    blocked_tools=blocked_tools,
+                    permission_mode=permission_mode,
+                    deny_dangerous=deny_dangerous,
+                    max_turns=max_turns,
+                    mcp_servers=mcp_servers,
+                    session_id=session_id,
+                    resume=resume,
+                    fork=fork,
+                )
+            else:
+                result, config = await self._execute_agent(
+                    ctx,
+                    profile,
+                    resolved_model,
+                    prompt=ctx.enriched_prompt,
+                    agent=ctx.selected_agent,
+                    allowed_tools=allowed_tools,
+                    blocked_tools=blocked_tools,
+                    permission_mode=permission_mode,
+                    deny_dangerous=deny_dangerous,
+                    max_turns=max_turns,
+                    mcp_servers=mcp_servers,
+                    session_id=session_id,
+                    resume=resume,
+                    fork=fork,
+                    dry_run=dry_run,
+                )
 
-        # 9. Credit the vendor and model used for this turn.
-        if not dry_run and not result.is_error:
+        # 10. Credit the vendor and model used for this turn.
+        if not dry_run and not result.is_error and not executed_as_chain:
             result.text += (
                 f"\n\n---\n"
                 f"Vendor: {_vendor_label(self.runtime.runtime_name)}\n"

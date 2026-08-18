@@ -55,6 +55,10 @@ def _format_event(event: dict[str, Any]) -> Text:
         message = f"{payload.get('threshold')} tokens={payload.get('tokens_used')}"
     elif event_type == "runtime.completed":
         message = f"error={payload.get('is_error')}"
+    elif event_type == "chain.step_started":
+        message = f"step {payload.get('step')}/{payload.get('total')} {payload.get('agent_id')}"
+    elif event_type == "chain.step_completed":
+        message = f"step {payload.get('step')}/{payload.get('total')} error={payload.get('is_error')}"
     else:
         message = str(payload)[:80]
 
@@ -97,6 +101,11 @@ def render(state: MonitorState) -> Panel:
         + (f" ({state.agent_role})" if state.agent_role else ""),
     )
     status_table.add_row("Turn", str(state.turn))
+    if state.chain_total is not None:
+        status_table.add_row(
+            "Chain",
+            f"step {state.chain_step or 0}/{state.chain_total}",
+        )
     status_table.add_row("Session", _truncate(state.session_id, 40))
 
     context_line = "—"

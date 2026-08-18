@@ -5,6 +5,20 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-08-18
+
+### Added
+- Multi-agent chain execution (`--chain` CLI flag, `/chain` interactive toggle).
+  A single user request is decomposed into up to 5 sequential specialist-agent
+  steps (e.g., research → engineer → QA) with per-step capability-aware model
+  selection.
+- LLM-driven chain planner with JSON output and fallback to predefined chains
+  for common patterns (`implement`, `fix`, `analyze`).
+- Per-step runtime/model arbitration inside a chain so each agent uses the
+  cheapest capable model independently.
+- Chain progress events (`chain.step_started`, `chain.step_completed`) displayed
+  in the live monitor.
+
 ## [1.3.0] - 2026-08-17
 
 ### Added
