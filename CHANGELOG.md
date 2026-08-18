@@ -5,6 +5,12 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-08-18
+
+### Fixed
+- Multi-line pasted text in `maestro --interactive` is now captured as a single
+  prompt instead of being split into one prompt per line.
+
 ## [1.4.0] - 2026-08-18
 
 ### Added

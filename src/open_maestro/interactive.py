@@ -346,10 +346,47 @@ async def _handle_command(
     return f"Unknown command '/{cmd}'. Type /help for available commands."
 
 
+def _read_input_with_paste(prompt: str = "> ") -> str:
+    """Read a line, then drain any immediately-pending stdin bytes.
+
+    Why: When a user pastes multi-line text into an interactive terminal,
+    each newline would otherwise be consumed as a separate prompt. By
+    checking stdin for more data right after the first line, we can collect
+    the whole paste into a single prompt.
+
+    The short timeout (50ms) means normal typing still gets one line at a
+    time, while a paste (which arrives as a burst) is captured in full.
+    """
+    import select
+    import sys
+
+    first = input(prompt)
+    lines = [first]
+
+    # Drain pasted lines for up to ~50ms after the first newline.
+    while True:
+        try:
+            ready, _, _ = select.select([sys.stdin], [], [], 0.05)
+        except (OSError, ValueError):
+            break
+        if not ready:
+            break
+        line = sys.stdin.readline()
+        if not line:
+            break
+        lines.append(line.rstrip("\n"))
+
+    # Remove a single trailing blank line that some terminals inject.
+    if len(lines) > 1 and lines[-1] == "":
+        lines.pop()
+
+    return "\n".join(lines)
+
+
 async def _read_line(prompt: str = "> ") -> str:
-    """Read a line from stdin in an async-friendly way."""
+    """Read a line (or pasted multi-line block) from stdin."""
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, input, prompt)
+    return await loop.run_in_executor(None, _read_input_with_paste, prompt)
 
 
 def _format_milestone_status(plan: Any) -> str:
