@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import shutil
+import sys
 import tempfile
 import time
 from collections.abc import Callable, Coroutine
@@ -174,6 +175,35 @@ class ClaudeCLIRuntime(AgentRuntime):
             logger.warning("Failed to write MCP config: %s", exc)
             return None
 
+    @staticmethod
+    async def _stream_pipe(
+        stream: asyncio.StreamReader | None,
+        output_stream: Any,
+        buffer: list[str],
+        prefix: str = "",
+    ) -> None:
+        """Read a subprocess stream line-by-line, print it, and buffer it.
+
+        Why: CLI tools produce progress output (tool calls, file reads, etc.)
+        that users want to see in real time. This helper tees the stream to both
+        the terminal and a capture buffer.
+        """
+        if stream is None:
+            return
+        while True:
+            line_bytes = await stream.readline()
+            if not line_bytes:
+                break
+            line = line_bytes.decode(errors="replace")
+            buffer.append(line)
+            if prefix:
+                output_stream.write(prefix)
+            output_stream.write(line)
+            try:
+                output_stream.flush()
+            except Exception:
+                pass
+
     async def _invoke(
         self,
         prompt: str,
@@ -193,6 +223,10 @@ class ClaudeCLIRuntime(AgentRuntime):
 
         start = time.monotonic()
         heartbeat = asyncio.create_task(self._working_heartbeat(start))
+
+        stdout_buffer: list[str] = []
+        stderr_buffer: list[str] = []
+
         try:
             process = await asyncio.create_subprocess_exec(
                 *args,
@@ -200,16 +234,27 @@ class ClaudeCLIRuntime(AgentRuntime):
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self._cwd if config is None or config.cwd is None else config.cwd,
             )
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(),
-                timeout=self._timeout_seconds,
+
+            stdout_task = asyncio.create_task(
+                self._stream_pipe(process.stdout, sys.stdout, stdout_buffer)
             )
-        except TimeoutError:
-            return AgentResult(
-                text="Claude CLI subprocess timed out",
-                is_error=True,
-                duration_ms=int((time.monotonic() - start) * 1000),
+            stderr_task = asyncio.create_task(
+                self._stream_pipe(process.stderr, sys.stderr, stderr_buffer, prefix="[claude] ")
             )
+
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(stdout_task, stderr_task, process.wait()),
+                    timeout=self._timeout_seconds,
+                )
+            except TimeoutError:
+                process.kill()
+                return AgentResult(
+                    text="Claude CLI subprocess timed out",
+                    is_error=True,
+                    duration_ms=int((time.monotonic() - start) * 1000),
+                )
+
         finally:
             heartbeat.cancel()
             try:
@@ -223,8 +268,8 @@ class ClaudeCLIRuntime(AgentRuntime):
                     logger.warning("Failed to clean up temp MCP config %s: %s", path, exc)
 
         duration_ms = int((time.monotonic() - start) * 1000)
-        stdout = stdout_bytes.decode() if stdout_bytes else ""
-        stderr = stderr_bytes.decode() if stderr_bytes else ""
+        stdout = "".join(stdout_buffer)
+        stderr = "".join(stderr_buffer)
 
         if process.returncode != 0:
             # Claude writes structured errors to stdout as JSON; prefer that
