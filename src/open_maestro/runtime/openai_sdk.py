@@ -396,7 +396,7 @@ class OpenAISDKRuntime(AgentRuntime):
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
 
-    async def _heartbeat(self, start: float, interval: float = 30.0) -> None:
+    async def _heartbeat(self, start: float, interval: float = 5.0) -> None:
         """Emit periodic runtime.working events while waiting for the LLM."""
         while True:
             await asyncio.sleep(interval)

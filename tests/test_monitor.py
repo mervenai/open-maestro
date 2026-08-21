@@ -67,6 +67,12 @@ def test_state_updates_context_threshold(state: MonitorState) -> None:
     assert state.tokens_used == 12000
 
 
+def test_state_updates_working(state: MonitorState) -> None:
+    """runtime.working sets status to working."""
+    state.update("runtime.working", {"duration_ms": 12345})
+    assert state.status == "working"
+
+
 def test_state_truncates_recent_events(state: MonitorState) -> None:
     """Only the last 50 events are kept."""
     for i in range(60):

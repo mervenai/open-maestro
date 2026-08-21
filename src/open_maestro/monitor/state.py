@@ -76,6 +76,8 @@ class MonitorState:
             self.tokens_used = payload.get("tokens_used")
         elif event_type == "session.saved":
             self.session_id = payload.get("session_id") or self.session_id
+        elif event_type == "runtime.working":
+            self.status = "working"
         elif event_type == "chain.step_started":
             self.chain_step = payload.get("step", self.chain_step)
             self.chain_total = payload.get("total", self.chain_total)

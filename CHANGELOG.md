@@ -5,6 +5,13 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.3] - 2026-08-22
+
+### Fixed
+- `--monitor` no longer shows a blank cursor during long-running turns. CLI
+  runtimes now emit `runtime.working` heartbeat events every 5 seconds, and the
+  monitor renderer displays elapsed working time with interim updates.
+
 ## [1.4.2] - 2026-08-18
 
 ### Changed

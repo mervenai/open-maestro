@@ -59,6 +59,9 @@ def _format_event(event: dict[str, Any]) -> Text:
         message = f"step {payload.get('step')}/{payload.get('total')} {payload.get('agent_id')}"
     elif event_type == "chain.step_completed":
         message = f"step {payload.get('step')}/{payload.get('total')} error={payload.get('is_error')}"
+    elif event_type == "runtime.working":
+        duration_ms = payload.get("duration_ms", 0)
+        message = f"working for {duration_ms / 1000:.1f}s"
     else:
         message = str(payload)[:80]
 
@@ -67,6 +70,9 @@ def _format_event(event: dict[str, Any]) -> Text:
         "agent.selected": "green",
         "runtime.started": "blue",
         "runtime.completed": "blue",
+        "runtime.working": "blue",
+        "chain.step_started": "green",
+        "chain.step_completed": "green",
         "tool.call": "yellow",
         "tool.result": "yellow",
         "memory.recalled": "magenta",

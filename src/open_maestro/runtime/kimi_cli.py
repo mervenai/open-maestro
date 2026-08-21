@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from open_maestro.config.capabilities import TaskProfile
 from open_maestro.config.models import ModelResolver
+from open_maestro.events.bus import EventBus
 from open_maestro.runtime.base import AgentConfig, AgentResult, AgentRuntime
 
 if TYPE_CHECKING:
@@ -196,6 +197,7 @@ class KimiCLIRuntime(AgentRuntime):
         start = time.monotonic()
         term_attrs = _TerminalAttrs()
         term_attrs.save()
+        heartbeat = asyncio.create_task(self._working_heartbeat(start))
         try:
             process = await asyncio.create_subprocess_exec(
                 *args,
@@ -215,6 +217,11 @@ class KimiCLIRuntime(AgentRuntime):
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
         finally:
+            heartbeat.cancel()
+            try:
+                await heartbeat
+            except asyncio.CancelledError:
+                pass
             term_attrs.restore()
 
         duration_ms = int((time.monotonic() - start) * 1000)
@@ -265,6 +272,17 @@ class KimiCLIRuntime(AgentRuntime):
             duration_ms=duration_ms,
             metadata=metadata,
         )
+
+    @staticmethod
+    async def _working_heartbeat(
+        start: float, interval: float = 5.0
+    ) -> None:
+        """Emit periodic runtime.working events while the CLI subprocess runs."""
+        bus = EventBus()
+        while True:
+            await asyncio.sleep(interval)
+            duration_ms = int((time.monotonic() - start) * 1000)
+            await bus.emit("runtime.working", {"duration_ms": duration_ms})
 
     async def run(
         self,
