@@ -98,7 +98,7 @@ class InteractiveState:
     dry_run_next: bool = False
     reasoning: bool = False
     fast: bool = False
-    chain: bool = False
+    chain: bool = True
     turn: int = 0
 
 
@@ -121,7 +121,7 @@ def _banner(session_id: str | None = None) -> str:
         "  /memory <query>   recall relevant memories from project memory\n"
         "  /reasoning        toggle reasoning preference\n"
         "  /fast             toggle fast/cheap preference\n"
-        "  /chain            toggle multi-agent chain mode\n"
+        "  /chain            toggle multi-agent chain mode (default: on)\n"
         "  /reset            clear conversation history\n"
         "  /help             show this message\n"
         "  /exit, /quit      leave interactive mode\n"
@@ -538,7 +538,7 @@ async def run_interactive(args: Any) -> int:
         model=args.model,
         reasoning=args.reasoning,
         fast=args.fast,
-        chain=getattr(args, "chain", False),
+        chain=getattr(args, "chain", True),
     )
 
     print(_banner(session_id=state.session_id))

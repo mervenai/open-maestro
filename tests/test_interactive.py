@@ -81,6 +81,10 @@ def test_handle_command_toggles() -> None:
     assert _cmd("/fast", state, registry) == "Fast/cheap preference: on."
     assert state.fast is True
 
+    assert state.chain is True
+    assert _cmd("/chain", state, registry) == "Multi-agent chain mode: off."
+    assert state.chain is False
+
 
 def test_handle_command_plan_and_dry() -> None:
     state = InteractiveState()
