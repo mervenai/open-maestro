@@ -367,6 +367,57 @@ maestro --export-dashboard markdown > dashboard.md
 maestro --export-dashboard html > dashboard.html
 ```
 
+### Link a Maestro project to Merven
+
+To pull the canonical epic/workstream structure from Merven, you need a Merven
+project and its token. This is done on the Merven core server, not the engineer
+workstation.
+
+#### 1. Create the project on the Merven server
+
+SSH into the Merven core server and run:
+
+```bash
+cd /opt/merven
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/staging/docker-compose.staging.yml \
+  exec core merven project create "Project Name" \
+  --client-name "Client Name" \
+  --epic "Epic One" \
+  --epic "Epic Two"
+```
+
+The command prints a project ID and token. If you only have the project ID, the
+token is stored in the `project` table under the tenant schema in Postgres:
+
+```bash
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/staging/docker-compose.staging.yml \
+  exec postgres psql -U merven -d merven -t -A \
+  -c "SET search_path TO tenant_acme_corp; SELECT project_token FROM project WHERE project_id='PROJECT_ID';"
+```
+
+(Replace `tenant_acme_corp` with the correct tenant schema if different.)
+
+#### 2. Sync milestones to the local workstation
+
+On the engineer machine, from the project directory:
+
+```bash
+cd ~/projects/YourProject
+export MERVEN_API_URL="https://api.staging.merven.ai/maestro"
+export MAESTRO_DASHBOARD_PROJECT_TOKEN="project-token-from-above"
+maestro --sync-milestones
+```
+
+`MERVEN_API_URL` is the Merven core API base path. `MAESTRO_DASHBOARD_PROJECT_TOKEN`
+is the project token from Merven. The local plan is written to
+`.open-maestro/milestones.yaml`.
+
+**Note:** `--sync-milestones` requires the workstation to reach `MERVEN_API_URL`.
+If the workstation is behind a heavy firewall or VPN that blocks outbound HTTPS,
+sync will time out. In that case, create and manage milestones locally with
+`maestro --discover-milestones` and the `/track`, `/complete`, `/blocker`
+interactive commands.
+
 ### Serve the dashboard locally
 
 ```bash
