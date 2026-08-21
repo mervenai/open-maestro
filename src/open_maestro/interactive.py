@@ -38,6 +38,7 @@ from open_maestro.milestones import (
     handle_blocker_command,
     handle_complete_command,
     handle_next_command,
+    handle_prompts_command,
     handle_track_command,
 )
 from open_maestro.monitor.live import Monitor
@@ -114,6 +115,7 @@ def _banner(session_id: str | None = None) -> str:
         "  /dry              dry-run the next prompt only\n"
         "  /milestones       show project milestone progress\n"
         "  /next             suggest the next milestone action\n"
+        "  /prompts <milestone> [epic]  list playbook prompts for a milestone\n"
         "  /complete <id>    mark a milestone complete (add --force to override)\n"
         "  /blocker <id> <reason>  record a milestone blocker\n"
         "  /track <id> <status>    update a milestone status inside an epic\n"
@@ -333,6 +335,9 @@ async def _handle_command(
 
     if cmd == "next":
         return handle_next_command(Path.cwd())
+
+    if cmd == "prompts":
+        return handle_prompts_command(Path.cwd(), args)
 
     if cmd == "complete":
         return handle_complete_command(Path.cwd(), args)

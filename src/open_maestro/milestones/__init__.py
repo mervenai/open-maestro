@@ -14,6 +14,7 @@ from open_maestro.milestones.commands import (
     handle_blocker_command,
     handle_complete_command,
     handle_next_command,
+    handle_prompts_command,
     handle_track_command,
 )
 from open_maestro.milestones.dashboard import (
@@ -53,6 +54,7 @@ __all__ = [
     "handle_complete_command",
     "handle_blocker_command",
     "handle_track_command",
+    "handle_prompts_command",
     "format_prompt_context",
     "export_dashboard_json",
     "export_dashboard_markdown",

@@ -1,0 +1,360 @@
+# Default milestone prompt playbook for software-consulting projects.
+# Derived from the completed M3BudgetUpload project lifecycle.
+# Override per project at: .open-maestro/playbook.yaml
+
+playbook_id: software-consulting
+version: "1.0.0"
+source_project: M3BudgetUpload
+milestone_prompts:
+  intake-discovery:
+    - id: intake-001
+      title: Read and summarize the PRD/RFP
+      order: 1
+      agent_hint: researcher
+      tags: [discover]
+      artifact_target: docs/intake/synthesis-{date}.md
+      prompt: |
+        Read the PRD/RFP in the requirements/ folder and any linked documents.
+        Produce a concise synthesis that covers:
+        - Business goal and user value proposition
+        - Scope IN/OUT (what is explicitly included and excluded)
+        - Top 5-8 open questions that could block design or implementation
+        - Top 5-8 risks with proposed mitigations
+        - Reuse opportunities in existing codebase or services
+        Write the output to {artifact_target}.
+
+    - id: intake-002
+      title: Identify existing service/code reuse
+      order: 2
+      agent_hint: researcher
+      tags: [discover, architecture]
+      artifact_target: docs/intake/reuse-assessment.md
+      prompt: |
+        Search the codebase for existing capabilities that could be reused for this feature.
+        Look for: similar controllers, services, UI components, events, integration patterns, and auth/permissions models.
+        Produce a reuse assessment with file paths, estimated level of effort to reuse (High/Medium/Low), and any contract mismatches.
+        Write the output to {artifact_target}.
+
+    - id: intake-003
+      title: Create a risk register
+      order: 3
+      agent_hint: researcher
+      tags: [discover, planning]
+      artifact_target: docs/intake/risk-register.md
+      prompt: |
+        Based on the PRD, synthesis, and reuse assessment, create a risk register.
+        For each risk include: description, likelihood, impact, owner, and mitigation.
+        Flag any risks that should block the design phase until resolved.
+        Write the output to {artifact_target}.
+
+  execution-planning:
+    - id: plan-001
+      title: Verify architecture against real repos
+      order: 1
+      agent_hint: researcher
+      tags: [discover, architecture]
+      artifact_target: docs/execution-plan-{date}.md
+      prompt: |
+        Verify the PRD's architectural assumptions against the actual codebase.
+        For each major assumption (data sources, auth, events, deployment topology):
+        - Confirm or correct it with file:line citations
+        - Note any contract mismatch or missing dependency
+        - Propose a ratified design decision
+        Produce an execution plan with the corrected architecture, repo/service impact map, and a go/no-go recommendation for design.
+        Write the output to {artifact_target}.
+
+    - id: plan-002
+      title: Define ratified design decisions
+      order: 2
+      agent_hint: researcher
+      tags: [decide, architecture]
+      artifact_target: docs/design-decisions.md
+      prompt: |
+        From the execution plan, extract the 3-6 architectural decisions that must be frozen before design begins.
+        Use an ADR-style format: context, decision, consequences, rejected alternatives.
+        Ensure each decision is numbered (D1, D2, ...) and references real code or docs.
+        Write the output to {artifact_target}.
+
+    - id: plan-003
+      title: Build repo/service impact map
+      order: 3
+      agent_hint: researcher
+      tags: [planning, architecture]
+      artifact_target: docs/repo-impact-map.md
+      prompt: |
+        Create a repo/service impact map showing which repositories and services will change for each epic/workstream.
+        Include expected file patterns, integration seams, and ownership.
+        Write the output to {artifact_target}.
+
+  design-blueprint:
+    - id: design-001
+      title: Draft data and API contract
+      order: 1
+      agent_hint: researcher
+      tags: [specify, backend]
+      artifact_target: docs/blueprint-design-and-data-contract.md
+      prompt: |
+        Draft a frozen data and API contract for the {epic_name} epic.
+        Include:
+        - Request/response DTOs with field types and validation rules
+        - Idempotency, auth, and error-handling rules
+        - Endpoint URLs and methods
+        - Integration events and their payloads
+        Cite existing code patterns from the codebase.
+        Write the output to {artifact_target}.
+
+    - id: design-002
+      title: Create UX/template spec
+      order: 2
+      agent_hint: researcher
+      tags: [specify, frontend]
+      artifact_target: docs/template-spec.md
+      prompt: |
+        Create a UX/template specification for the user-facing part of the {epic_name} epic.
+        Cover: screen/layout structure, user flow, validation messages, empty/error states, and any file/template formats (e.g., Excel columns).
+        Reference existing UI components and platform conventions.
+        Write the output to {artifact_target}.
+
+    - id: design-003
+      title: Generate Jira stories with BDD acceptance criteria
+      order: 3
+      agent_hint: documentation
+      tags: [specify, planning]
+      artifact_target: docs/jira-stories.csv
+      prompt: |
+        Convert the {epic_name} requirements into Jira-ready user stories with BDD acceptance criteria.
+        Each story should have: ID, title, description, acceptance criteria (Given/When/Then), priority, and linked FR.
+        Output as a CSV and a Markdown summary.
+        Write the output to {artifact_target}.
+
+    - id: design-004
+      title: Conduct design review and sign-off
+      order: 4
+      agent_hint: researcher
+      tags: [decide]
+      artifact_target: docs/design-signoff.md
+      prompt: |
+        Review the data contract, UX spec, and Jira stories for {epic_name}.
+        Identify inconsistencies, unresolved open questions, and risks.
+        Produce a design sign-off checklist with open items that must close before build planning.
+        Write the output to {artifact_target}.
+
+  build-planning:
+    - id: build-001
+      title: Create phased implementation plan
+      order: 1
+      agent_hint: researcher
+      tags: [plan]
+      artifact_target: docs/build-plan-{epic_id}.md
+      prompt: |
+        Create a phased implementation plan for the {epic_name} epic.
+        Break work into sequenced phases with:
+        - Phase goal and Definition of Done
+        - Tasks mapped to FR/Jira story
+        - Target files and expected changes
+        - Dependencies and parallelization opportunities
+        Cite real file paths from the codebase.
+        Write the output to {artifact_target}.
+
+    - id: build-002
+      title: Build traceability matrix
+      order: 2
+      agent_hint: documentation
+      tags: [plan]
+      artifact_target: docs/traceability-matrix.md
+      prompt: |
+        Build a traceability matrix mapping each FR/requirement to:
+        - Jira story
+        - Implementation file(s)
+        - Unit/E2E test file(s)
+        - Status (Not Started / In Progress / Done)
+        Write the output to {artifact_target}.
+
+    - id: build-003
+      title: Prepare test fixtures
+      order: 3
+      agent_hint: engineer
+      tags: [plan, verify]
+      artifact_target: tests/fixtures/
+      prompt: |
+        Create the test fixtures needed for the {epic_name} epic.
+        Include valid, invalid, edge-case, and regression examples.
+        For file-based inputs (e.g., uploads), provide the actual files in tests/fixtures/.
+        Document each fixture's purpose and expected behavior.
+
+    - id: build-004
+      title: Smoke-test dev environments
+      order: 4
+      agent_hint: local-ops
+      tags: [plan, verify]
+      artifact_target: docs/dev-smoke-test.md
+      prompt: |
+        Verify that local dev environments for all affected services run and can talk to each other.
+        Document startup steps, required env vars, and any failures or workarounds.
+        Write the output to {artifact_target}.
+
+  implementation:
+    - id: impl-001
+      title: Scaffold key endpoints and services
+      order: 1
+      agent_hint: engineer
+      tags: [build, backend]
+      artifact_target: ""
+      prompt: |
+        Implement the controller endpoints and service methods for the {epic_name} epic according to the frozen data contract.
+        Start with thin controllers, validation, and happy-path stubs; return 501 for unimplemented branches.
+        Add unit tests as you go.
+
+    - id: impl-002
+      title: Implement frontend components
+      order: 2
+      agent_hint: web-ui-engineer
+      tags: [build, frontend]
+      artifact_target: ""
+      prompt: |
+        Implement the frontend components and user flow for the {epic_name} epic.
+        Follow existing component conventions, reuse platform services, and wire to the frozen API contract.
+        Add unit/component tests as you go.
+
+    - id: impl-003
+      title: Wire integration and events
+      order: 3
+      agent_hint: engineer
+      tags: [build, integration]
+      artifact_target: ""
+      prompt: |
+        Wire cross-service integration for the {epic_name} epic: events, SignalR/notifications, background jobs, or whatever seam is defined in the contract.
+        Ensure idempotency, error handling, and observability.
+
+    - id: impl-004
+      title: Fill implementation gaps from build plan
+      order: 4
+      agent_hint: engineer
+      tags: [build]
+      artifact_target: ""
+      prompt: |
+        Work through the {epic_name} build plan phase by phase, replacing stubs and 501 responses with real logic.
+        After each phase, run the relevant unit tests and update the traceability matrix.
+
+  qa-integration:
+    - id: qa-001
+      title: Author backend unit tests
+      order: 1
+      agent_hint: qa
+      tags: [verify, backend]
+      artifact_target: tests/unit/
+      prompt: |
+        Author unit tests for the {epic_name} backend code.
+        Cover every branch called out in the traceability matrix, including error cases and idempotency.
+        Run the tests and fix failures before moving on.
+
+    - id: qa-002
+      title: Author E2E tests from BDD scenarios
+      order: 2
+      agent_hint: qa
+      tags: [verify, frontend]
+      artifact_target: tests/e2e/
+      prompt: |
+        Author E2E tests for the {epic_name} epic derived 1:1 from the BDD acceptance criteria.
+        Include happy path, validation errors, auth/permissions, and edge cases.
+        Run the tests and fix failures.
+
+    - id: qa-003
+      title: Create UAT playbook
+      order: 3
+      agent_hint: qa
+      tags: [verify, planning]
+      artifact_target: docs/qa/{epic_id}-uat-playbook.md
+      prompt: |
+        Create a UAT playbook for the {epic_name} epic.
+        Include: prerequisites, test scenarios with steps, expected results, known issues, and sign-off checklist.
+        Write the output to {artifact_target}.
+
+    - id: qa-004
+      title: Produce test report and sign-off
+      order: 4
+      agent_hint: qa
+      tags: [verify]
+      artifact_target: docs/qa/{epic_id}-test-report.md
+      prompt: |
+        Run the full test suite for {epic_name} and produce a test report.
+        Include: scope tested, pass/fail counts, linked failures, risks, and a go/no-go recommendation.
+        Write the output to {artifact_target}.
+
+  demo-delivery:
+    - id: demo-001
+      title: Prepare demo script
+      order: 1
+      agent_hint: documentation
+      tags: [present]
+      artifact_target: docs/demo/{epic_id}-demo-script.md
+      prompt: |
+        Write a demo script for the {epic_name} epic.
+        Include: setup steps, narrative flow, key clicks/inputs, expected outcomes, and fallback notes.
+        Write the output to {artifact_target}.
+
+    - id: demo-002
+      title: Conduct dry-run and capture notes
+      order: 2
+      agent_hint: qa
+      tags: [present, verify]
+      artifact_target: docs/demo/{epic_id}-dry-run-notes.md
+      prompt: |
+        Run through the demo script for {epic_name} and capture dry-run notes.
+        Record any issues, timing, and fixes needed before the real demo.
+        Write the output to {artifact_target}.
+
+    - id: demo-003
+      title: Create handoff and sign-off docs
+      order: 3
+      agent_hint: documentation
+      tags: [present]
+      artifact_target: docs/demo/{epic_id}-handoff.md
+      prompt: |
+        Create handoff documentation for the {epic_name} epic.
+        Include: what was built, how to run it, known issues, support contacts, and sign-off checklist.
+        Write the output to {artifact_target}.
+
+  retrospective-findings:
+    - id: retro-001
+      title: Document lessons learned
+      order: 1
+      agent_hint: documentation
+      tags: [reflect]
+      artifact_target: docs/findings/{epic_id}-lessons-learned.md
+      prompt: |
+        Facilitate a lessons-learned review for the {epic_name} epic.
+        Document what went well, what did not, root causes, and actionable improvements.
+        Write the output to {artifact_target}.
+
+    - id: retro-002
+      title: Capture known issues and backlog
+      order: 2
+      agent_hint: documentation
+      tags: [reflect]
+      artifact_target: docs/findings/{epic_id}-known-issues.md
+      prompt: |
+        Capture known issues, deferred work, and follow-up backlog items for the {epic_name} epic.
+        Prioritize by impact and effort; link to existing tickets if available.
+        Write the output to {artifact_target}.
+
+    - id: retro-003
+      title: Update team playbooks
+      order: 3
+      agent_hint: documentation
+      tags: [reflect]
+      artifact_target: docs/playbook-updates.md
+      prompt: |
+        Update relevant team playbooks with lessons from the {epic_name} epic.
+        Focus on repeatable procedures, environment setup, debugging recipes, and conventions.
+        Write the output to {artifact_target}.
+
+placeholders:
+  - name: date
+    description: Current date in ISO format (YYYY-MM-DD)
+  - name: epic_id
+    description: Slug ID of the current epic
+  - name: epic_name
+    description: Human-readable name of the current epic
+  - name: artifact_target
+    description: Target file path for the prompt's primary artifact

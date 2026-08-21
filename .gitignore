@@ -7,4 +7,5 @@ __pycache__/
 .kuzu-memory/
 .DS_Store
 dist/
+data/
 installpackage/*.whl

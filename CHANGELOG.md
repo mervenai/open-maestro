@@ -5,7 +5,21 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.4.3] - 2026-08-22
+## [1.5.0] - 2026-08-22
+
+### Added
+- Milestone prompt playbook derived from the completed M3BudgetUpload project.
+  - Default `software-consulting` playbook ships with the wheel at
+    `src/open_maestro/milestones/playbooks/software-consulting.yaml`.
+  - Playbook contains reusable prompt templates for all 8 lifecycle milestones
+    (Intake & Discovery through Retrospective & Findings).
+  - `/next` now suggests the top 3 playbook prompts for the current/next
+    milestone.
+  - New `/prompts <milestone> [epic]` interactive command lists all prompts for
+    a milestone so users can copy, edit, and execute them.
+  - Project-level playbook overrides via `.open-maestro/playbook.yaml`.
+  - Placeholder resolution for `{date}`, `{epic_id}`, `{epic_name}`, and
+    `{artifact_target}`.
 
 ### Fixed
 - `--monitor` no longer shows a blank cursor during long-running turns. CLI

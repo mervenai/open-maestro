@@ -9,6 +9,10 @@ from typing import Any
 from open_maestro.milestones import MilestoneStatus
 from open_maestro.milestones.detector import MilestoneDetector
 from open_maestro.milestones.models import Blocker, Milestone, MilestonePlan
+from open_maestro.milestones.playbook import (
+    format_prompt_list,
+    get_prompts_for_milestone,
+)
 from open_maestro.milestones.store import MilestoneStore
 
 
@@ -47,13 +51,14 @@ def handle_next_command(project_path: Path) -> str:
             if milestone.status == MilestoneStatus.IN_PROGRESS:
                 current.append((epic.id, milestone))
 
+    detector = MilestoneDetector(project_path)
+    suggestions = {
+        (s.epic_id, s.milestone_id): s
+        for s in detector.detect(plan)
+    }
+
     if current:
         lines = ["Current milestones in progress:"]
-        detector = MilestoneDetector(project_path)
-        suggestions = {
-            (s.epic_id, s.milestone_id): s
-            for s in detector.detect(plan)
-        }
         for epic_id, milestone in sorted(current, key=lambda x: x[1].order):
             lines.append(f"\n## {milestone.name} ({epic_id})")
             lines.append("Exit criteria:")
@@ -62,6 +67,12 @@ def handle_next_command(project_path: Path) -> str:
             missing = _format_missing(milestone, suggestions.get((epic_id, milestone.id)))
             if missing:
                 lines.append(missing)
+            prompt_pairs = get_prompts_for_milestone(
+                project_path, milestone.id, plan=plan, epic_id=epic_id
+            )
+            if prompt_pairs:
+                lines.append("")
+                lines.append(format_prompt_list(prompt_pairs, max_prompts=3))
         return "\n".join(lines)
 
     next_item: tuple[str, Milestone] | None = None
@@ -84,6 +95,13 @@ def handle_next_command(project_path: Path) -> str:
     ]
     for criterion in next_milestone.exit_criteria:
         lines.append(f"  - {criterion}")
+
+    prompt_pairs = get_prompts_for_milestone(
+        project_path, next_milestone.id, plan=plan, epic_id=epic_id
+    )
+    if prompt_pairs:
+        lines.append("")
+        lines.append(format_prompt_list(prompt_pairs, max_prompts=3))
     return "\n".join(lines)
 
 
@@ -182,6 +200,35 @@ def handle_track_command(project_path: Path, args: list[str]) -> str:
         milestone.completed_at = date.today()
     store.update(plan)
     return f"Updated milestone '{milestone.name}' in {epic_id} to {status.value}."
+
+
+def handle_prompts_command(project_path: Path, args: list[str]) -> str:
+    """List all playbook prompts for a milestone.
+
+    Usage: /prompts <milestone-id> [epic-id]
+    """
+    if not args:
+        return "Usage: /prompts <milestone-id> [epic-id]"
+
+    milestone_id = args[0]
+    epic_id = args[1] if len(args) > 1 else None
+
+    store = MilestoneStore(project_path)
+    plan = store.load()
+
+    prompt_pairs = get_prompts_for_milestone(
+        project_path, milestone_id, plan=plan, epic_id=epic_id
+    )
+    if not prompt_pairs:
+        return f"No prompts found for milestone '{milestone_id}'."
+
+    lines = [f"Prompts for '{milestone_id}':"]
+    for idx, (template, rendered) in enumerate(prompt_pairs, start=1):
+        agent = f" [{template.agent_hint}]" if template.agent_hint else ""
+        tags = f" ({', '.join(template.tags)})" if template.tags else ""
+        lines.append(f"\n{idx}. {template.title}{agent}{tags}")
+        lines.append(rendered)
+    return "\n".join(lines)
 
 
 def format_prompt_context(project_path: Path) -> str:
