@@ -379,8 +379,8 @@ async def _handle_command(
                 pending.append(text)
         if not pending:
             return "No prompts selected for execution."
-        state.pending_prompts = pending[1:]
-        return f"Selected prompt: {selected[0][0]}\n\n{pending[0]}"
+        state.pending_prompts = pending
+        return f"Selected prompt: {selected[0][0]}"
 
     if cmd == "prompts":
         result = handle_prompts_command(Path.cwd(), args)
@@ -431,9 +431,8 @@ async def _handle_command(
         state.suggested_prompts = []
         if not pending:
             return "No prompts selected for execution."
-        # Store pending prompts and return the first one to the caller.
-        state.pending_prompts = pending[1:]
-        return f"Selected prompt: {selected[0][0]}\n\n{pending[0]}"
+        state.pending_prompts = pending
+        return f"Selected prompt: {selected[0][0]}"
 
     if cmd == "complete":
         return handle_complete_command(Path.cwd(), args)
