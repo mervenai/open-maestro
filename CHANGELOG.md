@@ -5,6 +5,13 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.6] - 2026-08-22
+
+### Fixed
+- Selected prompts now correctly appear in the editable input line. The readline
+  startup hook now calls ``redisplay()`` and collapses multi-line prompts into
+  a single editable line.
+
 ## [1.5.5] - 2026-08-22
 
 ### Changed

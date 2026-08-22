@@ -411,7 +411,14 @@ def _read_input_with_paste(prompt: str = "> ", default: str = "") -> str:
         readline = None  # type: ignore[assignment]
 
     if default and readline is not None:
-        readline.set_startup_hook(lambda: readline.insert_text(default))
+        def _pre_fill() -> None:
+            # readline displays a single line; collapse newlines to spaces so
+            # the entire prompt is editable in the input buffer.
+            text = default.replace("\n", " ")
+            readline.insert_text(text)
+            readline.redisplay()
+
+        readline.set_startup_hook(_pre_fill)
 
     try:
         first = input(prompt)

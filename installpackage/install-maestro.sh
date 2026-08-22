@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # --- Configuration ---
-WHEEL_NAME="open_maestro-1.5.5-py3-none-any.whl"
+WHEEL_NAME="open_maestro-1.5.6-py3-none-any.whl"
 WHEEL_DIR="${1:-/tmp}"
 VENV_DIR="$HOME/.open-maestro/venv"
 
