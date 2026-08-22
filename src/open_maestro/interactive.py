@@ -362,23 +362,18 @@ async def _handle_command(
     if cmd == "select":
         if not state.suggested_prompts:
             return "No suggested prompts to select. Run /next or /prompts first."
-        selected = await asyncio.get_event_loop().run_in_executor(
-            None, _select_prompts_tui, state.suggested_prompts
-        )
+        # Run questionary on the main thread for reliable terminal control.
+        selected = _select_prompts_tui(state.suggested_prompts)
         if not selected:
             return "No prompts selected."
         # For each selected prompt, ask execute/edit/skip and queue for execution.
         pending: list[str] = []
         for title, rendered in selected:
-            action = await asyncio.get_event_loop().run_in_executor(
-                None, _prompt_action_tui, title
-            )
+            action = _prompt_action_tui(title)
             if action == "skip":
                 continue
             if action == "edit":
-                rendered = await asyncio.get_event_loop().run_in_executor(
-                    None, _edit_prompt_tui, rendered
-                )
+                rendered = _edit_prompt_tui(rendered)
             text = rendered.strip()
             if text:
                 pending.append(text)
@@ -688,16 +683,14 @@ async def run_interactive(args: Any) -> int:
         )
         if selected_title is not None:
             print(f"Selected prompt {user_input}: {selected_title}")
-            action = await asyncio.get_event_loop().run_in_executor(
-                None, _prompt_action_tui, selected_title
-            )
+            # Run questionary on the main thread; it needs direct terminal control
+            # for arrow-key navigation to work reliably.
+            action = _prompt_action_tui(selected_title)
             if action == "skip":
                 state.suggested_prompts = []
                 continue
             if action == "edit":
-                resolved_input = await asyncio.get_event_loop().run_in_executor(
-                    None, _edit_prompt_tui, resolved_input
-                )
+                resolved_input = _edit_prompt_tui(resolved_input)
             user_input = resolved_input.strip()
             # Clear suggestions so a later bare number is not misinterpreted.
             state.suggested_prompts = []

@@ -5,6 +5,13 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.9] - 2026-08-22
+
+### Fixed
+- Questionary TUI prompts now run on the main thread so arrow-key navigation
+  and checkbox selection work reliably. Running them in an executor thread
+  prevented prompt_toolkit from controlling the terminal correctly.
+
 ## [1.5.8] - 2026-08-22
 
 ### Changed
