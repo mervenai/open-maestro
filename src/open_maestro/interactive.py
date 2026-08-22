@@ -350,17 +350,30 @@ async def _handle_command(
         print(info)
         if not state.suggested_prompts:
             return "No suggested prompts for this milestone."
-        selected = await _select_prompts_tui(state.suggested_prompts)
+        try:
+            selected = await _select_prompts_tui(state.suggested_prompts)
+        except TUICancelled:
+            state.suggested_prompts = []
+            state.pending_prompts = []
+            return "Cancelled."
         state.suggested_prompts = []
         if not selected:
             return "No prompts selected."
         pending: list[str] = []
         for title, rendered in selected:
-            action = await _prompt_action_tui(title)
+            try:
+                action = await _prompt_action_tui(title)
+            except TUICancelled:
+                state.pending_prompts = []
+                return "Cancelled."
             if action == "skip":
                 continue
             if action == "edit":
-                rendered = await _edit_prompt_tui(rendered)
+                try:
+                    rendered = await _edit_prompt_tui(rendered)
+                except TUICancelled:
+                    state.pending_prompts = []
+                    return "Cancelled."
             text = rendered.strip()
             if text:
                 pending.append(text)
@@ -386,17 +399,32 @@ async def _handle_command(
         if not state.suggested_prompts:
             return "No suggested prompts to select. Run /next or /prompts first."
         # Run questionary asynchronously so it does not start a nested event loop.
-        selected = await _select_prompts_tui(state.suggested_prompts)
+        try:
+            selected = await _select_prompts_tui(state.suggested_prompts)
+        except TUICancelled:
+            state.suggested_prompts = []
+            state.pending_prompts = []
+            return "Cancelled."
         if not selected:
             return "No prompts selected."
         # For each selected prompt, ask execute/edit/skip and queue for execution.
         pending: list[str] = []
         for title, rendered in selected:
-            action = await _prompt_action_tui(title)
+            try:
+                action = await _prompt_action_tui(title)
+            except TUICancelled:
+                state.suggested_prompts = []
+                state.pending_prompts = []
+                return "Cancelled."
             if action == "skip":
                 continue
             if action == "edit":
-                rendered = await _edit_prompt_tui(rendered)
+                try:
+                    rendered = await _edit_prompt_tui(rendered)
+                except TUICancelled:
+                    state.suggested_prompts = []
+                    state.pending_prompts = []
+                    return "Cancelled."
             text = rendered.strip()
             if text:
                 pending.append(text)
@@ -450,12 +478,33 @@ def _format_choice_title(title: str, rendered: str) -> str:
     return f"{title}\n{indented}"
 
 
+class TUICancelled(Exception):
+    """Raised when the user cancels a questionary TUI with Escape."""
+
+
+def _add_escape_binding(question: Any) -> None:
+    """Add an Escape key binding that cancels a questionary prompt."""
+    from prompt_toolkit.keys import Keys
+
+    kb = question.application.key_bindings
+    if kb is None:
+        from prompt_toolkit.key_binding import KeyBindings
+
+        kb = KeyBindings()
+        question.application.key_bindings = kb
+
+    @kb.add(Keys.Escape, eager=True)
+    def _cancel(event: Any) -> None:
+        event.app.exit(exception=TUICancelled, style="class:aborting")
+
+
 async def _select_prompts_tui(
     suggested_prompts: list[tuple[str, str]],
 ) -> list[tuple[str, str]]:
     """Show a checkbox TUI to select one or more suggested prompts.
 
-    Returns the list of selected (title, prompt) tuples.
+    Returns the list of selected (title, prompt) tuples. Raises
+    :class:`TUICancelled` if the user presses Escape.
     """
     import questionary
 
@@ -470,35 +519,44 @@ async def _select_prompts_tui(
         "Select prompts (Space to check, Enter to confirm, Esc to cancel):",
         choices=choices,
     )
+    _add_escape_binding(question)
     selected = await question.application.run_async()
     return selected if selected else []
 
 
 async def _edit_prompt_tui(prompt_text: str) -> str:
-    """Show a multi-line text prompt pre-filled with prompt_text for editing."""
+    """Show a multi-line text prompt pre-filled with prompt_text for editing.
+
+    Raises :class:`TUICancelled` if the user presses Escape.
+    """
     import questionary
 
     question = questionary.text(
-        "Edit the prompt (Ctrl+J for new line, Enter to submit):",
+        "Edit the prompt (Esc to cancel, Ctrl+J for new line, Enter to submit):",
         default=prompt_text.replace("\n", " "),
         multiline=False,
     )
+    _add_escape_binding(question)
     edited = await question.application.run_async()
     return edited if edited is not None else prompt_text
 
 
 async def _prompt_action_tui(title: str) -> str:
-    """Ask whether to execute, edit, or skip a selected prompt."""
+    """Ask whether to execute, edit, or skip a selected prompt.
+
+    Raises :class:`TUICancelled` if the user presses Escape.
+    """
     import questionary
 
     question = questionary.select(
-        f"Selected: {title}",
+        f"Selected: {title} (Esc to cancel)",
         choices=[
             questionary.Choice("Execute as-is", value="execute"),
             questionary.Choice("Edit before executing", value="edit"),
             questionary.Choice("Skip", value="skip"),
         ],
     )
+    _add_escape_binding(question)
     action = await question.application.run_async()
     return action if action else "skip"
 
@@ -727,12 +785,24 @@ async def run_interactive(args: Any) -> int:
             print(f"Selected prompt {user_input}: {selected_title}")
             # Use questionary's async API; the sync .ask() tries asyncio.run()
             # which fails when an event loop is already running.
-            action = await _prompt_action_tui(selected_title)
+            try:
+                action = await _prompt_action_tui(selected_title)
+            except TUICancelled:
+                state.suggested_prompts = []
+                state.pending_prompts = []
+                print("Cancelled.")
+                continue
             if action == "skip":
                 state.suggested_prompts = []
                 continue
             if action == "edit":
-                resolved_input = await _edit_prompt_tui(resolved_input)
+                try:
+                    resolved_input = await _edit_prompt_tui(resolved_input)
+                except TUICancelled:
+                    state.suggested_prompts = []
+                    state.pending_prompts = []
+                    print("Cancelled.")
+                    continue
             user_input = resolved_input.strip()
             # Clear suggestions so a later bare number is not misinterpreted.
             state.suggested_prompts = []
