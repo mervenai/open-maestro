@@ -386,7 +386,7 @@ def _resolve_suggested_prompt(
     return user_input, None
 
 
-def _read_input_with_paste(prompt: str = "> ") -> str:
+def _read_input_with_paste(prompt: str = "> ", default: str = "") -> str:
     """Read a line, then drain any immediately-pending stdin bytes.
 
     Why: When a user pastes multi-line text into an interactive terminal,
@@ -396,37 +396,54 @@ def _read_input_with_paste(prompt: str = "> ") -> str:
 
     The short timeout (50ms) means normal typing still gets one line at a
     time, while a paste (which arrives as a burst) is captured in full.
+
+    Args:
+        prompt: Prompt string to display.
+        default: Optional text to pre-fill in the input buffer so the user
+            can edit before submitting.
     """
     import select
     import sys
 
-    first = input(prompt)
-    lines = [first]
+    try:
+        import readline
+    except ImportError:  # pragma: no cover
+        readline = None  # type: ignore[assignment]
 
-    # Drain pasted lines for up to ~50ms after the first newline.
-    while True:
-        try:
-            ready, _, _ = select.select([sys.stdin], [], [], 0.05)
-        except (OSError, ValueError):
-            break
-        if not ready:
-            break
-        line = sys.stdin.readline()
-        if not line:
-            break
-        lines.append(line.rstrip("\n"))
+    if default and readline is not None:
+        readline.set_startup_hook(lambda: readline.insert_text(default))
 
-    # Remove a single trailing blank line that some terminals inject.
-    if len(lines) > 1 and lines[-1] == "":
-        lines.pop()
+    try:
+        first = input(prompt)
+        lines = [first]
 
-    return "\n".join(lines)
+        # Drain pasted lines for up to ~50ms after the first newline.
+        while True:
+            try:
+                ready, _, _ = select.select([sys.stdin], [], [], 0.05)
+            except (OSError, ValueError):
+                break
+            if not ready:
+                break
+            line = sys.stdin.readline()
+            if not line:
+                break
+            lines.append(line.rstrip("\n"))
+
+        # Remove a single trailing blank line that some terminals inject.
+        if len(lines) > 1 and lines[-1] == "":
+            lines.pop()
+
+        return "\n".join(lines)
+    finally:
+        if readline is not None:
+            readline.set_startup_hook(None)
 
 
-async def _read_line(prompt: str = "> ") -> str:
+async def _read_line(prompt: str = "> ", default: str = "") -> str:
     """Read a line (or pasted multi-line block) from stdin."""
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _read_input_with_paste, prompt)
+    return await loop.run_in_executor(None, _read_input_with_paste, prompt, default)
 
 
 def _format_milestone_status(plan: Any) -> str:
@@ -604,9 +621,18 @@ async def run_interactive(args: Any) -> int:
         )
         if selected_title is not None:
             print(f"Selected prompt {user_input}: {selected_title}")
-            user_input = resolved_input
+            print("Edit the prompt below and press Enter to execute.")
+            try:
+                user_input = await _read_line("> ", default=resolved_input)
+            except (EOFError, KeyboardInterrupt):
+                print("\nExiting.")
+                _save_readline_history()
+                return 0
+            user_input = user_input.strip()
             # Clear suggestions so a later bare number is not misinterpreted.
             state.suggested_prompts = []
+            if not user_input:
+                continue
 
         cmd_result = await _handle_command(user_input, state, registry, memory)
         if cmd_result == "__EXIT__":

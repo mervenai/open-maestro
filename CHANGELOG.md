@@ -5,6 +5,13 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.5] - 2026-08-22
+
+### Changed
+- Selected prompts are now pre-filled into the input line using readline so the
+  user can edit them before pressing Enter to execute, rather than running
+  immediately.
+
 ## [1.5.4] - 2026-08-22
 
 ### Added
