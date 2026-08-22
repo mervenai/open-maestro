@@ -205,4 +205,7 @@ def format_prompt_list(
                 lines.append(f"     {rendered_line}")
     if len(prompts) > max_prompts:
         lines.append(f"\n  ...and {len(prompts) - max_prompts} more. Use /prompts to browse.")
+    lines.append(
+        "\n  Tip: type a number to run that prompt, or run /select to open a cursor menu."
+    )
     return "\n".join(lines)
