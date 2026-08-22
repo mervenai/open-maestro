@@ -386,7 +386,7 @@ def _resolve_suggested_prompt(
     return user_input, None
 
 
-def _read_input_with_paste(prompt: str = "> ", default: str = "") -> str:
+def _read_input_with_paste(prompt: str = "> ") -> str:
     """Read a line, then drain any immediately-pending stdin bytes.
 
     Why: When a user pastes multi-line text into an interactive terminal,
@@ -396,61 +396,78 @@ def _read_input_with_paste(prompt: str = "> ", default: str = "") -> str:
 
     The short timeout (50ms) means normal typing still gets one line at a
     time, while a paste (which arrives as a burst) is captured in full.
-
-    Args:
-        prompt: Prompt string to display.
-        default: Optional text to pre-fill in the input buffer so the user
-            can edit before submitting.
     """
     import select
     import sys
 
-    try:
-        import readline
-    except ImportError:  # pragma: no cover
-        readline = None  # type: ignore[assignment]
+    first = input(prompt)
+    lines = [first]
 
-    if default and readline is not None:
-        def _pre_fill() -> None:
-            # readline displays a single line; collapse newlines to spaces so
-            # the entire prompt is editable in the input buffer.
-            text = default.replace("\n", " ")
-            readline.insert_text(text)
-            readline.redisplay()
+    # Drain pasted lines for up to ~50ms after the first newline.
+    while True:
+        try:
+            ready, _, _ = select.select([sys.stdin], [], [], 0.05)
+        except (OSError, ValueError):
+            break
+        if not ready:
+            break
+        line = sys.stdin.readline()
+        if not line:
+            break
+        lines.append(line.rstrip("\n"))
 
-        readline.set_startup_hook(_pre_fill)
+    # Remove a single trailing blank line that some terminals inject.
+    if len(lines) > 1 and lines[-1] == "":
+        lines.pop()
 
-    try:
-        first = input(prompt)
-        lines = [first]
-
-        # Drain pasted lines for up to ~50ms after the first newline.
-        while True:
-            try:
-                ready, _, _ = select.select([sys.stdin], [], [], 0.05)
-            except (OSError, ValueError):
-                break
-            if not ready:
-                break
-            line = sys.stdin.readline()
-            if not line:
-                break
-            lines.append(line.rstrip("\n"))
-
-        # Remove a single trailing blank line that some terminals inject.
-        if len(lines) > 1 and lines[-1] == "":
-            lines.pop()
-
-        return "\n".join(lines)
-    finally:
-        if readline is not None:
-            readline.set_startup_hook(None)
+    return "\n".join(lines)
 
 
-async def _read_line(prompt: str = "> ", default: str = "") -> str:
+async def _read_line(prompt: str = "> ") -> str:
     """Read a line (or pasted multi-line block) from stdin."""
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _read_input_with_paste, prompt, default)
+    return await loop.run_in_executor(None, _read_input_with_paste, prompt)
+
+
+def _edit_in_editor(default_text: str) -> str | None:
+    """Open default_text in the user's $EDITOR and return the saved content.
+
+    Returns None if no editor is available or the user quits without saving.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    editor = os.environ.get("EDITOR") or os.environ.get("VISUAL")
+    if not editor:
+        # Try common fallback editors.
+        for candidate in ("vim", "vi", "nano", "emacs", "code --wait"):
+            if shutil.which(candidate.split()[0]):
+                editor = candidate
+                break
+
+    if not editor:
+        return None
+
+    with tempfile.NamedTemporaryFile(
+        mode="w+", suffix=".txt", delete=False, encoding="utf-8"
+    ) as f:
+        f.write(default_text)
+        temp_path = f.name
+
+    try:
+        subprocess.call([*editor.split(), temp_path])
+        with open(temp_path, encoding="utf-8") as f:
+            edited = f.read()
+        return edited
+    except Exception as exc:
+        logger.debug("Editor failed: %s", exc)
+        return None
+    finally:
+        try:
+            os.unlink(temp_path)
+        except Exception:
+            pass
 
 
 def _format_milestone_status(plan: Any) -> str:
@@ -628,14 +645,16 @@ async def run_interactive(args: Any) -> int:
         )
         if selected_title is not None:
             print(f"Selected prompt {user_input}: {selected_title}")
-            print("Edit the prompt below and press Enter to execute.")
-            try:
-                user_input = await _read_line("> ", default=resolved_input)
-            except (EOFError, KeyboardInterrupt):
-                print("\nExiting.")
-                _save_readline_history()
-                return 0
-            user_input = user_input.strip()
+            # Try to open the prompt in the user's $EDITOR for editing.
+            edited = await asyncio.get_event_loop().run_in_executor(
+                None, _edit_in_editor, resolved_input
+            )
+            if edited is not None:
+                user_input = edited.strip()
+            else:
+                # No editor available: execute the original prompt as-is.
+                print("No $EDITOR found. Executing the original prompt as-is.")
+                user_input = resolved_input.strip()
             # Clear suggestions so a later bare number is not misinterpreted.
             state.suggested_prompts = []
             if not user_input:

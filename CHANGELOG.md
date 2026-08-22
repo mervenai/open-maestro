@@ -5,6 +5,14 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.7] - 2026-08-22
+
+### Changed
+- Prompt editing now uses the system's ``$EDITOR`` (or a fallback editor) for
+  reliability. After selecting a prompt by number, the prompt opens in a temp
+  file so it can be edited and saved before execution. If no editor is found,
+  the original prompt executes as-is.
+
 ## [1.5.6] - 2026-08-22
 
 ### Fixed
