@@ -344,7 +344,30 @@ async def _handle_command(
     if cmd == "next":
         prompts, _ = get_current_or_next_milestone_prompts(Path.cwd())
         state.suggested_prompts = [(t.title, rendered) for t, rendered in prompts]
-        return handle_next_command(Path.cwd())
+        # Show milestone context without the prompt list; the TUI will present
+        # the prompts and let the user pick, edit, or skip them in one step.
+        info = handle_next_command(Path.cwd(), include_prompts=False)
+        print(info)
+        if not state.suggested_prompts:
+            return "No suggested prompts for this milestone."
+        selected = await _select_prompts_tui(state.suggested_prompts)
+        state.suggested_prompts = []
+        if not selected:
+            return "No prompts selected."
+        pending: list[str] = []
+        for title, rendered in selected:
+            action = await _prompt_action_tui(title)
+            if action == "skip":
+                continue
+            if action == "edit":
+                rendered = await _edit_prompt_tui(rendered)
+            text = rendered.strip()
+            if text:
+                pending.append(text)
+        if not pending:
+            return "No prompts selected for execution."
+        state.pending_prompts = pending[1:]
+        return f"Selected prompt: {selected[0][0]}\n\n{pending[0]}"
 
     if cmd == "prompts":
         result = handle_prompts_command(Path.cwd(), args)

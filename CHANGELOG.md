@@ -5,6 +5,13 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.2] - 2026-08-23
+
+### Changed
+- `/next` now opens the prompt-selection TUI automatically. Users no longer
+  need to type `/select` after `/next`; they can pick prompts with the cursor,
+  choose to edit each one, and queue multiple prompts for execution in one step.
+
 ## [1.6.1] - 2026-08-23
 
 ### Changed

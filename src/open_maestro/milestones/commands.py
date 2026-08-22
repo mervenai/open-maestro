@@ -80,8 +80,13 @@ def _format_missing(milestone: Milestone, suggestion: Any) -> str:
     )
 
 
-def handle_next_command(project_path: Path) -> str:
-    """Suggest the next concrete action based on milestone state."""
+def handle_next_command(project_path: Path, include_prompts: bool = True) -> str:
+    """Suggest the next concrete action based on milestone state.
+
+    Args:
+        include_prompts: When False, only the milestone context is returned.
+            The caller is responsible for presenting the prompts (e.g. via TUI).
+    """
     store = MilestoneStore(project_path)
     plan = store.load()
 
@@ -107,6 +112,8 @@ def handle_next_command(project_path: Path) -> str:
             missing = _format_missing(milestone, suggestions.get((epic_id, milestone.id)))
             if missing:
                 lines.append(missing)
+            if not include_prompts:
+                continue
             prompt_pairs = get_prompts_for_milestone(
                 project_path, milestone.id, plan=plan, epic_id=epic_id
             )
@@ -136,12 +143,13 @@ def handle_next_command(project_path: Path) -> str:
     for criterion in next_milestone.exit_criteria:
         lines.append(f"  - {criterion}")
 
-    prompt_pairs = get_prompts_for_milestone(
-        project_path, next_milestone.id, plan=plan, epic_id=epic_id
-    )
-    if prompt_pairs:
-        lines.append("")
-        lines.append(format_prompt_list(prompt_pairs, max_prompts=3))
+    if include_prompts:
+        prompt_pairs = get_prompts_for_milestone(
+            project_path, next_milestone.id, plan=plan, epic_id=epic_id
+        )
+        if prompt_pairs:
+            lines.append("")
+            lines.append(format_prompt_list(prompt_pairs, max_prompts=3))
     return "\n".join(lines)
 
 
