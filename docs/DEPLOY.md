@@ -5,7 +5,7 @@ workstations for a team of engineers.
 
 ## Current state (read this first)
 
-Open Maestro **1.6.2** is a functional multi-agent orchestration layer with:
+Open Maestro **1.6.3** is a functional multi-agent orchestration layer with:
 
 - Vendor-agnostic agent routing across Claude, Kimi, and OpenAI-compatible models
 - Model arbitration that picks the cheapest capable backend for a task
@@ -38,23 +38,23 @@ Build the wheel once and share it with the team:
 ```bash
 cd /Users/jj/dev/open-maestro
 python -m build --wheel
-# Share dist/open_maestro-1.6.2-py3-none-any.whl
+# Share dist/open_maestro-1.6.3-py3-none-any.whl
 ```
 
 Each engineer runs the install script:
 
 ```bash
-./install-ubuntu.sh /path/to/open_maestro-1.6.2-py3-none-any.whl
+./install-ubuntu.sh /path/to/open_maestro-1.6.3-py3-none-any.whl
 ```
 
 To also install SDK runtimes and their Python dependencies:
 
 ```bash
 # openai-sdk runtime (cloud OpenAI, Azure, Ollama, vLLM, DashScope, etc.)
-OPENAI=1 ./install-ubuntu.sh /path/to/open_maestro-1.6.2-py3-none-any.whl
+OPENAI=1 ./install-ubuntu.sh /path/to/open_maestro-1.6.3-py3-none-any.whl
 
 # All SDK runtimes
-OPENAI=1 CLAUDE_SDK=1 KIMI_ACP=1 ./install-ubuntu.sh /path/to/open_maestro-1.6.2-py3-none-any.whl
+OPENAI=1 CLAUDE_SDK=1 KIMI_ACP=1 ./install-ubuntu.sh /path/to/open_maestro-1.6.3-py3-none-any.whl
 ```
 
 The `OPENAI=1` flag installs the `openai` package, which is required for the
@@ -131,7 +131,7 @@ claude auth login
 > Anthropic API key. Install the SDK extra and set the key:
 >
 > ```bash
-> CLAUDE_SDK=1 ./install-ubuntu.sh /path/to/open_maestro-1.6.2-py3-none-any.whl
+> CLAUDE_SDK=1 ./install-ubuntu.sh /path/to/open_maestro-1.6.3-py3-none-any.whl
 > export ANTHROPIC_API_KEY="sk-ant-..."
 > ```
 >
@@ -517,19 +517,19 @@ When you release a new wheel:
 
 ```bash
 maestro --version          # note old version
-./install-ubuntu.sh /path/to/open_maestro-1.6.2-py3-none-any.whl
+./install-ubuntu.sh /path/to/open_maestro-1.6.3-py3-none-any.whl
 maestro --version          # confirm new version
 ```
 
 User-level config, sources, and memory in `~/.open-maestro/` are preserved.
 
-### Upgrading to v1.6.2
+### Upgrading to v1.6.3
 
-v1.6.2 is backward-compatible with v1.3.0/v1.4.0/v1.4.1 milestone files. The
+v1.6.3 is backward-compatible with v1.3.0/v1.4.0/v1.4.1 milestone files. The
 main additions are multi-agent chains (`--chain` / `/chain`) and per-step model
 arbitration (v1.4.0), reliable multi-line paste handling in interactive mode
-(v1.4.1), and chain mode defaulting to on in interactive mode (v1.6.2). After
-upgrading the wheel, run `maestro --version` to confirm `1.6.2`.
+(v1.4.1), and chain mode defaulting to on in interactive mode (v1.6.3). After
+upgrading the wheel, run `maestro --version` to confirm `1.6.3`.
 
 ### Upgrading from v1.2.x or earlier (schema migration)
 
@@ -557,7 +557,7 @@ Running the install script again will replace the venv contents while keeping
 your config, sources, and memory:
 
 ```bash
-./install-ubuntu.sh /path/to/open_maestro-1.6.2-py3-none-any.whl
+./install-ubuntu.sh /path/to/open_maestro-1.6.3-py3-none-any.whl
 ```
 
 Use the same feature flags you used the first time (e.g. `OPENAI=1`) so the
@@ -571,7 +571,7 @@ in `~/.open-maestro/` — user config, agent sources, memory databases, and logs
 
 ```bash
 rm -rf ~/.open-maestro/venv
-./install-ubuntu.sh /path/to/open_maestro-1.6.2-py3-none-any.whl
+./install-ubuntu.sh /path/to/open_maestro-1.6.3-py3-none-any.whl
 ```
 
 ## Troubleshooting

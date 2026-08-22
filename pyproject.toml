@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "open-maestro"
-version = "1.6.2"
+version = "1.6.3"
 description = "Vendor-agnostic multi-agent orchestration runtime for AI coding assistants with milestone-guided project lifecycle and client dashboards."
 readme = "README.md"
 license = { text = "MIT" }

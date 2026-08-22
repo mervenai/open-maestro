@@ -437,6 +437,19 @@ def _resolve_suggested_prompt(
     return user_input, None
 
 
+def _format_choice_title(title: str, rendered: str) -> str:
+    """Return a TUI choice title that includes the full prompt body.
+
+    The body lines are indented to align under the title text after the
+    checkbox/pointer prefix (5 columns).
+    """
+    body = rendered.strip()
+    if not body:
+        return title
+    indented = "\n".join(f"     {line}" for line in body.splitlines())
+    return f"{title}\n{indented}"
+
+
 async def _select_prompts_tui(
     suggested_prompts: list[tuple[str, str]],
 ) -> list[tuple[str, str]]:
@@ -447,7 +460,10 @@ async def _select_prompts_tui(
     import questionary
 
     choices = [
-        questionary.Choice(title=title, value=(title, rendered))
+        questionary.Choice(
+            title=_format_choice_title(title, rendered),
+            value=(title, rendered),
+        )
         for title, rendered in suggested_prompts
     ]
     question = questionary.checkbox(

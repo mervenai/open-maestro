@@ -5,6 +5,12 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.3] - 2026-08-23
+
+### Changed
+- The `/next` prompt-selection TUI now displays the full expanded prompt body
+  under each title, so users can see exactly what they are selecting.
+
 ## [1.6.2] - 2026-08-23
 
 ### Changed
