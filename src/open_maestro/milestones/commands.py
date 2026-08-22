@@ -16,6 +16,46 @@ from open_maestro.milestones.playbook import (
 from open_maestro.milestones.store import MilestoneStore
 
 
+def get_current_or_next_milestone_prompts(
+    project_path: Path,
+) -> tuple[list[tuple[Any, str]], str | None]:
+    """Return prompts for the milestone /next would focus on, plus its ID.
+
+    This is used by interactive mode to let users select a suggested prompt by
+    number after running /next.
+    """
+    store = MilestoneStore(project_path)
+    plan = store.load()
+
+    target: tuple[str, Milestone] | None = None
+    current: list[tuple[str, Milestone]] = []
+    for epic in plan.epics:
+        for milestone in epic.milestones:
+            if milestone.status == MilestoneStatus.IN_PROGRESS:
+                current.append((epic.id, milestone))
+
+    if current:
+        # If multiple milestones are in progress, use the first ordered one.
+        target = sorted(current, key=lambda x: x[1].order)[0]
+    else:
+        for epic in sorted(plan.epics, key=lambda e: e.order):
+            for milestone in sorted(epic.milestones, key=lambda m: m.order):
+                if milestone.status == MilestoneStatus.NOT_STARTED:
+                    target = (epic.id, milestone)
+                    break
+            if target is not None:
+                break
+
+    if target is None:
+        return [], None
+
+    epic_id, milestone = target
+    prompts = get_prompts_for_milestone(
+        project_path, milestone.id, plan=plan, epic_id=epic_id
+    )
+    return prompts, milestone.id
+
+
 def _resolve_milestone(plan: MilestonePlan, ref: str) -> tuple[str, Milestone] | None:
     """Resolve a milestone reference of the form ``epic_id/milestone_id`` or just ``milestone_id``."""
     if "/" in ref:

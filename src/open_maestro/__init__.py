@@ -1,6 +1,6 @@
 """Open Maestro: vendor-agnostic multi-agent orchestration runtime."""
 
-__version__ = "1.5.3"
+__version__ = "1.5.4"
 
 from open_maestro.runtime.base import AgentConfig, AgentResult, AgentRuntime
 from open_maestro.runtime.factory import create_runtime, list_runtimes

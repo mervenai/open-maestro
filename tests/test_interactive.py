@@ -11,6 +11,7 @@ from open_maestro.interactive import (
     _assemble_prompt,
     _handle_command,
     _looks_like_decision,
+    _resolve_suggested_prompt,
 )
 
 
@@ -157,3 +158,24 @@ def test_looks_like_decision() -> None:
     assert _looks_like_decision("What is your recommendation?")
     assert _looks_like_decision("Decide which stack to use")
     assert not _looks_like_decision("Explain how this works")
+
+
+def test_resolve_suggested_prompt_selects_by_number() -> None:
+    prompts = [("First", "prompt one"), ("Second", "prompt two")]
+    resolved, title = _resolve_suggested_prompt("1", prompts)
+    assert resolved == "prompt one"
+    assert title == "First"
+
+
+def test_resolve_suggested_prompt_invalid_number() -> None:
+    prompts = [("First", "prompt one")]
+    resolved, title = _resolve_suggested_prompt("5", prompts)
+    assert resolved == "5"
+    assert title is None
+
+
+def test_resolve_suggested_prompt_non_number() -> None:
+    prompts = [("First", "prompt one")]
+    resolved, title = _resolve_suggested_prompt("hello", prompts)
+    assert resolved == "hello"
+    assert title is None

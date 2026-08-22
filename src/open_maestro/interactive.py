@@ -35,6 +35,8 @@ from open_maestro.milestones import (
     MilestoneDetector,
     MilestoneStatus,
     MilestoneStore,
+    get_current_or_next_milestone_prompts,
+    get_prompts_for_milestone,
     handle_blocker_command,
     handle_complete_command,
     handle_next_command,
@@ -101,6 +103,9 @@ class InteractiveState:
     fast: bool = False
     chain: bool = True
     turn: int = 0
+    # Prompts most recently shown by /next or /prompts, available for selection
+    # by typing their number (1-indexed).
+    suggested_prompts: list[tuple[str, str]] = field(default_factory=list)
 
 
 def _banner(session_id: str | None = None) -> str:
@@ -334,10 +339,22 @@ async def _handle_command(
         return _handle_milestones_command(Path.cwd())
 
     if cmd == "next":
+        prompts, _ = get_current_or_next_milestone_prompts(Path.cwd())
+        state.suggested_prompts = [(t.title, rendered) for t, rendered in prompts]
         return handle_next_command(Path.cwd())
 
     if cmd == "prompts":
-        return handle_prompts_command(Path.cwd(), args)
+        result = handle_prompts_command(Path.cwd(), args)
+        if args:
+            milestone_id = args[0]
+            epic_id = args[1] if len(args) > 1 else None
+            store = MilestoneStore(Path.cwd())
+            plan = store.load()
+            prompts = get_prompts_for_milestone(
+                Path.cwd(), milestone_id, plan=plan, epic_id=epic_id
+            )
+            state.suggested_prompts = [(t.title, rendered) for t, rendered in prompts]
+        return result
 
     if cmd == "complete":
         return handle_complete_command(Path.cwd(), args)
@@ -349,6 +366,24 @@ async def _handle_command(
         return handle_track_command(Path.cwd(), args)
 
     return f"Unknown command '/{cmd}'. Type /help for available commands."
+
+
+def _resolve_suggested_prompt(
+    user_input: str,
+    suggested_prompts: list[tuple[str, str]],
+) -> tuple[str, str | None]:
+    """If user_input is a number matching a suggested prompt, return its text.
+
+    Returns (resolved_input, selected_title). If the input is not a selection,
+    returns (user_input, None).
+    """
+    if not user_input.isdigit() or not suggested_prompts:
+        return user_input, None
+    idx = int(user_input) - 1
+    if 0 <= idx < len(suggested_prompts):
+        title, selected_prompt = suggested_prompts[idx]
+        return selected_prompt, title
+    return user_input, None
 
 
 def _read_input_with_paste(prompt: str = "> ") -> str:
@@ -563,6 +598,15 @@ async def run_interactive(args: Any) -> int:
         user_input = user_input.strip()
         if not user_input:
             continue
+
+        resolved_input, selected_title = _resolve_suggested_prompt(
+            user_input, state.suggested_prompts
+        )
+        if selected_title is not None:
+            print(f"Selected prompt {user_input}: {selected_title}")
+            user_input = resolved_input
+            # Clear suggestions so a later bare number is not misinterpreted.
+            state.suggested_prompts = []
 
         cmd_result = await _handle_command(user_input, state, registry, memory)
         if cmd_result == "__EXIT__":
