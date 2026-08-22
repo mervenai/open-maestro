@@ -362,18 +362,18 @@ async def _handle_command(
     if cmd == "select":
         if not state.suggested_prompts:
             return "No suggested prompts to select. Run /next or /prompts first."
-        # Run questionary on the main thread for reliable terminal control.
-        selected = _select_prompts_tui(state.suggested_prompts)
+        # Run questionary asynchronously so it does not start a nested event loop.
+        selected = await _select_prompts_tui(state.suggested_prompts)
         if not selected:
             return "No prompts selected."
         # For each selected prompt, ask execute/edit/skip and queue for execution.
         pending: list[str] = []
         for title, rendered in selected:
-            action = _prompt_action_tui(title)
+            action = await _prompt_action_tui(title)
             if action == "skip":
                 continue
             if action == "edit":
-                rendered = _edit_prompt_tui(rendered)
+                rendered = await _edit_prompt_tui(rendered)
             text = rendered.strip()
             if text:
                 pending.append(text)
@@ -414,7 +414,7 @@ def _resolve_suggested_prompt(
     return user_input, None
 
 
-def _select_prompts_tui(
+async def _select_prompts_tui(
     suggested_prompts: list[tuple[str, str]],
 ) -> list[tuple[str, str]]:
     """Show a checkbox TUI to select one or more suggested prompts.
@@ -427,37 +427,40 @@ def _select_prompts_tui(
         questionary.Choice(title=title, value=(title, rendered))
         for title, rendered in suggested_prompts
     ]
-    selected = questionary.checkbox(
+    question = questionary.checkbox(
         "Select prompts (Space to check, Enter to confirm, Esc to cancel):",
         choices=choices,
-    ).ask()
+    )
+    selected = await question.application.run_async()
     return selected if selected else []
 
 
-def _edit_prompt_tui(prompt_text: str) -> str:
+async def _edit_prompt_tui(prompt_text: str) -> str:
     """Show a multi-line text prompt pre-filled with prompt_text for editing."""
     import questionary
 
-    edited = questionary.text(
+    question = questionary.text(
         "Edit the prompt (Ctrl+J for new line, Enter to submit):",
         default=prompt_text.replace("\n", " "),
         multiline=False,
-    ).ask()
+    )
+    edited = await question.application.run_async()
     return edited if edited is not None else prompt_text
 
 
-def _prompt_action_tui(title: str) -> str:
+async def _prompt_action_tui(title: str) -> str:
     """Ask whether to execute, edit, or skip a selected prompt."""
     import questionary
 
-    action = questionary.select(
+    question = questionary.select(
         f"Selected: {title}",
         choices=[
             questionary.Choice("Execute as-is", value="execute"),
             questionary.Choice("Edit before executing", value="edit"),
             questionary.Choice("Skip", value="skip"),
         ],
-    ).ask()
+    )
+    action = await question.application.run_async()
     return action if action else "skip"
 
 
@@ -683,14 +686,14 @@ async def run_interactive(args: Any) -> int:
         )
         if selected_title is not None:
             print(f"Selected prompt {user_input}: {selected_title}")
-            # Run questionary on the main thread; it needs direct terminal control
-            # for arrow-key navigation to work reliably.
-            action = _prompt_action_tui(selected_title)
+            # Use questionary's async API; the sync .ask() tries asyncio.run()
+            # which fails when an event loop is already running.
+            action = await _prompt_action_tui(selected_title)
             if action == "skip":
                 state.suggested_prompts = []
                 continue
             if action == "edit":
-                resolved_input = _edit_prompt_tui(resolved_input)
+                resolved_input = await _edit_prompt_tui(resolved_input)
             user_input = resolved_input.strip()
             # Clear suggestions so a later bare number is not misinterpreted.
             state.suggested_prompts = []
