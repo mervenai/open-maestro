@@ -106,6 +106,8 @@ class InteractiveState:
     # Prompts most recently shown by /next or /prompts, available for selection
     # by typing their number (1-indexed).
     suggested_prompts: list[tuple[str, str]] = field(default_factory=list)
+    # Prompts queued by /select for execution in subsequent turns.
+    pending_prompts: list[str] = field(default_factory=list)
 
 
 def _banner(session_id: str | None = None) -> str:
@@ -120,6 +122,7 @@ def _banner(session_id: str | None = None) -> str:
         "  /dry              dry-run the next prompt only\n"
         "  /milestones       show project milestone progress\n"
         "  /next             suggest the next milestone action\n"
+        "  /select           open a TUI to select and edit suggested prompts\n"
         "  /prompts <milestone> [epic]  list playbook prompts for a milestone\n"
         "  /complete <id>    mark a milestone complete (add --force to override)\n"
         "  /blocker <id> <reason>  record a milestone blocker\n"
@@ -356,6 +359,36 @@ async def _handle_command(
             state.suggested_prompts = [(t.title, rendered) for t, rendered in prompts]
         return result
 
+    if cmd == "select":
+        if not state.suggested_prompts:
+            return "No suggested prompts to select. Run /next or /prompts first."
+        selected = await asyncio.get_event_loop().run_in_executor(
+            None, _select_prompts_tui, state.suggested_prompts
+        )
+        if not selected:
+            return "No prompts selected."
+        # For each selected prompt, ask execute/edit/skip and queue for execution.
+        pending: list[str] = []
+        for title, rendered in selected:
+            action = await asyncio.get_event_loop().run_in_executor(
+                None, _prompt_action_tui, title
+            )
+            if action == "skip":
+                continue
+            if action == "edit":
+                rendered = await asyncio.get_event_loop().run_in_executor(
+                    None, _edit_prompt_tui, rendered
+                )
+            text = rendered.strip()
+            if text:
+                pending.append(text)
+        state.suggested_prompts = []
+        if not pending:
+            return "No prompts selected for execution."
+        # Store pending prompts and return the first one to the caller.
+        state.pending_prompts = pending[1:]
+        return f"Selected prompt: {selected[0][0]}\n\n{pending[0]}"
+
     if cmd == "complete":
         return handle_complete_command(Path.cwd(), args)
 
@@ -384,6 +417,53 @@ def _resolve_suggested_prompt(
         title, selected_prompt = suggested_prompts[idx]
         return selected_prompt, title
     return user_input, None
+
+
+def _select_prompts_tui(
+    suggested_prompts: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    """Show a checkbox TUI to select one or more suggested prompts.
+
+    Returns the list of selected (title, prompt) tuples.
+    """
+    import questionary
+
+    choices = [
+        questionary.Choice(title=title, value=(title, rendered))
+        for title, rendered in suggested_prompts
+    ]
+    selected = questionary.checkbox(
+        "Select prompts (Space to check, Enter to confirm, Esc to cancel):",
+        choices=choices,
+    ).ask()
+    return selected if selected else []
+
+
+def _edit_prompt_tui(prompt_text: str) -> str:
+    """Show a multi-line text prompt pre-filled with prompt_text for editing."""
+    import questionary
+
+    edited = questionary.text(
+        "Edit the prompt (Ctrl+J for new line, Enter to submit):",
+        default=prompt_text.replace("\n", " "),
+        multiline=False,
+    ).ask()
+    return edited if edited is not None else prompt_text
+
+
+def _prompt_action_tui(title: str) -> str:
+    """Ask whether to execute, edit, or skip a selected prompt."""
+    import questionary
+
+    action = questionary.select(
+        f"Selected: {title}",
+        choices=[
+            questionary.Choice("Execute as-is", value="execute"),
+            questionary.Choice("Edit before executing", value="edit"),
+            questionary.Choice("Skip", value="skip"),
+        ],
+    ).ask()
+    return action if action else "skip"
 
 
 def _read_input_with_paste(prompt: str = "> ") -> str:
@@ -427,47 +507,6 @@ async def _read_line(prompt: str = "> ") -> str:
     """Read a line (or pasted multi-line block) from stdin."""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, _read_input_with_paste, prompt)
-
-
-def _edit_in_editor(default_text: str) -> str | None:
-    """Open default_text in the user's $EDITOR and return the saved content.
-
-    Returns None if no editor is available or the user quits without saving.
-    """
-    import shutil
-    import subprocess
-    import tempfile
-
-    editor = os.environ.get("EDITOR") or os.environ.get("VISUAL")
-    if not editor:
-        # Try common fallback editors.
-        for candidate in ("vim", "vi", "nano", "emacs", "code --wait"):
-            if shutil.which(candidate.split()[0]):
-                editor = candidate
-                break
-
-    if not editor:
-        return None
-
-    with tempfile.NamedTemporaryFile(
-        mode="w+", suffix=".txt", delete=False, encoding="utf-8"
-    ) as f:
-        f.write(default_text)
-        temp_path = f.name
-
-    try:
-        subprocess.call([*editor.split(), temp_path])
-        with open(temp_path, encoding="utf-8") as f:
-            edited = f.read()
-        return edited
-    except Exception as exc:
-        logger.debug("Editor failed: %s", exc)
-        return None
-    finally:
-        try:
-            os.unlink(temp_path)
-        except Exception:
-            pass
 
 
 def _format_milestone_status(plan: Any) -> str:
@@ -629,12 +668,16 @@ async def run_interactive(args: Any) -> int:
         print("\n" + milestone_msg)
 
     while True:
-        try:
-            user_input = await _read_line("> ")
-        except (EOFError, KeyboardInterrupt):
-            print("\nExiting.")
-            _save_readline_history()
-            return 0
+        if state.pending_prompts:
+            user_input = state.pending_prompts.pop(0)
+            print(f"> {user_input}")
+        else:
+            try:
+                user_input = await _read_line("> ")
+            except (EOFError, KeyboardInterrupt):
+                print("\nExiting.")
+                _save_readline_history()
+                return 0
 
         user_input = user_input.strip()
         if not user_input:
@@ -645,16 +688,17 @@ async def run_interactive(args: Any) -> int:
         )
         if selected_title is not None:
             print(f"Selected prompt {user_input}: {selected_title}")
-            # Try to open the prompt in the user's $EDITOR for editing.
-            edited = await asyncio.get_event_loop().run_in_executor(
-                None, _edit_in_editor, resolved_input
+            action = await asyncio.get_event_loop().run_in_executor(
+                None, _prompt_action_tui, selected_title
             )
-            if edited is not None:
-                user_input = edited.strip()
-            else:
-                # No editor available: execute the original prompt as-is.
-                print("No $EDITOR found. Executing the original prompt as-is.")
-                user_input = resolved_input.strip()
+            if action == "skip":
+                state.suggested_prompts = []
+                continue
+            if action == "edit":
+                resolved_input = await asyncio.get_event_loop().run_in_executor(
+                    None, _edit_prompt_tui, resolved_input
+                )
+            user_input = resolved_input.strip()
             # Clear suggestions so a later bare number is not misinterpreted.
             state.suggested_prompts = []
             if not user_input:

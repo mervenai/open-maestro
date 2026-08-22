@@ -5,6 +5,15 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.8] - 2026-08-22
+
+### Changed
+- Prompt selection now uses a TUI powered by ``questionary``. After `/next` or
+  `/prompts`, type a number or run `/select` to open a cursor-driven menu.
+  - Checkbox TUI lets you pick one or more prompts.
+  - Each selected prompt can be executed as-is, edited inline, or skipped.
+  - Multi-select via `/select` queues prompts and executes them in sequence.
+
 ## [1.5.7] - 2026-08-22
 
 ### Changed
