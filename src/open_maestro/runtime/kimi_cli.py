@@ -15,6 +15,7 @@ from open_maestro.config.capabilities import TaskProfile
 from open_maestro.config.models import ModelResolver
 from open_maestro.events.bus import EventBus
 from open_maestro.runtime.base import AgentConfig, AgentResult, AgentRuntime
+from open_maestro.runtime.stream_printer import create_printer
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -179,16 +180,9 @@ class KimiCLIRuntime(AgentRuntime):
     @staticmethod
     async def _stream_pipe(
         stream: asyncio.StreamReader | None,
-        output_stream: Any,
-        buffer: list[str],
-        prefix: str = "",
+        printer: Any,
     ) -> None:
-        """Read a subprocess stream line-by-line, print it, and buffer it.
-
-        Why: The Kimi CLI produces rich progress output (tool calls, file reads,
-        etc.) that users want to see in real time. This helper tees the stream
-        to both the terminal and a capture buffer.
-        """
+        """Read a subprocess stream line-by-line and print it via a StreamPrinter."""
         if stream is None:
             return
         while True:
@@ -196,14 +190,7 @@ class KimiCLIRuntime(AgentRuntime):
             if not line_bytes:
                 break
             line = line_bytes.decode(errors="replace")
-            buffer.append(line)
-            if prefix:
-                output_stream.write(prefix)
-            output_stream.write(line)
-            try:
-                output_stream.flush()
-            except Exception:
-                pass
+            printer.write(line)
 
     async def _invoke(
         self,
@@ -228,8 +215,8 @@ class KimiCLIRuntime(AgentRuntime):
         term_attrs.save()
         heartbeat = asyncio.create_task(self._working_heartbeat(start))
 
-        stdout_buffer: list[str] = []
-        stderr_buffer: list[str] = []
+        stdout_printer = create_printer("kimi", use_stderr=False)
+        stderr_printer = create_printer("kimi", use_stderr=True)
 
         try:
             process = await asyncio.create_subprocess_exec(
@@ -241,10 +228,10 @@ class KimiCLIRuntime(AgentRuntime):
             )
 
             stdout_task = asyncio.create_task(
-                self._stream_pipe(process.stdout, sys.stdout, stdout_buffer)
+                self._stream_pipe(process.stdout, stdout_printer)
             )
             stderr_task = asyncio.create_task(
-                self._stream_pipe(process.stderr, sys.stderr, stderr_buffer, prefix="[kimi] ")
+                self._stream_pipe(process.stderr, stderr_printer)
             )
 
             try:
@@ -269,8 +256,8 @@ class KimiCLIRuntime(AgentRuntime):
             term_attrs.restore()
 
         duration_ms = int((time.monotonic() - start) * 1000)
-        stdout = "".join(stdout_buffer)
-        stderr = "".join(stderr_buffer)
+        stdout = stdout_printer.get_buffer()
+        stderr = stderr_printer.get_buffer()
 
         if process.returncode != 0:
             logger.error("Kimi CLI failed (rc=%s): %s", process.returncode, stderr)
