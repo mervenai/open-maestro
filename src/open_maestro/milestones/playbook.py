@@ -180,8 +180,14 @@ def get_prompts_for_milestone(
 def format_prompt_list(
     prompts: list[tuple[PromptTemplate, str]],
     max_prompts: int = 3,
+    preview_chars: int | None = None,
 ) -> str:
-    """Format a list of prompts for display in interactive mode."""
+    """Format a list of prompts for display in interactive mode.
+
+    By default the full rendered prompt is shown so the user can see exactly
+    what they are selecting. Pass ``preview_chars`` to truncate to a one-line
+    preview instead.
+    """
     if not prompts:
         return "No suggested prompts for this milestone."
     lines = ["Suggested prompts:"]
@@ -189,11 +195,14 @@ def format_prompt_list(
         title = template.title
         agent = f" [{template.agent_hint}]" if template.agent_hint else ""
         lines.append(f"\n  {idx}. {title}{agent}")
-        # Show a one-line preview of the rendered prompt.
-        preview = " ".join(rendered.split())[:160]
-        if len(rendered) > 160:
-            preview += "..."
-        lines.append(f"     {preview}")
+        if preview_chars:
+            preview = " ".join(rendered.split())[:preview_chars]
+            if len(rendered) > preview_chars:
+                preview += "..."
+            lines.append(f"     {preview}")
+        else:
+            for rendered_line in rendered.splitlines():
+                lines.append(f"     {rendered_line}")
     if len(prompts) > max_prompts:
         lines.append(f"\n  ...and {len(prompts) - max_prompts} more. Use /prompts to browse.")
     return "\n".join(lines)
