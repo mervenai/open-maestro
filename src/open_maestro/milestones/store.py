@@ -26,6 +26,50 @@ def _normalize_project_id(name: str) -> str:
     return normalized or "project"
 
 
+def _normalize_legacy_milestones(raw: dict[str, Any]) -> dict[str, Any]:
+    """Coerce hand-edited or agent-written YAML into schema v2.0 shape.
+
+    Early milestone files stored artifacts and blockers as plain strings. The
+    Pydantic models require ``Artifact`` and ``Blocker`` objects, so this
+    normalizer converts strings into the minimal valid dicts before validation.
+    The stored ``summary`` is recomputed on load, so it is dropped.
+    """
+    raw = dict(raw)
+    raw.pop("summary", None)
+
+    for epic in raw.get("epics", []):
+        epic_id = epic.get("id", "unknown")
+        for milestone in epic.get("milestones", []):
+            milestone_id = milestone.get("id", "unknown")
+            artifacts = milestone.get("artifacts", [])
+            normalized_artifacts: list[dict[str, Any]] = []
+            for artifact in artifacts:
+                if isinstance(artifact, str):
+                    normalized_artifacts.append(
+                        {"path": artifact, "required": True, "detected": False}
+                    )
+                elif isinstance(artifact, dict):
+                    normalized_artifacts.append(artifact)
+            milestone["artifacts"] = normalized_artifacts
+
+            blockers = milestone.get("blockers", [])
+            normalized_blockers: list[dict[str, Any]] = []
+            for blocker in blockers:
+                if isinstance(blocker, str):
+                    normalized_blockers.append(
+                        {
+                            "description": blocker,
+                            "epic_id": epic_id,
+                            "milestone_id": milestone_id,
+                        }
+                    )
+                elif isinstance(blocker, dict):
+                    normalized_blockers.append(blocker)
+            milestone["blockers"] = normalized_blockers
+
+    return raw
+
+
 class MilestoneStore:
     """Load and save milestone plans to ``.open-maestro/milestones.yaml``."""
 
@@ -67,6 +111,7 @@ class MilestoneStore:
                 "or delete the file to create a fresh schema v2.0 plan."
             )
 
+        raw = _normalize_legacy_milestones(raw)
         return MilestonePlan(**raw)
 
     def save(self, plan: MilestonePlan) -> None:

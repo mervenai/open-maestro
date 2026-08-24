@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from typing import Any
 
 import httpx
 
-from open_maestro.milestones.models import Epic, MilestonePlan, MilestoneStatus
+from open_maestro.milestones.models import Epic, Milestone, MilestonePlan, MilestoneStatus
 from open_maestro.milestones.store import MilestoneStore
 from open_maestro.milestones.templates import _STANDARD_MILESTONES
+
+logger = logging.getLogger(__name__)
 
 
 class MervenSyncError(RuntimeError):
@@ -57,38 +60,130 @@ def _merge_status(local: MilestoneStatus, merven: MilestoneStatus) -> MilestoneS
     return merven if _STATUS_ADVANCEMENT.get(merven, 0) > _STATUS_ADVANCEMENT.get(local, 0) else local
 
 
-def _epic_from_merven(epic_view: dict[str, Any], *, order: int) -> Epic:
-    """Convert a Merven epic view into a Maestro Epic with standard lifecycle milestones.
+def _milestone_template(
+    existing: MilestonePlan | None,
+) -> list[Milestone] | None:
+    """Return a deep copy of the milestone definitions from an existing local plan.
 
-    Maestro's taxonomy is: a project contains epics (workstreams/features), and the
-    8 standard lifecycle milestones live inside each epic. Merven's own epic-level
-    milestone definitions are ignored; only the epic name/order and any statuses that
-    can be mapped to Maestro's standard milestones are used.
+    Why: Merven owns the canonical epic list, but Maestro owns the milestone
+    taxonomy inside each epic. If the user has already defined custom milestones,
+    syncing should keep those definitions and only add/remove epics or update
+    statuses. This is a fallback for epics that Merven returns without milestone
+    details.
+    """
+    if existing is None or not existing.epics:
+        return None
+    for epic in existing.epics:
+        if epic.milestones:
+            return [m.model_copy(deep=True) for m in epic.milestones]
+    return None
+
+
+# Default weights for the Merven P-milestones when Merven provides them.
+_P_MILESTONE_WEIGHTS: dict[str, int] = {
+    "p1": 10,
+    "p3": 10,
+    "p4": 15,
+    "p5": 10,
+    "p6": 30,
+    "p8": 15,
+    "p9": 5,
+    "p10": 5,
+}
+
+
+def _milestone_from_merven(ms: dict[str, Any], order: int) -> Milestone:
+    """Convert a single Merven epic milestone into a Maestro Milestone."""
+    kind = str(ms.get("kind", "")).lower()
+    title = str(ms.get("title", "")).strip()
+    name = title or kind.upper()
+    return Milestone(
+        id=kind,
+        name=name,
+        order=order,
+        weight=_P_MILESTONE_WEIGHTS.get(kind, 10),
+        client_visible=True,
+        status=_status_from_merven(ms.get("status")),
+        artifacts=[],
+        exit_criteria=[],
+        blockers=[],
+        notes="",
+    )
+
+
+def _status_for_milestone(
+    milestone_id: str, merven_by_kind: dict[str, MilestoneStatus]
+) -> MilestoneStatus | None:
+    """Map a Merven milestone kind to a status for *milestone_id*.
+
+    Matching order:
+    1. Exact kind == milestone id
+    2. Kind ends with "-<milestone_id>"
+    3. Normalized kind (no dashes) == normalized milestone id
+    4. Kind starts with milestone id followed by a delimiter
+    """
+    lowered = milestone_id.lower()
+    normalized = lowered.replace("-", "")
+    candidates = [lowered, f"p{lowered}"]
+    for kind, status in merven_by_kind.items():
+        kind_norm = kind.replace("-", "")
+        if kind in candidates or kind.endswith(f"-{lowered}"):
+            return status
+        if kind_norm == normalized:
+            return status
+        if (
+            kind.startswith(lowered)
+            and len(kind) > len(lowered)
+            and kind[len(lowered)] in "-_|:"
+        ):
+            return status
+    return None
+
+
+def _epic_from_merven(
+    epic_view: dict[str, Any],
+    *,
+    order: int,
+    milestone_template: list[Milestone] | None = None,
+) -> Epic:
+    """Convert a Merven epic view into a Maestro Epic.
+
+    Merven is the canonical source for both the epic list and the milestone
+    lifecycle inside each epic. When Merven returns milestones for an epic, those
+    are used directly (kind → id, title → name, status mapped). When Merven does
+    not return milestones, the local template or the built-in 8 standard lifecycle
+    milestones are used as a fallback.
     """
     epic_name = str(epic_view.get("name", ""))
     epic_id = _slugify(epic_name)
 
-    milestones = [m.model_copy(deep=True) for m in _STANDARD_MILESTONES]
+    merven_milestones = epic_view.get("milestones", [])
+    if merven_milestones:
+        milestones = [
+            _milestone_from_merven(ms, order=idx)
+            for idx, ms in enumerate(merven_milestones, start=1)
+        ]
+    else:
+        source_milestones = milestone_template or _STANDARD_MILESTONES
+        milestones = [m.model_copy(deep=True) for m in source_milestones]
+        # Reset statuses from the template so sync does not carry stale state into
+        # new epics; locally-merged statuses will be applied next.
+        for milestone in milestones:
+            milestone.status = MilestoneStatus.NOT_STARTED
 
-    # If Merven provides milestones that match Maestro's standard lifecycle IDs,
-    # import their statuses. This is a forward-compat hook for when Merven aligns
-    # its epic milestone taxonomy with Maestro's.
-    merven_by_kind: dict[str, MilestoneStatus] = {}
-    for ms in epic_view.get("milestones", []):
-        kind = str(ms.get("kind", "")).lower()
-        status = _status_from_merven(ms.get("status"))
-        merven_by_kind[kind] = status
+        # If Merven provides milestones that match Maestro's fallback ids, import
+        # their statuses. This is a forward-compat hook for when Merven aligns its
+        # epic milestone taxonomy with Maestro's fallback template.
+        merven_by_kind: dict[str, MilestoneStatus] = {}
+        for ms in merven_milestones:
+            kind = str(ms.get("kind", "")).lower()
+            status = _status_from_merven(ms.get("status"))
+            merven_by_kind[kind] = status
 
-    for milestone in milestones:
-        # Try matching by exact id, then by common prefixes like p1/p3/etc.
-        mapped_status = merven_by_kind.get(milestone.id)
-        if mapped_status is None:
-            for kind, status in merven_by_kind.items():
-                if kind.endswith(f"-{milestone.id}") or kind == milestone.id.replace("-", ""):
-                    mapped_status = status
-                    break
-        if mapped_status is not None:
-            milestone.status = mapped_status
+        for milestone in milestones:
+            mapped_status = _status_for_milestone(milestone.id, merven_by_kind)
+            if mapped_status is not None:
+                milestone.status = mapped_status
 
     return Epic(
         id=epic_id,
@@ -99,11 +194,19 @@ def _epic_from_merven(epic_view: dict[str, Any], *, order: int) -> Epic:
     )
 
 
-def _plan_from_merven_payload(project_token: str, payload: dict[str, Any]) -> MilestonePlan:
+def _plan_from_merven_payload(
+    project_token: str,
+    payload: dict[str, Any],
+    milestone_template: list[Milestone] | None = None,
+) -> MilestonePlan:
     """Build a Maestro MilestonePlan from a Merven ``GET /projects/{id}`` payload."""
     epics: list[Epic] = []
     for order, epic_view in enumerate(payload.get("epics", []), start=1):
-        epics.append(_epic_from_merven(epic_view, order=order))
+        epics.append(
+            _epic_from_merven(
+                epic_view, order=order, milestone_template=milestone_template
+            )
+        )
 
     # If Merven returns no epics, fall back to a single default epic so the plan
     # is still usable.
@@ -122,9 +225,61 @@ def _plan_from_merven_payload(project_token: str, payload: dict[str, Any]) -> Mi
     )
 
 
+def _normalize_api_url(url: str) -> str:
+    """Return the Merven core API base URL.
+
+    Older documentation told users to set ``MERVEN_API_URL`` to
+    ``https://api.staging.merven.ai/maestro``. The core engagement endpoints
+    (``/projects``) live at the API root, so strip a trailing ``/maestro``
+    segment and warn.
+    """
+    url = url.rstrip("/")
+    if url.endswith("/maestro"):
+        logger.warning(
+            "MERVEN_API_URL ends with /maestro; using the core API root instead."
+        )
+        url = url[: -len("/maestro")]
+    return url
+
+
+def _resolve_project_id_from_dashboard(
+    core_url: str,
+    project_token: str,
+    headers: dict[str, str],
+    dashboard_url: str | None = None,
+) -> str | None:
+    """Try to map a project token to a project ID via the dashboard snapshot."""
+    dashboard_base = (dashboard_url or os.environ.get("MAESTRO_DASHBOARD_URL", "")).rstrip("/")
+    if not dashboard_base:
+        dashboard_base = f"{core_url}/maestro/dashboard"
+
+    try:
+        response = httpx.get(
+            f"{dashboard_base}/{project_token}",
+            headers=headers,
+            timeout=30.0,
+        )
+        if response.status_code != 200:
+            return None
+        data = response.json()
+    except Exception:
+        return None
+
+    # The dashboard payload is either {dashboard: {...}} or {...} directly.
+    dashboard = data.get("dashboard") if isinstance(data, dict) else None
+    if dashboard is None:
+        dashboard = data
+    if isinstance(dashboard, dict):
+        project_id = dashboard.get("project_id")
+        if project_id:
+            return str(project_id)
+    return None
+
+
 def sync_from_merven(
     project_path: str,
     *,
+    project_id: str | None = None,
     project_token: str | None = None,
     api_url: str | None = None,
     api_key: str | None = None,
@@ -137,18 +292,25 @@ def sync_from_merven(
     retains its own milestone taxonomy.
 
     What: Reads ``MERVEN_API_URL``, ``MERVEN_API_KEY`` (or
-    ``MERVEN_TENANT_DEFAULT_API_KEY``), and ``MAESTRO_DASHBOARD_PROJECT_TOKEN``
-    from the environment (or arguments), fetches ``GET /projects/{token}`` from
-    Merven, converts the shaped payload to a ``MilestonePlan``, and saves it to
-    ``.open-maestro/milestones.yaml``.
+    ``MERVEN_TENANT_DEFAULT_API_KEY``), and ``MAESTRO_PROJECT_ID`` /
+    ``MAESTRO_DASHBOARD_PROJECT_TOKEN`` from the environment (or arguments),
+    fetches ``GET /projects/{project_id}`` from Merven, converts the shaped
+    payload to a ``MilestonePlan``, and saves it to ``.open-maestro/milestones.yaml``.
     """
-    token = project_token or os.environ.get("MAESTRO_DASHBOARD_PROJECT_TOKEN")
-    if not token:
+    token_or_id = (
+        project_id
+        or project_token
+        or os.environ.get("MAESTRO_PROJECT_ID")
+        or os.environ.get("MAESTRO_DASHBOARD_PROJECT_TOKEN")
+    )
+    if not token_or_id:
         raise MervenSyncError(
-            "No project token. Set MAESTRO_DASHBOARD_PROJECT_TOKEN or pass project_token."
+            "No project ID or token. Set MAESTRO_PROJECT_ID or MAESTRO_DASHBOARD_PROJECT_TOKEN."
         )
 
-    url = (api_url or os.environ.get("MERVEN_API_URL", "")).rstrip("/")
+    url = _normalize_api_url(
+        api_url or os.environ.get("MERVEN_API_URL", "")
+    )
     if not url:
         raise MervenSyncError("No Merven API URL. Set MERVEN_API_URL.")
 
@@ -161,8 +323,24 @@ def sync_from_merven(
     if key:
         headers["Authorization"] = f"Bearer {key}"
 
+    resolved_id: str | None = None
     try:
-        response = httpx.get(f"{url}/projects/{token}", headers=headers, timeout=30.0)
+        response = httpx.get(
+            f"{url}/projects/{token_or_id}", headers=headers, timeout=30.0
+        )
+        if response.status_code == 404:
+            # The supplied value may be a dashboard project token. Try to
+            # resolve it to a project ID via the dashboard snapshot.
+            resolved_id = _resolve_project_id_from_dashboard(
+                url, token_or_id, headers
+            )
+            if resolved_id and resolved_id != token_or_id:
+                logger.info(
+                    "Resolved project token %s to project ID %s", token_or_id, resolved_id
+                )
+                response = httpx.get(
+                    f"{url}/projects/{resolved_id}", headers=headers, timeout=30.0
+                )
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         raise MervenSyncError(
@@ -172,25 +350,59 @@ def sync_from_merven(
         raise MervenSyncError(f"Merven API request failed: {exc}") from exc
 
     payload = response.json()
-    plan = _plan_from_merven_payload(token, payload)
+    effective_project_id = str(payload.get("project_id") or resolved_id or token_or_id)
 
     store = MilestoneStore(project_path)
-    if store.exists():
-        existing = store.load()
-        existing_by_key = {
-            (e.id, m.id): m
-            for e in existing.epics
-            for m in e.milestones
-        }
-        for epic in plan.epics:
-            for milestone in epic.milestones:
-                local = existing_by_key.get((epic.id, milestone.id))
-                if local is not None:
-                    milestone.status = _merge_status(local.status, milestone.status)
-                    if milestone.status == MilestoneStatus.COMPLETED and local.completed_at:
-                        milestone.completed_at = local.completed_at
-                    if milestone.status in (MilestoneStatus.IN_PROGRESS, MilestoneStatus.COMPLETED) and local.started_at:
-                        milestone.started_at = local.started_at
+    existing = store.load() if store.exists() else None
+    template = _milestone_template(existing)
+    merven_plan = _plan_from_merven_payload(
+        effective_project_id, payload, milestone_template=template
+    )
+
+    # Merven owns the canonical project/epic list, but Maestro owns the milestone
+    # taxonomy inside each epic. Preserve locally-defined epics (and their
+    # milestone definitions) while merging forward any statuses Merven reports.
+    if existing is None:
+        plan = merven_plan
+    else:
+        final_epics: list[Epic] = []
+        existing_by_id = {e.id: e for e in existing.epics}
+        merven_by_id = {e.id: e for e in merven_plan.epics}
+
+        # 1. Start from local epics in their current order. Update statuses from
+        #    Merven for matching (epic, milestone) pairs but keep local names,
+        #    weights, artifacts, exit criteria, blockers, and dates.
+        for existing_epic in existing.epics:
+            epic = existing_epic.model_copy(deep=True)
+            merven_epic = merven_by_id.get(epic.id)
+            if merven_epic is not None:
+                merven_status_by_kind = {
+                    ms.id: ms.status for ms in merven_epic.milestones
+                }
+                for milestone in epic.milestones:
+                    mapped = _status_for_milestone(milestone.id, merven_status_by_kind)
+                    if mapped is not None:
+                        milestone.status = _merge_status(milestone.status, mapped)
+            final_epics.append(epic)
+
+        # 2. Append any epics Merven knows about that do not exist locally.
+        for merven_epic in merven_plan.epics:
+            if merven_epic.id not in existing_by_id:
+                final_epics.append(merven_epic.model_copy(deep=True))
+
+        # 3. Recompute order numbers so they stay contiguous.
+        for idx, epic in enumerate(final_epics, start=1):
+            epic.order = idx
+            for m_idx, milestone in enumerate(epic.milestones, start=1):
+                milestone.order = m_idx
+
+        plan = MilestonePlan(
+            project_id=merven_plan.project_id,
+            project_name=merven_plan.project_name or existing.project_name,
+            project_path=existing.project_path,
+            schema_version="2.0",
+            epics=final_epics,
+        )
 
     store.save(plan)
     return plan

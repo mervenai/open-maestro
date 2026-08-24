@@ -403,14 +403,24 @@ On the engineer machine, from the project directory:
 
 ```bash
 cd ~/projects/YourProject
-export MERVEN_API_URL="https://api.staging.merven.ai/maestro"
-export MAESTRO_DASHBOARD_PROJECT_TOKEN="project-token-from-above"
+export MERVEN_API_URL="https://api.staging.merven.ai"
+export MERVEN_API_KEY="demo"
+export MAESTRO_PROJECT_ID="project-id-from-above"
 maestro --sync-milestones
 ```
 
-`MERVEN_API_URL` is the Merven core API base path. `MAESTRO_DASHBOARD_PROJECT_TOKEN`
-is the project token from Merven. The local plan is written to
-`.open-maestro/milestones.yaml`.
+`MERVEN_API_URL` is the Merven core API base path (without `/maestro`).
+`MAESTRO_PROJECT_ID` is the project **ID** from Merven (not the dashboard project token).
+`MERVEN_API_KEY` is the Merven core API key from the server's `deploy/.env`
+(`MERVEN_API_KEY` for static mode, or `MERVEN_TENANT_DEFAULT_API_KEY` for
+`per_tenant` mode). It is **not** the dashboard publish key. The staging
+deployment currently uses the default key `demo`; production deployments should
+use a generated key.
+The local plan is written to `.open-maestro/milestones.yaml`.
+
+If you only have the dashboard project token, Maestro will try to resolve it to a
+project ID by reading the published dashboard snapshot, but using the project ID is
+faster and more reliable.
 
 **Note:** `--sync-milestones` requires the workstation to reach `MERVEN_API_URL`.
 If the workstation is behind a heavy firewall or VPN that blocks outbound HTTPS,

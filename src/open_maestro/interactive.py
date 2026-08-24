@@ -484,17 +484,23 @@ class TUICancelled(Exception):
 def _add_escape_binding(question: Any) -> None:
     """Add an Escape key binding that cancels a questionary prompt."""
     from prompt_toolkit.keys import Keys
+    from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
 
-    kb = question.application.key_bindings
-    if kb is None:
-        from prompt_toolkit.key_binding import KeyBindings
+    existing = question.application.key_bindings
 
-        kb = KeyBindings()
-        question.application.key_bindings = kb
+    new_kb = KeyBindings()
 
-    @kb.add(Keys.Escape, eager=True)
+    @new_kb.add(Keys.Escape, eager=True)
     def _cancel(event: Any) -> None:
         event.app.exit(exception=TUICancelled, style="class:aborting")
+
+    if existing is None:
+        question.application.key_bindings = new_kb
+    elif hasattr(existing, "add"):
+        existing.add(Keys.Escape, eager=True)(_cancel)
+    else:
+        # prompt_toolkit may return a merged key bindings object; wrap it.
+        question.application.key_bindings = merge_key_bindings([existing, new_kb])
 
 
 async def _select_prompts_tui(
