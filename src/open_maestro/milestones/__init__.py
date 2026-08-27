@@ -30,6 +30,12 @@ from open_maestro.milestones.detector import (
 )
 from open_maestro.milestones.merven_sync import MervenSyncError, sync_from_merven
 from open_maestro.milestones.playbook import get_prompts_for_milestone
+from open_maestro.milestones.prompt_history import (
+    PromptHistoryStore,
+    PromptRunHistory,
+    PromptRunRecord,
+    format_run_indicator,
+)
 from open_maestro.milestones.publisher import DashboardPublisher, PublishError
 from open_maestro.milestones.server import serve_dashboard, stop_dashboard_server
 from open_maestro.milestones.store import MilestoneStore
@@ -60,6 +66,10 @@ __all__ = [
     "get_current_or_next_milestone_prompts",
     "get_prompts_for_milestone",
     "format_prompt_context",
+    "PromptHistoryStore",
+    "PromptRunHistory",
+    "PromptRunRecord",
+    "format_run_indicator",
     "export_dashboard_json",
     "export_dashboard_markdown",
     "export_dashboard_html",

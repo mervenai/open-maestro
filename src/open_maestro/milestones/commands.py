@@ -18,8 +18,8 @@ from open_maestro.milestones.store import MilestoneStore
 
 def get_current_or_next_milestone_prompts(
     project_path: Path,
-) -> tuple[list[tuple[Any, str]], str | None]:
-    """Return prompts for the milestone /next would focus on, plus its ID.
+) -> tuple[list[tuple[Any, str]], str | None, str | None]:
+    """Return prompts for the milestone /next would focus on, plus epic/milestone IDs.
 
     This is used by interactive mode to let users select a suggested prompt by
     number after running /next.
@@ -47,13 +47,13 @@ def get_current_or_next_milestone_prompts(
                 break
 
     if target is None:
-        return [], None
+        return [], None, None
 
     epic_id, milestone = target
     prompts = get_prompts_for_milestone(
         project_path, milestone.id, plan=plan, epic_id=epic_id
     )
-    return prompts, milestone.id
+    return prompts, epic_id, milestone.id
 
 
 def _resolve_milestone(plan: MilestonePlan, ref: str) -> tuple[str, Milestone] | None:

@@ -9,8 +9,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import shlex
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -35,6 +37,8 @@ from open_maestro.milestones import (
     MilestoneDetector,
     MilestoneStatus,
     MilestoneStore,
+    PromptHistoryStore,
+    format_run_indicator,
     get_current_or_next_milestone_prompts,
     get_prompts_for_milestone,
     handle_blocker_command,
@@ -104,10 +108,14 @@ class InteractiveState:
     chain: bool = True
     turn: int = 0
     # Prompts most recently shown by /next or /prompts, available for selection
-    # by typing their number (1-indexed).
-    suggested_prompts: list[tuple[str, str]] = field(default_factory=list)
+    # by typing their number (1-indexed). Each tuple is (prompt_id, title, rendered_text).
+    suggested_prompts: list[tuple[str, str, str]] = field(default_factory=list)
     # Prompts queued by /select for execution in subsequent turns.
-    pending_prompts: list[str] = field(default_factory=list)
+    # Each tuple is (prompt_id, rendered_text, edited, title).
+    pending_prompts: list[tuple[str, str, bool, str]] = field(default_factory=list)
+    # Epic/milestone context for the most recently shown suggested prompts.
+    current_epic_id: str | None = None
+    current_milestone_id: str | None = None
 
 
 def _banner(session_id: str | None = None) -> str:
@@ -342,16 +350,29 @@ async def _handle_command(
         return _handle_milestones_command(Path.cwd())
 
     if cmd == "next":
-        prompts, _ = get_current_or_next_milestone_prompts(Path.cwd())
-        state.suggested_prompts = [(t.title, rendered) for t, rendered in prompts]
+        prompts, epic_id, milestone_id = get_current_or_next_milestone_prompts(
+            Path.cwd()
+        )
+        state.current_epic_id = epic_id
+        state.current_milestone_id = milestone_id
+        state.suggested_prompts = [
+            (t.id, t.title, rendered) for t, rendered in prompts
+        ]
         # Show milestone context without the prompt list; the TUI will present
         # the prompts and let the user pick, edit, or skip them in one step.
         info = handle_next_command(Path.cwd(), include_prompts=False)
         print(info)
         if not state.suggested_prompts:
             return "No suggested prompts for this milestone."
+        history_store = PromptHistoryStore(Path.cwd())
+        run_history = history_store.load()
         try:
-            selected = await _select_prompts_tui(state.suggested_prompts)
+            selected = await _select_prompts_tui(
+                state.suggested_prompts,
+                run_history=run_history,
+                epic_id=epic_id,
+                milestone_id=milestone_id,
+            )
         except TUICancelled:
             state.suggested_prompts = []
             state.pending_prompts = []
@@ -359,8 +380,8 @@ async def _handle_command(
         state.suggested_prompts = []
         if not selected:
             return "No prompts selected."
-        pending: list[str] = []
-        for title, rendered in selected:
+        pending: list[tuple[str, str, bool, str]] = []
+        for prompt_id, title, rendered in selected:
             try:
                 action = await _prompt_action_tui(title)
             except TUICancelled:
@@ -368,39 +389,52 @@ async def _handle_command(
                 return "Cancelled."
             if action == "skip":
                 continue
+            edited = False
             if action == "edit":
                 try:
                     rendered = await _edit_prompt_tui(rendered)
+                    edited = True
                 except TUICancelled:
                     state.pending_prompts = []
                     return "Cancelled."
             text = rendered.strip()
             if text:
-                pending.append(text)
+                pending.append((prompt_id, text, edited, title))
         if not pending:
             return "No prompts selected for execution."
         state.pending_prompts = pending
-        return f"Selected prompt: {selected[0][0]}"
+        return f"Selected prompt: {selected[0][1]}"
 
     if cmd == "prompts":
         result = handle_prompts_command(Path.cwd(), args)
         if args:
             milestone_id = args[0]
             epic_id = args[1] if len(args) > 1 else None
+            state.current_epic_id = epic_id
+            state.current_milestone_id = milestone_id
             store = MilestoneStore(Path.cwd())
             plan = store.load()
             prompts = get_prompts_for_milestone(
                 Path.cwd(), milestone_id, plan=plan, epic_id=epic_id
             )
-            state.suggested_prompts = [(t.title, rendered) for t, rendered in prompts]
+            state.suggested_prompts = [
+                (t.id, t.title, rendered) for t, rendered in prompts
+            ]
         return result
 
     if cmd == "select":
         if not state.suggested_prompts:
             return "No suggested prompts to select. Run /next or /prompts first."
         # Run questionary asynchronously so it does not start a nested event loop.
+        history_store = PromptHistoryStore(Path.cwd())
+        run_history = history_store.load()
         try:
-            selected = await _select_prompts_tui(state.suggested_prompts)
+            selected = await _select_prompts_tui(
+                state.suggested_prompts,
+                run_history=run_history,
+                epic_id=state.current_epic_id,
+                milestone_id=state.current_milestone_id,
+            )
         except TUICancelled:
             state.suggested_prompts = []
             state.pending_prompts = []
@@ -408,8 +442,8 @@ async def _handle_command(
         if not selected:
             return "No prompts selected."
         # For each selected prompt, ask execute/edit/skip and queue for execution.
-        pending: list[str] = []
-        for title, rendered in selected:
+        pending: list[tuple[str, str, bool, str]] = []
+        for prompt_id, title, rendered in selected:
             try:
                 action = await _prompt_action_tui(title)
             except TUICancelled:
@@ -418,21 +452,23 @@ async def _handle_command(
                 return "Cancelled."
             if action == "skip":
                 continue
+            edited = False
             if action == "edit":
                 try:
                     rendered = await _edit_prompt_tui(rendered)
+                    edited = True
                 except TUICancelled:
                     state.suggested_prompts = []
                     state.pending_prompts = []
                     return "Cancelled."
             text = rendered.strip()
             if text:
-                pending.append(text)
+                pending.append((prompt_id, text, edited, title))
         state.suggested_prompts = []
         if not pending:
             return "No prompts selected for execution."
         state.pending_prompts = pending
-        return f"Selected prompt: {selected[0][0]}"
+        return f"Selected prompt: {selected[0][1]}"
 
     if cmd == "complete":
         return handle_complete_command(Path.cwd(), args)
@@ -446,39 +482,456 @@ async def _handle_command(
     return f"Unknown command '/{cmd}'. Type /help for available commands."
 
 
+_REPO_ANALYSIS_KEYWORDS = {
+    "analyze",
+    "analysis",
+    "analyse",
+    "codebase",
+    "code base",
+    "repo",
+    "repository",
+    "project",
+    "review",
+    "examine",
+    "inspect",
+    "audit",
+    "explore",
+    "understand",
+    "study",
+    "evaluate",
+}
+
+_PATH_RE = re.compile(
+    r"(?:\s|^)((?:~|\.\.?)?/[a-zA-Z0-9_./-]+)(?:\s|$)"
+)
+
+# Remote repository URLs (http, https, git, ssh).
+_URL_RE = re.compile(
+    r"(?:\s|^)(?:https?://|git@|git://)[^\s]+(?:\.git)?(?:\s|$)",
+    re.IGNORECASE,
+)
+
+
+def _extract_remote_urls(prompt: str) -> list[str]:
+    """Return remote repository URLs mentioned in *prompt*."""
+    urls: list[str] = []
+    seen: set[str] = set()
+    for match in _URL_RE.finditer(prompt):
+        raw = match.group(0).strip()
+        if raw and raw not in seen:
+            urls.append(raw)
+            seen.add(raw)
+    return urls
+
+
+def _extract_candidate_paths(prompt: str) -> list[Path]:
+    """Return existing filesystem paths mentioned in *prompt*."""
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+    for match in _PATH_RE.finditer(prompt):
+        raw = match.group(0).strip()
+        if not raw:
+            continue
+        try:
+            expanded = Path(raw).expanduser()
+        except Exception:
+            continue
+        try:
+            resolved = expanded.resolve()
+        except Exception:
+            resolved = expanded
+        if resolved.exists() and resolved not in seen:
+            candidates.append(resolved)
+            seen.add(resolved)
+    return candidates
+
+
+def _looks_like_repo_analysis(prompt: str) -> bool:
+    lowered = prompt.lower()
+    return any(kw in lowered for kw in _REPO_ANALYSIS_KEYWORDS)
+
+
+def _is_url(text: str) -> bool:
+    """Return True if *text* looks like a remote URL rather than a local path."""
+    lowered = text.lower()
+    return lowered.startswith(("http://", "https://", "git@", "git://"))
+
+
+_FOLLOW_UP_PHRASES = {
+    "did you",
+    "have you",
+    "was it",
+    "the findings",
+    "your analysis",
+    "that repo",
+    "the result",
+    "what you said",
+    "what we",
+    "you found",
+    "summarize",
+    "explain",
+    "clarify",
+    "recap",
+    "tell me about",
+    "update the dashboard",
+    "sync the dashboard",
+    "publish the dashboard",
+}
+
+_QUESTION_PREFIXES = {
+    "did you",
+    "have you",
+    "which",
+    "what did",
+    "when did",
+    "where did",
+    "was it",
+    "is it",
+    "are they",
+    "how did",
+}
+
+
+def _looks_like_follow_up(
+    prompt: str,
+    history: list[dict[str, str]],
+    memories: list[str],
+) -> bool:
+    """Return True if the prompt refers to previous work rather than new repo work."""
+    lowered = prompt.lower()
+
+    # Direct question about a past action.
+    if any(lowered.startswith(prefix) for prefix in _QUESTION_PREFIXES):
+        return True
+
+    # Contains follow-up phrasing and does NOT also request new repo exploration.
+    has_follow_up_phrase = any(phrase in lowered for phrase in _FOLLOW_UP_PHRASES)
+    requests_new_repo_work = any(
+        action in lowered for action in _REPO_ANALYSIS_KEYWORDS
+    )
+    if has_follow_up_phrase and not requests_new_repo_work:
+        return True
+
+    # Short, vague prompt with conversation/memory context and no explicit path.
+    if (
+        (len(history) > 2 or memories)
+        and len(prompt.split()) <= 6
+        and not _extract_remote_urls(prompt)
+        and not _extract_candidate_paths(prompt)
+    ):
+        return True
+
+    return False
+
+
+async def _maybe_clarify_repo_path(
+    prompt: str,
+    history: list[dict[str, str]],
+    memory: KuzuMemoryClient | None,
+) -> tuple[str, Path | None]:
+    """Ask the user which repo to analyze when the target is ambiguous.
+
+    Returns (updated_prompt, resolved_path). If no clarification is needed,
+    returns the original prompt and None.
+    """
+    remote_urls = _extract_remote_urls(prompt)
+
+    memories: list[str] = []
+    if memory is not None:
+        try:
+            memories = await memory.recall(prompt)
+        except Exception:
+            pass
+
+    if remote_urls:
+        pass  # proceed to clarification
+    elif _looks_like_follow_up(prompt, history, memories):
+        return prompt, None
+    elif not _looks_like_repo_analysis(prompt):
+        return prompt, None
+
+    candidates = _extract_candidate_paths(prompt)
+    cwd = Path.cwd().resolve()
+
+    # One clear, existing local path that differs from cwd -> use it without asking.
+    if len(candidates) == 1 and candidates[0] != cwd and not remote_urls:
+        path = candidates[0]
+        return (
+            f"{prompt}\n\n[Clarified repo location: analyze the codebase at {path}]",
+            path,
+        )
+
+    import questionary
+
+    default = str(cwd)
+    choices: list[Any] = [
+        questionary.Choice(title=f"Current directory: {default}", value=default),
+    ]
+    for candidate in candidates:
+        if candidate != cwd:
+            choices.append(
+                questionary.Choice(title=str(candidate), value=str(candidate))
+            )
+    if remote_urls:
+        choices.append(
+            questionary.Choice(
+                title=f"Clone remote repo: {remote_urls[0]}",
+                value=f"__clone__:{remote_urls[0]}",
+            )
+        )
+    choices.append(
+        questionary.Choice(title="Clone remote repo...", value="__clone_prompt__")
+    )
+    choices.append(questionary.Choice(title="Other local path...", value="__other__"))
+
+    question = questionary.select(
+        "Which repository should I analyze?",
+        choices=choices,
+    )
+    _add_escape_binding(question)
+    try:
+        selected = await question.application.run_async()
+    except TUICancelled:
+        return prompt, None
+
+    if selected == "__other__":
+        question = questionary.text(
+            "Enter the local repository path:",
+            default=default,
+        )
+        _add_escape_binding(question)
+        try:
+            typed = await question.application.run_async()
+        except TUICancelled:
+            return prompt, None
+        selected = typed.strip() if typed else default
+    elif selected == "__clone_prompt__":
+        question = questionary.text(
+            "Enter the remote repository URL (e.g. https://github.com/user/repo):",
+        )
+        _add_escape_binding(question)
+        try:
+            url = await question.application.run_async()
+        except TUICancelled:
+            return prompt, None
+        url = url.strip() if url else ""
+        if not url:
+            return prompt, None
+        question = questionary.text(
+            f"Local path to clone {url} into:",
+            default=str(cwd / _default_clone_dir(url)),
+        )
+        _add_escape_binding(question)
+        try:
+            typed = await question.application.run_async()
+        except TUICancelled:
+            return prompt, None
+        clone_path = typed.strip() if typed else str(cwd / _default_clone_dir(url))
+        path = Path(clone_path).expanduser().resolve()
+        if not path.exists():
+            print(f"Cloning {url} into {path}...")
+            try:
+                import subprocess
+
+                subprocess.run(
+                    ["git", "clone", url, str(path)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            except Exception as exc:
+                print(f"Failed to clone {url}: {exc}")
+                return prompt, None
+        return (
+            f"{prompt}\n\n[Clarified repo location: analyze the codebase at {path}]",
+            path,
+        )
+    elif selected.startswith("__clone__:"):
+        url = selected.split(":", 2)[1]
+        question = questionary.text(
+            f"Local path to clone {url} into:",
+            default=str(cwd / _default_clone_dir(url)),
+        )
+        _add_escape_binding(question)
+        try:
+            typed = await question.application.run_async()
+        except TUICancelled:
+            return prompt, None
+        clone_path = typed.strip() if typed else str(cwd / _default_clone_dir(url))
+        path = Path(clone_path).expanduser().resolve()
+        if not path.exists():
+            print(f"Cloning {url} into {path}...")
+            try:
+                import subprocess
+
+                subprocess.run(
+                    ["git", "clone", url, str(path)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            except Exception as exc:
+                print(f"Failed to clone {url}: {exc}")
+                return prompt, None
+        return (
+            f"{prompt}\n\n[Clarified repo location: analyze the codebase at {path}]",
+            path,
+        )
+
+    if _is_url(selected):
+        print(
+            "Remote URLs cannot be analyzed directly. "
+            "Choose 'Clone remote repo' or provide a local clone path."
+        )
+        return prompt, None
+
+    path = Path(selected).expanduser().resolve()
+    if not path.exists():
+        print(f"Warning: {path} does not exist. Using current directory.")
+        path = cwd
+
+    if path == cwd:
+        return prompt, None
+
+    return (
+        f"{prompt}\n\n[Clarified repo location: analyze the codebase at {path}]",
+        path,
+    )
+
+
+def _default_clone_dir(url: str) -> str:
+    """Return a default local directory name for cloning *url*."""
+    lowered = url.lower().rstrip("/")
+    if lowered.endswith(".git"):
+        lowered = lowered[:-4]
+    for prefix in ("https://", "http://", "git://"):
+        if lowered.startswith(prefix):
+            lowered = lowered[len(prefix) :]
+    if "@" in lowered:
+        lowered = lowered.split("@", 1)[1]
+    parts = lowered.split("/")
+    name = parts[-1] if parts else "repo"
+    return re.sub(r"[^a-z0-9_-]+", "-", name).strip("-") or "repo"
+
+
 def _resolve_suggested_prompt(
     user_input: str,
-    suggested_prompts: list[tuple[str, str]],
-) -> tuple[str, str | None]:
+    suggested_prompts: list[tuple[str, str, str]],
+) -> tuple[str, str | None, str | None]:
     """If user_input is a number matching a suggested prompt, return its text.
 
-    Returns (resolved_input, selected_title). If the input is not a selection,
-    returns (user_input, None).
+    Returns (resolved_input, selected_title, prompt_id). If the input is not a
+    selection, returns (user_input, None, None).
     """
     if not user_input.isdigit() or not suggested_prompts:
-        return user_input, None
+        return user_input, None, None
     idx = int(user_input) - 1
     if 0 <= idx < len(suggested_prompts):
-        title, selected_prompt = suggested_prompts[idx]
-        return selected_prompt, title
-    return user_input, None
+        prompt_id, title, selected_prompt = suggested_prompts[idx]
+        return selected_prompt, title, prompt_id
+    return user_input, None, None
 
 
-def _format_choice_title(title: str, rendered: str) -> str:
+def _format_choice_title(
+    title: str,
+    rendered: str,
+    run_record: Any | None = None,
+) -> str:
     """Return a TUI choice title that includes the full prompt body.
 
     The body lines are indented to align under the title text after the
-    checkbox/pointer prefix (5 columns).
+    checkbox/pointer prefix (5 columns). If *run_record* is provided, a
+    "Ran" indicator is appended to the title.
     """
+    indicator = format_run_indicator(run_record)
+    display_title = f"{title}{indicator}" if indicator else title
     body = rendered.strip()
     if not body:
-        return title
+        return display_title
     indented = "\n".join(f"     {line}" for line in body.splitlines())
-    return f"{title}\n{indented}"
+    return f"{display_title}\n{indented}"
 
 
 class TUICancelled(Exception):
     """Raised when the user cancels a questionary TUI with Escape."""
+
+
+async def _run_with_interrupt(coro: Any, indicator: ProgressIndicator | None = None) -> Any:
+    """Run *coro* and allow the user to cancel it with two Escape presses.
+
+    On Unix TTYs a background thread listens for raw keystrokes. The first Esc
+    shows a "press again to cancel" hint; a second Esc within one second cancels
+    the task. On non-TTY or Windows platforms the coroutine runs normally.
+    """
+    if sys.platform == "win32" or not sys.stdin.isatty():
+        return await coro
+
+    try:
+        import select
+        import termios
+        import tty
+    except ImportError:
+        return await coro
+
+    task: asyncio.Task[Any] = asyncio.create_task(coro)
+    cancelled_by_user = False
+
+    def _keyboard_listener() -> None:
+        nonlocal cancelled_by_user
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setcbreak(fd)
+            esc_count = 0
+            last_esc = 0.0
+            while not task.done():
+                ready, _, _ = select.select([fd], [], [], 0.2)
+                if not ready:
+                    continue
+                try:
+                    ch = sys.stdin.read(1)
+                except Exception:
+                    continue
+                if not ch:
+                    continue
+                if ch == "\x1b":
+                    now = time.monotonic()
+                    if now - last_esc > 1.0:
+                        esc_count = 1
+                    else:
+                        esc_count += 1
+                    last_esc = now
+                    if esc_count == 1:
+                        print(
+                            "\n→ Press Esc again within 1 second to cancel",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                    elif esc_count >= 2:
+                        cancelled_by_user = True
+                        task.cancel()
+                        break
+                else:
+                    esc_count = 0
+        finally:
+            try:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+            except Exception:
+                pass
+
+    listener = asyncio.create_task(asyncio.to_thread(_keyboard_listener))
+    try:
+        return await task
+    except asyncio.CancelledError:
+        if cancelled_by_user:
+            raise TUICancelled("Execution cancelled")
+        raise
+    finally:
+        listener.cancel()
+        try:
+            await listener
+        except asyncio.CancelledError:
+            pass
 
 
 def _add_escape_binding(question: Any) -> None:
@@ -504,22 +957,31 @@ def _add_escape_binding(question: Any) -> None:
 
 
 async def _select_prompts_tui(
-    suggested_prompts: list[tuple[str, str]],
-) -> list[tuple[str, str]]:
+    suggested_prompts: list[tuple[str, str, str]],
+    *,
+    run_history: Any | None = None,
+    epic_id: str | None = None,
+    milestone_id: str | None = None,
+) -> list[tuple[str, str, str]]:
     """Show a checkbox TUI to select one or more suggested prompts.
 
-    Returns the list of selected (title, prompt) tuples. Raises
+    Returns the list of selected (prompt_id, title, rendered) tuples. Raises
     :class:`TUICancelled` if the user presses Escape.
     """
     import questionary
 
-    choices = [
-        questionary.Choice(
-            title=_format_choice_title(title, rendered),
-            value=(title, rendered),
+    run_history = run_history or None
+    choices = []
+    for prompt_id, title, rendered in suggested_prompts:
+        record = None
+        if run_history is not None and epic_id and milestone_id:
+            record = run_history.get(epic_id, milestone_id, prompt_id)
+        choices.append(
+            questionary.Choice(
+                title=_format_choice_title(title, rendered, run_record=record),
+                value=(prompt_id, title, rendered),
+            )
         )
-        for title, rendered in suggested_prompts
-    ]
     question = questionary.checkbox(
         "Select prompts (Space to check, Enter to confirm, Esc to cancel):",
         choices=choices,
@@ -768,8 +1230,13 @@ async def run_interactive(args: Any) -> int:
         print("\n" + milestone_msg)
 
     while True:
+        pending_prompt_id: str | None = None
+        pending_edited = False
+        selected_title: str | None = None
         if state.pending_prompts:
-            user_input = state.pending_prompts.pop(0)
+            pending_prompt_id, user_input, pending_edited, selected_title = (
+                state.pending_prompts.pop(0)
+            )
             print(f"> {user_input}")
         else:
             try:
@@ -783,7 +1250,7 @@ async def run_interactive(args: Any) -> int:
         if not user_input:
             continue
 
-        resolved_input, selected_title = _resolve_suggested_prompt(
+        resolved_input, selected_title, selected_prompt_id = _resolve_suggested_prompt(
             user_input, state.suggested_prompts
         )
         if selected_title is not None:
@@ -803,12 +1270,14 @@ async def run_interactive(args: Any) -> int:
             if action == "edit":
                 try:
                     resolved_input = await _edit_prompt_tui(resolved_input)
+                    pending_edited = True
                 except TUICancelled:
                     state.suggested_prompts = []
                     state.pending_prompts = []
                     print("Cancelled.")
                     continue
             user_input = resolved_input.strip()
+            pending_prompt_id = selected_prompt_id
             # Clear suggestions so a later bare number is not misinterpreted.
             state.suggested_prompts = []
             if not user_input:
@@ -824,6 +1293,13 @@ async def run_interactive(args: Any) -> int:
             continue
 
         state.turn += 1
+
+        # Ask for repo location when an analysis task's target is ambiguous.
+        clarified_prompt, _ = await _maybe_clarify_repo_path(
+            user_input, state.history, memory
+        )
+        user_input = clarified_prompt
+
         profile = _build_task_profile(user_input, state, args)
         prompt = _assemble_prompt(user_input, state.history)
 
@@ -903,11 +1379,11 @@ async def run_interactive(args: Any) -> int:
         indicator.set_message("Thinking")
         if not args.monitor:
             indicator.start()
-        try:
+        async def _execute_turn() -> Any:
             if args.monitor:
                 async with Monitor(event_bus) as monitor:
                     monitor.state.turn = state.turn
-                    result = await pm.handle(
+                    return await pm.handle(
                         prompt,
                         agent_id=state.agent_id,
                         task_profile=profile,
@@ -924,24 +1400,29 @@ async def run_interactive(args: Any) -> int:
                         chain=state.chain,
                         runtime_config=runtime_config,
                     )
-            else:
-                result = await pm.handle(
-                    prompt,
-                    agent_id=state.agent_id,
-                    task_profile=profile,
-                    model=turn_model,
-                    allowed_tools=args.allowed_tools,
-                    blocked_tools=args.block_tools,
-                    permission_mode=args.permission_mode,
-                    deny_dangerous=args.deny_dangerous,
-                    max_turns=args.max_turns,
-                    mcp_servers=mcp_config,
-                    session_id=state.session_id,
-                    resume=state.session_id is not None,
-                    dry_run=dry_run,
-                    chain=state.chain,
-                    runtime_config=runtime_config,
-                )
+            return await pm.handle(
+                prompt,
+                agent_id=state.agent_id,
+                task_profile=profile,
+                model=turn_model,
+                allowed_tools=args.allowed_tools,
+                blocked_tools=args.block_tools,
+                permission_mode=args.permission_mode,
+                deny_dangerous=args.deny_dangerous,
+                max_turns=args.max_turns,
+                mcp_servers=mcp_config,
+                session_id=state.session_id,
+                resume=state.session_id is not None,
+                dry_run=dry_run,
+                chain=state.chain,
+                runtime_config=runtime_config,
+            )
+
+        try:
+            result = await _run_with_interrupt(_execute_turn(), indicator=indicator)
+        except TUICancelled:
+            print("Cancelled by user.")
+            continue
         except Exception as exc:
             logger.exception("Task handling failed")
             print(f"Error: {exc}", file=sys.stderr)
@@ -958,6 +1439,25 @@ async def run_interactive(args: Any) -> int:
         if not dry_run and result.session_id:
             state.session_id = result.session_id
             print(f"[session: {state.session_id}]")
+
+        # Record that a suggested playbook prompt was executed.
+        if (
+            not dry_run
+            and pending_prompt_id
+            and state.current_epic_id
+            and state.current_milestone_id
+        ):
+            try:
+                history_store = PromptHistoryStore(Path.cwd())
+                history_store.record(
+                    epic_id=state.current_epic_id,
+                    milestone_id=state.current_milestone_id,
+                    prompt_id=pending_prompt_id,
+                    prompt_title=selected_title or pending_prompt_id,
+                    edited=pending_edited,
+                )
+            except Exception as exc:
+                logger.debug("Failed to record prompt run history: %s", exc)
 
         state.history.append({"role": "user", "content": user_input})
         state.history.append({"role": "assistant", "content": result.text})
