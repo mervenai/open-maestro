@@ -5,6 +5,22 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.9] - 2026-08-31
+
+### Added
+- Auto-populate work epics when **Intake & Discovery** is marked complete.
+  - Triggered automatically by `/complete`, `/track`, and after a playbook prompt
+    advances a milestone.
+  - Parses `docs/intake/epics.md` (table or heading style) to extract epic
+    names and numbers.
+  - Creates each work epic with the standard 8 lifecycle milestones, all
+    `not_started`.
+  - Writes a local `dashboard.html` immediately after the epics are created.
+
+### Changed
+- `MilestoneStore.update()` now runs the auto-population hook before recomputing
+  the plan summary and saving.
+
 ## [1.8.8] - 2026-08-30
 
 ### Changed

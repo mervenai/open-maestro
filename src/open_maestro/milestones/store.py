@@ -129,9 +129,18 @@ class MilestoneStore:
             raise RuntimeError(f"Failed to save milestone plan to {self.file_path}: {exc}") from exc
 
     def update(self, plan: MilestonePlan) -> None:
-        """Recompute summary and save."""
+        """Recompute summary, auto-populate work epics if ready, and save."""
+        from open_maestro.milestones.auto_populate import (
+            maybe_export_dashboard,
+            maybe_populate_work_epics,
+        )
+
+        added, _ = maybe_populate_work_epics(plan, self.project_path)
         plan._recompute_summary()  # noqa: SLF001
         self.save(plan)
+
+        if added:
+            maybe_export_dashboard(plan, self.project_path)
 
     def export_dashboard(self, plan: MilestonePlan) -> dict[str, Any]:
         """Return a client-safe dashboard projection."""
