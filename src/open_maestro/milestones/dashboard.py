@@ -371,15 +371,26 @@ def export_dashboard_html(plan: MilestonePlan) -> str:
 
 
 def _derive_epic_status(epic: Epic) -> str:
-    """Map an epic's process milestones to one of Not-Started/In-Progress/Complete."""
-    statuses = [m.status for m in epic.milestones]
-    if not statuses:
+    """Map an epic's process milestones to one of Not-Started/In-Progress/Complete.
+
+    The 8 lifecycle milestones are rolled up to 3 high-level statuses:
+      - Milestones 1-4 (Intake through Build Planning) = Not Started
+      - Milestones 5-7 (Implementation through Demo & Delivery) = In Progress
+      - Milestone 8 (Retrospective & Findings) = Complete
+    """
+    active = [
+        m for m in epic.milestones
+        if m.status not in (MilestoneStatus.NOT_STARTED, MilestoneStatus.SKIPPED)
+    ]
+    if not active:
         return "not_started"
-    if all(s == MilestoneStatus.COMPLETED for s in statuses):
+
+    max_order = max(m.order for m in active)
+    if max_order >= 8:
         return "completed"
-    if all(s == MilestoneStatus.NOT_STARTED for s in statuses):
-        return "not_started"
-    return "in_progress"
+    if max_order >= 5:
+        return "in_progress"
+    return "not_started"
 
 
 def _process_track_from_epic(epic: Epic) -> dict[str, Any]:

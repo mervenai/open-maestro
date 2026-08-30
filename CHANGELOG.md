@@ -5,6 +5,17 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-08-31
+
+### Changed
+- Work-epic status in the dashboard is now derived from the **highest active
+  milestone order** instead of overall completion:
+  - Milestones 1–4 (Intake through Build Planning) → **Not Started**
+  - Milestones 5–7 (Implementation through Demo & Delivery) → **In Progress**
+  - Milestone 8 (Retrospective & Findings) → **Complete**
+- The Project Process track still displays all 8 lifecycle milestones; only the
+  per-epic status tracker uses the 3-level rollup.
+
 ## [1.8.9] - 2026-08-31
 
 ### Added
