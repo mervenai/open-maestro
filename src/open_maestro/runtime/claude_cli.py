@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -20,6 +21,68 @@ from open_maestro.runtime.base import AgentConfig, AgentResult, AgentRuntime
 from open_maestro.runtime.stream_printer import create_printer
 
 logger = logging.getLogger(__name__)
+
+# Tool names accepted by the ``claude`` CLI for --allowedTools/--disallowedTools.
+# Other vendor-specific names (e.g. Kimi's ApplyPatch) are filtered out and
+# enforced via system-prompt guardrails instead.
+_KNOWN_CLAUDE_TOOLS: set[str] = {
+    # Editing tools.  We deliberately omit ``MultiEdit`` because some Claude
+    # CLI builds do not expose it and warn when it appears in
+    # ``--disallowedTools``.  Blocking ``Edit`` is sufficient to prevent
+    # multi-file edits on those builds, and the system-prompt guard still
+    # forbids ``MultiEdit`` by name.
+    "Bash",
+    "Glob",
+    "Grep",
+    "LS",
+    "Read",
+    "Edit",
+    "Write",
+    "NotebookRead",
+    "NotebookEdit",
+    "WebFetch",
+    "TodoRead",
+    "TodoWrite",
+    "WebSearch",
+    "Agent",
+    "CreateTerminal",
+    "WriteFile",
+    "exit_plan_mode",
+}
+
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+)
+
+
+def _normalize_claude_session_id(session_id: str | None) -> str | None:
+    """Return a bare UUID/session title suitable for ``claude --resume``.
+
+    Claude's ``--resume`` flag expects a UUID or a session title.  Some
+    runtimes/versions return IDs prefixed with ``session_``; strip that prefix
+    when the remainder is a UUID so the CLI can validate it.
+    """
+    if not session_id:
+        return session_id
+    if session_id.startswith("session_") and _UUID_RE.match(session_id[8:]):
+        return session_id[8:]
+    return session_id
+
+
+def _filter_claude_tool_names(tool_names: set[str] | None) -> set[str]:
+    """Return only the tool names that the Claude CLI recognizes."""
+    if not tool_names:
+        return set()
+    valid = set()
+    for name in tool_names:
+        if name in _KNOWN_CLAUDE_TOOLS:
+            valid.add(name)
+        else:
+            logger.debug(
+                "Skipping blocked tool %r for claude-cli; will rely on system prompt guard",
+                name,
+            )
+    return valid
 
 
 class ClaudeCLIRuntime(AgentRuntime):
@@ -98,7 +161,7 @@ class ClaudeCLIRuntime(AgentRuntime):
             args.extend(["--max-turns", str(max_turns)])
 
         if resume_session:
-            args.extend(["--resume", resume_session])
+            args.extend(["--resume", _normalize_claude_session_id(resume_session)])
             if fork:
                 args.append("--fork-session")
 
@@ -116,11 +179,16 @@ class ClaudeCLIRuntime(AgentRuntime):
 
         if config is not None:
             if config.allowed_tools:
-                args.extend(["--allowedTools", ",".join(config.allowed_tools)])
+                args.extend(
+                    ["--allowedTools", ",".join(_filter_claude_tool_names(set(config.allowed_tools)))]
+                )
 
             if config.blocked_tools:
                 args.extend(
-                    ["--disallowedTools", ",".join(sorted(config.blocked_tools))]
+                    [
+                        "--disallowedTools",
+                        ",".join(sorted(_filter_claude_tool_names(set(config.blocked_tools)))),
+                    ]
                 )
 
             if config.permission_mode:
@@ -401,7 +469,11 @@ class ClaudeCLIRuntime(AgentRuntime):
         prompt: str,
         config: AgentConfig | None = None,
     ) -> AgentResult:
-        return await self._invoke(prompt, resume_session=session_id, config=config)
+        return await self._invoke(
+            prompt,
+            resume_session=_normalize_claude_session_id(session_id),
+            config=config,
+        )
 
     async def fork(
         self,
@@ -410,7 +482,10 @@ class ClaudeCLIRuntime(AgentRuntime):
         config: AgentConfig | None = None,
     ) -> AgentResult:
         return await self._invoke(
-            prompt, resume_session=session_id, fork=True, config=config
+            prompt,
+            resume_session=_normalize_claude_session_id(session_id),
+            fork=True,
+            config=config,
         )
 
     def _merge_config(

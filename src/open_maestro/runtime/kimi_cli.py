@@ -33,6 +33,32 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _session_not_found(text: str) -> bool:
+    """Return True if *text* indicates the requested Kimi session does not exist."""
+    lowered = text.lower()
+    return (
+        'session' in lowered
+        and 'not found' in lowered
+    )
+
+
+def _normalize_kimi_session_id(session_id: str) -> str:
+    """Return a session ID in the form Kimi's ``-r`` flag expects.
+
+    Kimi prints the resume hint as ``kimi -r session_<uuid>``, so we ensure the
+    ``session_`` prefix is present even if Maestro stored a bare UUID.
+    """
+    session_id = session_id.strip()
+    if session_id.startswith("session_"):
+        return session_id
+    return f"session_{session_id}"
+
+
+# Set to True after the first resume failure so we stop warning the user on
+# every subsequent turn.  Kimi CLI prompt-mode sessions appear to be ephemeral.
+_RESUME_BROKEN: bool = False
+
+
 class _TerminalAttrs:
     """Save and restore Unix terminal attributes around a subprocess.
 
@@ -130,7 +156,9 @@ class KimiCLIRuntime(AgentRuntime):
         args: list[str] = ["kimi"]
 
         if resume_session:
-            args.extend(["-r", resume_session])
+            # Kimi's `kimi -r` expects the full `session_<uuid>` form; bare UUIDs
+            # are reported as "Session ... not found".
+            args.extend(["-r", _normalize_kimi_session_id(resume_session)])
 
         args.extend(["-p", prompt])
 
@@ -424,7 +452,28 @@ class KimiCLIRuntime(AgentRuntime):
         prompt: str,
         config: AgentConfig | None = None,
     ) -> AgentResult:
-        return await self._invoke(prompt, resume_session=session_id, config=config)
+        global _RESUME_BROKEN
+        if _RESUME_BROKEN:
+            logger.debug(
+                "Kimi CLI resume is disabled after a prior failure; "
+                "starting a fresh session."
+            )
+            return await self._invoke(prompt, config=config)
+
+        result = await self._invoke(
+            prompt,
+            resume_session=_normalize_kimi_session_id(session_id),
+            config=config,
+        )
+        if result.is_error and _session_not_found(result.text):
+            _RESUME_BROKEN = True
+            logger.warning(
+                "Kimi session '%s' could not be resumed; starting a fresh session. "
+                "Future turns will use fresh sessions automatically.",
+                session_id,
+            )
+            return await self._invoke(prompt, config=config)
+        return result
 
     def _merge_config(
         self,

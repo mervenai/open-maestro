@@ -66,13 +66,6 @@ class InteractiveProgressHandler:
             runtime = payload.get("runtime")
             return f"→ Delegating to '{agent_id}' via {runtime}"
 
-        if event_type == "runtime.working":
-            duration_ms = payload.get("duration_ms")
-            if duration_ms is not None:
-                seconds = int(duration_ms / 1000)
-                return f"→ Still working... ({seconds}s elapsed)"
-            return "→ Still working..."
-
         if event_type == "tool.call":
             tool_name = payload.get("tool_name", "tool")
             tool_input = payload.get("tool_input") or {}

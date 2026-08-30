@@ -171,6 +171,84 @@ class PromptHistoryStore:
         self.save(history)
         return record
 
+    def backfill_from_artifacts(self) -> int:
+        """Create history records for prompts whose artifact files already exist.
+
+        This lets ``/next`` show ``[Ran]`` for prompts that were executed before
+        the run-history feature existed, or when the record was lost.  The
+        artifact's modification time is used as the run timestamp.
+
+        Returns the number of records added.
+        """
+        # Lazy imports avoid circular dependencies during package init.
+        from open_maestro.milestones.models import MilestoneStatus
+        from open_maestro.milestones.playbook import get_prompts_for_milestone
+        from open_maestro.milestones.store import MilestoneStore
+
+        history = self.load()
+        added = 0
+        try:
+            store = MilestoneStore(self.project_path)
+            if not store.exists():
+                return 0
+            plan = store.load()
+        except Exception:
+            return 0
+
+        for epic in plan.epics:
+            for milestone in epic.milestones:
+                if milestone.status not in (
+                    MilestoneStatus.IN_PROGRESS,
+                    MilestoneStatus.COMPLETED,
+                ):
+                    continue
+                try:
+                    prompt_pairs = get_prompts_for_milestone(
+                        self.project_path,
+                        milestone.id,
+                        plan=plan,
+                        epic_id=epic.id,
+                    )
+                except Exception:
+                    continue
+                for template, _rendered in prompt_pairs:
+                    if not template.artifact_target:
+                        continue
+                    target = self._resolve_artifact_glob(
+                        template.artifact_target, epic.id, epic.name
+                    )
+                    matches = list(self.project_path.glob(target))
+                    if not matches:
+                        matches = list(self.project_path.rglob(target.lstrip("/")))
+                    if matches:
+                        mtime = max(m.stat().st_mtime for m in matches)
+                        run_at = datetime.fromtimestamp(mtime)
+                        key = PromptRunHistory._key(epic.id, milestone.id, template.id)
+                        if key not in history.runs:
+                            history.runs[key] = PromptRunRecord(
+                                epic_id=epic.id,
+                                milestone_id=milestone.id,
+                                prompt_id=template.id,
+                                prompt_title=template.title,
+                                last_run_at=run_at,
+                                run_count=1,
+                                edited=False,
+                            )
+                            added += 1
+        if added:
+            self.save(history)
+        return added
+
+    @staticmethod
+    def _resolve_artifact_glob(target: str, epic_id: str, epic_name: str) -> str:
+        """Turn an artifact target with placeholders into a glob pattern."""
+        # Replace known placeholders with wildcards so existing files are found
+        # regardless of when they were created.
+        result = target.replace("{date}", "*")
+        result = result.replace("{epic_id}", epic_id or "*")
+        result = result.replace("{epic_name}", "*")
+        return result
+
 
 def format_run_indicator(record: PromptRunRecord | None) -> str:
     """Return a short human-readable 'Ran' label for a prompt."""

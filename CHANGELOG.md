@@ -5,6 +5,130 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.8] - 2026-08-30
+
+### Changed
+- Dashboard layout simplified per client feedback:
+  - Removed the separate "Project Process" global section.
+  - The first epic (formerly "Default Track") is now rendered as **Project Process**
+    and displays all 8 lifecycle milestones in two rows.
+  - Work epics below Project Process display only a 3-step status tracker
+    (Not Started → In Progress → Complete) without repeating the 8 milestones.
+- HTML and Markdown exporters updated to consume the new `process_track` + `epics`
+  data shape.
+
+### Removed
+- Deprecated dashboard helpers `_derive_global_milestones`,
+  `_epic_process_milestones`, `_global_section`, `_status_sentence`, and
+  `_PROCESS_MILESTONE_NAMES` are no longer used.
+
+## [1.8.7] - 2026-08-29
+
+### Changed
+- Dashboard rendering now separates **project-wide process milestones** (orders 1,
+  2, and 8: Intake & Discovery, Execution Planning, Retrospective & Findings)
+  from **per-epic process milestones** (orders 3-7).
+- Each epic displays a 3-step status tracker (Not Started → In Progress →
+  Complete) derived from its process milestones.
+- Dashboard exporters (HTML, JSON, Markdown) use milestone **order** instead of
+  hardcoded IDs, making them resilient to legacy or renamed milestone schemas.
+
+### Migrated
+- `M3PMS2Daily/.open-maestro/milestones.yaml`: renamed legacy milestone IDs
+  (`p1`, `p3`, `p4`, etc.) in non-default epics to the standard 8 process
+  milestone IDs. A backup was saved before the change.
+
+## [1.8.6] - 2026-08-29
+
+### Fixed
+- `kimi-cli` resume now uses the full `session_<uuid>` form Kimi expects.
+- After the first Kimi resume failure in a process, Maestro stops trying to
+  resume and silently starts fresh sessions. This removes the repeated warning
+  spam while preserving the conversation history that Maestro already injects
+  into each prompt.
+
+## [1.8.5] - 2026-08-29
+
+### Fixed
+- `kimi-cli` runtime now falls back to a fresh session when resuming fails with
+  "Session ... not found" instead of erroring out the turn. This makes
+  long-running interactive sessions resilient to Kimi session expiration or
+  stale session IDs.
+
+## [1.8.4] - 2026-08-29
+
+### Fixed
+- `/next` now backfills prompt run history from existing artifact files. Prompts
+  whose output files already exist (e.g. `docs/execution-plan-*.md`) show a
+  `[Ran]` indicator even if they were executed before run-history recording was
+  added or the record was lost.
+- Recording failures for playbook prompt runs are now logged at warning level
+  instead of silently swallowed at debug level.
+
+## [1.8.3] - 2026-08-29
+
+### Added
+- Canned `/next` playbook prompts now auto-advance their milestone from
+  `not_started` to `in_progress` when run, and print the milestone(s) updated.
+- The interactive banner now shows the last dashboard publish timestamp and URL
+  (read from `.open-maestro/dashboard_publish_history.yaml`).
+
+## [1.8.2] - 2026-08-29
+
+### Changed
+- Removed the "Still working... (Ns elapsed)" heartbeat lines from the
+  interactive progress UI. The spinner still indicates active work; the event is
+  still available to `--monitor`.
+
+## [1.8.1] - 2026-08-29
+
+### Changed
+- `maestro --export-dashboard` now prints a confirmation to stderr so users who
+  redirect stdout to a file (e.g. `> dashboard.html`) see feedback in the
+  terminal.
+
+## [1.8.0] - 2026-08-29
+
+### Added
+- Standalone dashboard receiver (`maestro --serve-remote-dashboard`) that
+  accepts published dashboard snapshots and serves HTML/JSON/Markdown without
+  depending on the Merven project.
+  - Snapshots are stored as JSON files in `--dashboard-data-dir` (default
+    `.open-maestro/dashboards`), keyed by project token.
+  - Supports the same publish payload and `Authorization: Bearer <key>` auth as
+    the legacy Merven receiver.
+  - View endpoints:
+    - `GET /maestro/dashboard/<token>` — JSON
+    - `GET /maestro/dashboard/<token>/html` — HTML
+    - `GET /maestro/dashboard/<token>/md` — Markdown
+
+## [1.7.0] - 2026-08-29
+
+### Added
+- Project todo list (`/todo` interactive commands).
+  - `todos.json` stored under `.open-maestro/` in the project directory.
+  - Commands: `/todo add`, `/todo list`, `/todo done`, `/todo block`,
+    `/todo delete`, `/todo clear`.
+  - Open todos are automatically injected into each agent's system prompt so
+    specialists know what work is already in flight.
+
+## [1.6.7] - 2026-08-29
+
+### Fixed
+- Cross-runtime session resume: interactive mode now tracks which runtime
+  created the current session and only resumes when the selected runtime
+  matches, preventing Kimi from trying to resume a Claude session.
+- Claude CLI blocked-tool filtering now drops tool names the `claude` CLI does
+  not recognize (e.g. `ApplyPatch`) and enforces them via system-prompt
+  guardrails instead.
+- Session IDs with a `session_` prefix are normalized to bare UUIDs before
+  being passed to `claude --resume`.
+- Repo-location clarification no longer triggers for project-management
+  follow-ups about milestones, epics, backlogs, or sprints unless an explicit
+  path or URL is provided.
+- Playbook prompts queued by `/next` no longer trigger the repo-location
+  clarification; they are already scoped to the current project.
+
 ## [1.6.5] - 2026-08-23
 
 ### Fixed

@@ -34,10 +34,12 @@ from open_maestro.events.stream import StreamingHandler
 from open_maestro.mcp.config import load_mcp_config
 from open_maestro.memory.kuzu_client import KuzuMemoryClient
 from open_maestro.milestones import (
+    DashboardPublishHistoryStore,
     MilestoneDetector,
     MilestoneStatus,
     MilestoneStore,
     PromptHistoryStore,
+    advance_milestone_on_prompt,
     format_run_indicator,
     get_current_or_next_milestone_prompts,
     get_prompts_for_milestone,
@@ -56,6 +58,7 @@ from open_maestro.search.vector_client import VectorSearchClient
 from open_maestro.session.store import SessionStore
 from open_maestro.sources.config import SourceRegistry
 from open_maestro.sources.sync import sync_source
+from open_maestro.todos.commands import handle_todo_command
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +102,9 @@ class InteractiveState:
 
     history: list[dict[str, str]] = field(default_factory=list)
     session_id: str | None = None
+    # Runtime that produced session_id (e.g. "kimi-cli", "claude-cli").
+    # Used to avoid resuming a session on a different backend.
+    session_runtime: str | None = None
     agent_id: str | None = None
     model: str | None = None
     show_plan_next: bool = False
@@ -118,11 +124,16 @@ class InteractiveState:
     current_milestone_id: str | None = None
 
 
-def _banner(session_id: str | None = None) -> str:
+def _banner(
+    session_id: str | None = None,
+    publish_line: str | None = None,
+) -> str:
     session_line = f"[session: {session_id}]\n" if session_id else ""
+    publish_section = f"{publish_line}\n" if publish_line else ""
     return (
         "Open Maestro interactive mode\n"
         + session_line
+        + publish_section
         + "Type a task and press Enter. Commands:\n"
         "  /agent <id>       pin an agent for the next turn(s)\n"
         "  /model <model>    override the model for the next turn(s)\n"
@@ -137,6 +148,7 @@ def _banner(session_id: str | None = None) -> str:
         "  /track <id> <status>    update a milestone status inside an epic\n"
         "  /remember <text>  store a key decision or finding to project memory\n"
         "  /memory <query>   recall relevant memories from project memory\n"
+        "  /todo ...         manage project todos (add/list/done/block/delete/clear)\n"
         "  /reasoning        toggle reasoning preference\n"
         "  /fast             toggle fast/cheap preference\n"
         "  /chain            toggle multi-agent chain mode (default: on)\n"
@@ -365,6 +377,7 @@ async def _handle_command(
         if not state.suggested_prompts:
             return "No suggested prompts for this milestone."
         history_store = PromptHistoryStore(Path.cwd())
+        history_store.backfill_from_artifacts()
         run_history = history_store.load()
         try:
             selected = await _select_prompts_tui(
@@ -427,6 +440,7 @@ async def _handle_command(
             return "No suggested prompts to select. Run /next or /prompts first."
         # Run questionary asynchronously so it does not start a nested event loop.
         history_store = PromptHistoryStore(Path.cwd())
+        history_store.backfill_from_artifacts()
         run_history = history_store.load()
         try:
             selected = await _select_prompts_tui(
@@ -479,6 +493,9 @@ async def _handle_command(
     if cmd == "track":
         return handle_track_command(Path.cwd(), args)
 
+    if cmd == "todo":
+        return handle_todo_command(Path.cwd(), args)
+
     return f"Unknown command '/{cmd}'. Type /help for available commands."
 
 
@@ -498,7 +515,17 @@ _REPO_ANALYSIS_KEYWORDS = {
     "explore",
     "understand",
     "study",
-    "evaluate",
+}
+
+# Phrases that indicate project-management follow-ups rather than repo analysis.
+_PROJECT_MANAGEMENT_PHRASES = {
+    "milestone",
+    "milestones",
+    "epic",
+    "epics",
+    "backlog",
+    "sprint",
+    "sprints",
 }
 
 _PATH_RE = re.compile(
@@ -644,6 +671,7 @@ async def _maybe_clarify_repo_path(
     prompt: str,
     history: list[dict[str, str]],
     memory: KuzuMemoryClient | None,
+    from_playbook: bool = False,
 ) -> tuple[str, Path | None]:
     """Ask the user which repo to analyze when the target is ambiguous.
 
@@ -665,8 +693,23 @@ async def _maybe_clarify_repo_path(
         return prompt, None
     elif not _looks_like_repo_analysis(prompt):
         return prompt, None
+    elif from_playbook and not remote_urls:
+        # Playbook prompts are scoped to the current project; only ask if the
+        # prompt itself points somewhere else explicitly.
+        return prompt, None
 
     candidates = _extract_candidate_paths(prompt)
+
+    # Project-management prompts (milestones, epics, backlogs) refer to the
+    # current project context, not a codebase to analyze, unless they include
+    # an explicit path or URL.
+    if (
+        not remote_urls
+        and not candidates
+        and any(p in prompt.lower() for p in _PROJECT_MANAGEMENT_PHRASES)
+    ):
+        return prompt, None
+
     cwd = Path.cwd().resolve()
 
     # One clear, existing local path that differs from cwd -> use it without asking.
@@ -1239,7 +1282,8 @@ async def run_interactive(args: Any) -> int:
         chain=getattr(args, "chain", True),
     )
 
-    print(_banner(session_id=state.session_id))
+    publish_line = DashboardPublishHistoryStore(Path.cwd()).format_last()
+    print(_banner(session_id=state.session_id, publish_line=publish_line))
 
     milestone_msg = await _discover_milestones_interactive(Path.cwd())
     if milestone_msg:
@@ -1249,6 +1293,7 @@ async def run_interactive(args: Any) -> int:
         pending_prompt_id: str | None = None
         pending_edited = False
         selected_title: str | None = None
+        from_playbook = bool(state.pending_prompts)
         if state.pending_prompts:
             pending_prompt_id, user_input, pending_edited, selected_title = (
                 state.pending_prompts.pop(0)
@@ -1311,8 +1356,11 @@ async def run_interactive(args: Any) -> int:
         state.turn += 1
 
         # Ask for repo location when an analysis task's target is ambiguous.
+        # Playbook prompts queued by /next are already scoped to the current
+        # project, so skip the clarification unless they contain an explicit URL
+        # or filesystem path.
         clarified_prompt, _ = await _maybe_clarify_repo_path(
-            user_input, state.history, memory
+            user_input, state.history, memory, from_playbook=from_playbook
         )
         user_input = clarified_prompt
 
@@ -1395,6 +1443,11 @@ async def run_interactive(args: Any) -> int:
         indicator.set_message("Thinking")
         if not args.monitor:
             indicator.start()
+
+        # Only resume a session if the selected runtime is the one that created it.
+        can_resume = state.session_runtime == turn_runtime
+        effective_session_id = state.session_id if can_resume else None
+
         async def _execute_turn() -> Any:
             if args.monitor:
                 async with Monitor(event_bus) as monitor:
@@ -1410,8 +1463,8 @@ async def run_interactive(args: Any) -> int:
                         deny_dangerous=args.deny_dangerous,
                         max_turns=args.max_turns,
                         mcp_servers=mcp_config,
-                        session_id=state.session_id,
-                        resume=state.session_id is not None,
+                        session_id=effective_session_id,
+                        resume=effective_session_id is not None,
                         dry_run=dry_run,
                         chain=state.chain,
                         runtime_config=runtime_config,
@@ -1427,8 +1480,8 @@ async def run_interactive(args: Any) -> int:
                 deny_dangerous=args.deny_dangerous,
                 max_turns=args.max_turns,
                 mcp_servers=mcp_config,
-                session_id=state.session_id,
-                resume=state.session_id is not None,
+                session_id=effective_session_id,
+                resume=effective_session_id is not None,
                 dry_run=dry_run,
                 chain=state.chain,
                 runtime_config=runtime_config,
@@ -1453,10 +1506,21 @@ async def run_interactive(args: Any) -> int:
         print(f"{result.text}\n")
 
         if not dry_run and result.session_id:
-            state.session_id = result.session_id
+            sid = result.session_id
+            if sid.startswith("session_"):
+                maybe_uuid = sid[8:]
+                if re.match(
+                    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                    maybe_uuid,
+                    re.IGNORECASE,
+                ):
+                    sid = maybe_uuid
+            state.session_id = sid
+            state.session_runtime = turn_runtime
             print(f"[session: {state.session_id}]")
 
-        # Record that a suggested playbook prompt was executed.
+        # Record that a suggested playbook prompt was executed and advance the
+        # milestone status if appropriate.
         if (
             not dry_run
             and pending_prompt_id
@@ -1473,7 +1537,18 @@ async def run_interactive(args: Any) -> int:
                     edited=pending_edited,
                 )
             except Exception as exc:
-                logger.debug("Failed to record prompt run history: %s", exc)
+                logger.warning("Failed to record prompt run history: %s", exc)
+
+            try:
+                update_msg = advance_milestone_on_prompt(
+                    Path.cwd(),
+                    state.current_epic_id,
+                    state.current_milestone_id,
+                )
+                if update_msg:
+                    print(update_msg)
+            except Exception as exc:
+                logger.debug("Failed to advance milestone status: %s", exc)
 
         state.history.append({"role": "user", "content": user_input})
         state.history.append({"role": "assistant", "content": result.text})

@@ -32,6 +32,7 @@ from open_maestro.runtime.base import AgentConfig, AgentResult, AgentRuntime
 from open_maestro.runtime.latency import record_result
 from open_maestro.security.policy import PermissionPolicy, evaluate
 from open_maestro.session.store import SessionRecord, SessionStore
+from open_maestro.todos.store import TodoStore
 
 if TYPE_CHECKING:
     from open_maestro.memory.kuzu_client import KuzuMemoryClient
@@ -601,6 +602,18 @@ class ProjectManager:
             **agent_config,
             task_profile=profile,
         )
+
+        # Inject any open project todos into the agent's system prompt so the
+        # specialist knows what work is already in flight.
+        try:
+            todo_text = TodoStore(Path.cwd()).format_open()
+        except Exception:
+            todo_text = ""
+        if todo_text:
+            new_system_prompt = (
+                f"{config.system_prompt or ''}\n\n{todo_text}".strip()
+            )
+            config = replace(config, system_prompt=new_system_prompt)
 
         policy = PermissionPolicy(
             mode=permission_mode or "allow",

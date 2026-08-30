@@ -279,6 +279,42 @@ def handle_prompts_command(project_path: Path, args: list[str]) -> str:
     return "\n".join(lines)
 
 
+def advance_milestone_on_prompt(
+    project_path: Path,
+    epic_id: str,
+    milestone_id: str,
+) -> str | None:
+    """Advance a milestone to in_progress after one of its prompts ran.
+
+    Returns a human-readable message if the milestone was updated, or None if
+    no change was needed.
+    """
+    store = MilestoneStore(project_path)
+    plan = store.load()
+    milestone = plan.get_milestone(epic_id, milestone_id)
+    if milestone is None:
+        return None
+
+    if milestone.status == MilestoneStatus.COMPLETED:
+        return None
+    if milestone.status == MilestoneStatus.IN_PROGRESS:
+        return None
+
+    milestone.status = MilestoneStatus.IN_PROGRESS
+    if milestone.started_at is None:
+        milestone.started_at = date.today()
+
+    epic = plan.get_epic(epic_id)
+    if epic is not None and epic.status not in (
+        MilestoneStatus.IN_PROGRESS,
+        MilestoneStatus.COMPLETED,
+    ):
+        epic.status = MilestoneStatus.IN_PROGRESS
+
+    store.update(plan)
+    return f"Updated milestone '{milestone.name}' in {epic_id} to in_progress."
+
+
 def format_prompt_context(project_path: Path) -> str:
     """Return a concise milestone context string for agent prompts."""
     try:

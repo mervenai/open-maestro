@@ -352,7 +352,11 @@ the taxonomy changed: a project contains **epics** (workstreams / features such 
 "Import Flow" or "Audit Log"), and each epic contains the 8 standard lifecycle
 **milestones** (Intake & Discovery, Execution Planning, Design Blueprint, etc.).
 
-### Export a dashboard
+### Export a dashboard (local only)
+
+`--export-dashboard` renders the current milestone plan to stdout. It does **not**
+upload anything to a remote server. To push a dashboard to a hosted receiver, use
+`--publish-dashboard` instead.
 
 From inside a project directory:
 
@@ -397,7 +401,48 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/sta
 
 (Replace `tenant_acme_corp` with the correct tenant schema if different.)
 
-#### 2. Sync milestones to the local workstation
+#### 2. Delete a project on Merven
+
+The `merven project` CLI does not expose a `delete` action, so removing a project
+requires deleting its row directly from the Merven Postgres database.
+
+> **Warning:** This is irreversible. Back up the database or export the dashboard
+> first if you need to preserve anything.
+
+Run these commands on the Merven core server:
+
+```bash
+cd /opt/merven
+
+# 1. Confirm the project exists and note the correct tenant schema.
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/staging/docker-compose.staging.yml \
+  exec postgres psql -U merven -d merven -t -A \
+  -c "SET search_path TO tenant_acme_corp; SELECT project_id, name FROM project WHERE project_id='PROJECT_ID';"
+
+# 2. Delete the project row. If foreign-key constraints block this, the error
+#    will list the dependent table(s); delete those rows first.
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/staging/docker-compose.staging.yml \
+  exec postgres psql -U merven -d merven -t -A \
+  -c "SET search_path TO tenant_acme_corp; DELETE FROM project WHERE project_id='PROJECT_ID';"
+```
+
+To discover all tables in a tenant schema before deleting:
+
+```bash
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/staging/docker-compose.staging.yml \
+  exec postgres psql -U merven -d merven -t -A \
+  -c "SELECT tablename FROM pg_tables WHERE schemaname='tenant_acme_corp';"
+```
+
+After deleting on the server, remove the local milestone file on the workstation
+to unlink the project:
+
+```bash
+cd ~/projects/YourProject
+rm .open-maestro/milestones.yaml
+```
+
+#### 3. Sync milestones to the local workstation
 
 On the engineer machine, from the project directory:
 
@@ -440,17 +485,77 @@ Then open http://localhost:8080 in a browser. Endpoints:
 - `/api/dashboard` — JSON dashboard
 - `/dashboard.md` — Markdown dashboard
 
-### Publish to a remote receiver (e.g. staging.merven.ai)
+### Standalone dashboard receiver (no Merven required)
 
-Open Maestro 1.1.0 ships a dashboard *publisher*. The receiver lives in the
-Merven core API on `api.staging.merven.ai` (the `merven.ai` root site is hosted on
-Lovable and cannot run a Python backend). On the Merven core server, set
-`MERVEN_MAESTRO_DASHBOARD_API_KEY` in `deploy/.env`. On the Maestro CLI, use
-`MAESTRO_DASHBOARD_API_KEY`. Both values must be identical.
+Maestro ships a self-hosted dashboard receiver that stores published snapshots
+as JSON files and serves HTML/JSON/Markdown views. It does **not** need the
+Merven database or Merven core API.
+
+#### Run the receiver on a server
+
+Install the Maestro wheel on the host (or any machine with Python 3.11+) and run:
+
+```bash
+export MAESTRO_DASHBOARD_API_KEY="your-secret-key"
+maestro --serve-remote-dashboard --dashboard-host 0.0.0.0 --dashboard-port 8080 --dashboard-data-dir /var/lib/maestro-dashboards
+```
+
+- `--dashboard-host 0.0.0.0` binds to all interfaces so a reverse proxy can reach it.
+- `--dashboard-data-dir` is where snapshots are stored (default: `./.open-maestro/dashboards`).
+- `MAESTRO_DASHBOARD_API_KEY` is required for publishing. GET views are public.
+
+For production, put the receiver behind a reverse proxy with HTTPS. A minimal
+Caddyfile:
+
+```
+dashboards.example.com {
+    reverse_proxy localhost:8080
+}
+```
+
+#### Publish from a workstation
+
+From inside a Maestro-linked project directory:
+
+```bash
+export MAESTRO_DASHBOARD_URL="https://dashboards.example.com/maestro/dashboard"
+export MAESTRO_DASHBOARD_API_KEY="your-secret-key"
+export MAESTRO_DASHBOARD_PROJECT_TOKEN="project-token"
+
+maestro --publish-dashboard "$MAESTRO_DASHBOARD_URL"
+```
+
+The project token can be any string you choose; it becomes the URL slug for the
+dashboard. The receiver creates the snapshot on first publish.
+
+#### View a published dashboard
+
+Given a project token of `project-token`:
+
+- HTML: `https://dashboards.example.com/maestro/dashboard/project-token/html`
+- JSON: `https://dashboards.example.com/maestro/dashboard/project-token`
+- Markdown: `https://dashboards.example.com/maestro/dashboard/project-token/md`
+
+#### Delete a published snapshot
+
+Snapshots are plain JSON files in `--dashboard-data-dir`. Delete the file named
+after the project token:
+
+```bash
+rm /var/lib/maestro-dashboards/project-token.json
+```
+
+### Publish to a remote receiver (legacy Merven integration)
+
+The original receiver lives in the Merven core API on `api.staging.merven.ai`
+(the `merven.ai` root site is hosted on Lovable and cannot run a Python
+backend). On the Merven core server, set `MERVEN_MAESTRO_DASHBOARD_API_KEY` in
+`deploy/.env`. On the Maestro CLI, use `MAESTRO_DASHBOARD_API_KEY`. Both values
+must be identical.
 
 ```bash
 export MAESTRO_DASHBOARD_URL="https://api.staging.merven.ai/maestro/dashboard"
-export MAESTRO_DASHBOARD_API_KEY="your-api-key"
+export MAESTRO_DASHBOARD_API_KEY="ff10f1dc1d1d41099aa9ae5d21db8423521841ec80d05f9ef3b7e14b309bc73b"
 export MAESTRO_DASHBOARD_PROJECT_TOKEN="project-token"
 
 maestro --publish-dashboard "$MAESTRO_DASHBOARD_URL"

@@ -6,7 +6,7 @@ import json
 from datetime import date, datetime
 from typing import Any
 
-from open_maestro.milestones.models import MilestonePlan, MilestoneStatus
+from open_maestro.milestones.models import Epic, Milestone, MilestonePlan, MilestoneStatus
 
 
 # Merven.ai design tokens extracted from https://merven.ai
@@ -46,28 +46,37 @@ def _status_bg(status: str) -> str:
     }.get(status, "rgba(121, 129, 141, 0.15)")
 
 
-def export_dashboard_json(plan: MilestonePlan) -> str:
-    """Return a client-safe JSON dashboard string."""
-    data = _dashboard_data(plan)
+def export_dashboard_json_from_data(data: dict[str, Any]) -> str:
+    """Return a client-safe JSON dashboard string from pre-built data."""
     return json.dumps(data, indent=2, default=_json_serializer)
 
 
-def export_dashboard_markdown(plan: MilestonePlan) -> str:
-    """Return a client-ready Markdown dashboard string."""
-    data = _dashboard_data(plan)
+def export_dashboard_json(plan: MilestonePlan) -> str:
+    """Return a client-safe JSON dashboard string from a milestone plan."""
+    return export_dashboard_json_from_data(_dashboard_data(plan))
+
+
+def export_dashboard_markdown_from_data(data: dict[str, Any]) -> str:
+    """Return a client-ready Markdown dashboard string from pre-built data."""
     lines = [
         f"# {data['project_name']} — Project Dashboard",
         "",
         f"**Overall completion:** {data['overall_completion']}%",
         "",
-        "## Epics",
+        "## Project Process",
         "",
     ]
+    process_track = data.get("process_track") or {}
+    for m in process_track.get("milestones", []):
+        icon = "✓" if m["status"] == "completed" else "○"
+        lines.append(f"- {icon} **{m['name']}:** {m['status']} ({m['completion']}%)")
+    lines.append("")
+
+    lines.append("## Epics")
+    lines.append("")
     for epic in data["epics"]:
-        lines.append(f"### {epic['name']} ({epic['completion']}%)")
-        for m in epic["milestones"]:
-            icon = "✓" if m["status"] == "completed" else "○"
-            lines.append(f"- {icon} **{m['name']}:** {m['status']} ({m['completion']}%)")
+        status_label = epic["status"].replace("_", " ").title()
+        lines.append(f"### {epic['name']} — {status_label} ({epic['completion']}%)")
         lines.append("")
 
     if data.get("active_blockers"):
@@ -87,9 +96,14 @@ def export_dashboard_markdown(plan: MilestonePlan) -> str:
     return "\n".join(lines)
 
 
-def export_dashboard_html(plan: MilestonePlan) -> str:
-    """Return an HTML dashboard styled to match merven.ai."""
-    data = _dashboard_data(plan)
+def export_dashboard_markdown(plan: MilestonePlan) -> str:
+    """Return a client-ready Markdown dashboard string from a milestone plan."""
+    return export_dashboard_markdown_from_data(_dashboard_data(plan))
+
+
+def export_dashboard_html_from_data(data: dict[str, Any]) -> str:
+    """Return an HTML dashboard styled to match merven.ai from pre-built data."""
+    process_html = _process_track_section(data.get("process_track"))
     epics_html = "\n".join(_epic_swimlane(e) for e in data["epics"])
     blockers_html = _blockers_section(data.get("active_blockers", []))
     deliverables_html = _deliverables_section(data.get("recent_deliverables", []))
@@ -252,6 +266,42 @@ def export_dashboard_html(plan: MilestonePlan) -> str:
       font-weight: 600;
       margin: 0 0 1.25rem;
     }}
+    .global-section {{
+      background: linear-gradient(135deg, var(--card-start) 0%, var(--card-end) 100%);
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      box-shadow: var(--shadow);
+    }}
+    .global-section h2 {{
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin: 0 0 1rem;
+    }}
+    .status-tracker {{
+      display: flex;
+      gap: 0.75rem;
+      margin-bottom: 1.25rem;
+    }}
+    .status-step {{
+      flex: 1;
+      text-align: center;
+      padding: 0.75rem 0.5rem;
+      border-radius: 0.5rem;
+      border: 1px solid var(--border);
+      background: var(--accent);
+      color: var(--muted-fg);
+      font-size: 0.8125rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }}
+    .status-step.active {{
+      background: var(--status-bg);
+      color: var(--status-fg);
+      border-color: var(--status-fg);
+    }}
     .blocker {{
       background: rgba(239, 68, 68, 0.08);
       border: 1px solid rgba(239, 68, 68, 0.25);
@@ -299,6 +349,8 @@ def export_dashboard_html(plan: MilestonePlan) -> str:
       <div class="label">Overall Completion</div>
     </section>
 
+    {process_html}
+
     {epics_html}
 
     {blockers_html}
@@ -313,8 +365,58 @@ def export_dashboard_html(plan: MilestonePlan) -> str:
 </html>"""
 
 
+def export_dashboard_html(plan: MilestonePlan) -> str:
+    """Return an HTML dashboard styled to match merven.ai from a milestone plan."""
+    return export_dashboard_html_from_data(_dashboard_data(plan))
+
+
+def _derive_epic_status(epic: Epic) -> str:
+    """Map an epic's process milestones to one of Not-Started/In-Progress/Complete."""
+    statuses = [m.status for m in epic.milestones]
+    if not statuses:
+        return "not_started"
+    if all(s == MilestoneStatus.COMPLETED for s in statuses):
+        return "completed"
+    if all(s == MilestoneStatus.NOT_STARTED for s in statuses):
+        return "not_started"
+    return "in_progress"
+
+
+def _process_track_from_epic(epic: Epic) -> dict[str, Any]:
+    """Return the default epic formatted as the project process track."""
+    return {
+        "id": epic.id,
+        "name": "Project Process",
+        "completion": epic.completion(),
+        "milestones": [
+            {
+                "id": m.id,
+                "name": m.name,
+                "status": m.status.value,
+                "completion": m.completion(),
+                "summary": _milestone_summary(m),
+            }
+            for m in sorted(epic.milestones, key=lambda x: x.order)
+        ],
+    }
+
+
+def _work_epic(epic: Epic) -> dict[str, Any]:
+    """Return a non-process epic formatted for the dashboard."""
+    return {
+        "id": epic.id,
+        "name": epic.name,
+        "status": _derive_epic_status(epic),
+        "completion": epic.completion(),
+    }
+
+
 def _dashboard_data(plan: MilestonePlan) -> dict[str, Any]:
     """Build a client-safe dashboard data structure."""
+    sorted_epics = sorted(plan.epics, key=lambda x: x.order)
+    process_epic = sorted_epics[0] if sorted_epics else None
+    work_epics = sorted_epics[1:] if len(sorted_epics) > 1 else []
+
     return {
         "project_id": plan.project_id,
         "project_name": plan.project_name or plan.project_id.replace("-", " ").title(),
@@ -328,60 +430,60 @@ def _dashboard_data(plan: MilestonePlan) -> dict[str, Any]:
             }
             for b in plan.summary.active_blockers
         ],
-        "epics": [
-            {
-                "id": epic.id,
-                "name": epic.name,
-                "completion": epic.completion(),
-                "milestones": [
-                    {
-                        "id": m.id,
-                        "name": m.name,
-                        "status": m.status.value,
-                        "completion": m.completion(),
-                        "summary": _milestone_summary(m),
-                    }
-                    for m in sorted(epic.milestones, key=lambda x: x.order)
-                ],
-            }
-            for epic in sorted(plan.epics, key=lambda x: x.order)
-        ],
+        "process_track": _process_track_from_epic(process_epic) if process_epic else None,
+        "epics": [_work_epic(epic) for epic in work_epics],
         "recent_deliverables": _recent_deliverables(plan),
     }
 
 
+def _process_track_section(process_track: dict[str, Any] | None) -> str:
+    if not process_track:
+        return ""
+    milestones = process_track.get("milestones", [])
+    rows = [milestones[i : i + 4] for i in range(0, len(milestones), 4)]
+    row_html = "\n".join(
+        f"""<div class="gantt-row">\n{"\n".join(_milestone_bar(m) for m in row)}\n</div>"""
+        for row in rows
+    )
+    return f"""<section class="global-section">
+  <h2>Project Process</h2>
+  {row_html}
+</section>"""
+
+
 def _epic_swimlane(epic: dict[str, Any]) -> str:
-    milestones = epic["milestones"]
-    first_row = milestones[:4]
-    second_row = milestones[4:8]
-
-    def _bar(m: dict[str, Any]) -> str:
-        status = m["status"].replace("_", "-")
-        status_label = m["status"].replace("_", " ")
-        status_fg = _status_color(m["status"])
-        status_bg = _status_bg(m["status"])
-        return f"""<div class="milestone-bar {status}" style="--fill: {m['completion']}%; --status-bg: {status_bg}; --status-fg: {status_fg};">
-      <div class="milestone-content">
-        <div class="milestone-name">{_escape(m['name'])}</div>
-        <span class="milestone-status">{status_label} {m['completion']}%</span>
-      </div>
-    </div>"""
-
-    first_bars = "\n".join(_bar(m) for m in first_row)
-    second_bars = "\n".join(_bar(m) for m in second_row)
+    status = epic["status"]
+    status_fg = _status_color(status)
+    status_bg = _status_bg(status)
+    steps = ["not_started", "in_progress", "completed"]
+    step_labels = ["Not Started", "In Progress", "Complete"]
+    step_html = "\n".join(
+        f"""<div class="status-step{' active' if s == status else ''}" style="--status-bg: {status_bg if s == status else 'var(--accent)'}; --status-fg: {status_fg if s == status else 'var(--muted-fg)'}">{label}</div>"""
+        for s, label in zip(steps, step_labels)
+    )
 
     return f"""<section class="epic">
   <div class="epic-header">
     <h2 class="epic-title">{_escape(epic['name'])}</h2>
     <span class="epic-completion">{epic['completion']}% complete</span>
   </div>
-  <div class="gantt-row">
-    {first_bars}
-  </div>
-  <div class="gantt-row">
-    {second_bars}
+  <div class="status-tracker">
+    {step_html}
   </div>
 </section>"""
+
+
+def _milestone_bar(m: dict[str, Any]) -> str:
+    status = m["status"].replace("_", "-")
+    status_label = m["status"].replace("_", " ")
+    status_fg = _status_color(m["status"])
+    status_bg = _status_bg(m["status"])
+    return f"""<div class="milestone-bar {status}" style="--fill: {m['completion']}%; --status-bg: {status_bg}; --status-fg: {status_fg};">
+      <div class="milestone-content">
+        <div class="milestone-name">{_escape(m['name'])}</div>
+        <span class="milestone-status">{status_label} {m['completion']}%</span>
+      </div>
+    </div>"""
 
 
 def _blockers_section(blockers: list[dict[str, Any]]) -> str:

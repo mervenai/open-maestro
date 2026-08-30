@@ -24,6 +24,7 @@ from open_maestro.events.stream import StreamingHandler
 from open_maestro.interactive import run_interactive
 from open_maestro.mcp.config import load_mcp_config
 from open_maestro.memory.kuzu_client import KuzuMemoryClient
+from open_maestro.dashboard_server import serve_remote_dashboard
 from open_maestro.milestones import (
     DashboardPublisher,
     MervenSyncError,
@@ -242,9 +243,23 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Host for --serve-dashboard (default: 127.0.0.1)",
     )
     parser.add_argument(
+        "--serve-remote-dashboard",
+        action="store_true",
+        help="Start a standalone HTTP receiver for published dashboards (no Merven required)",
+    )
+    parser.add_argument(
+        "--dashboard-data-dir",
+        default=None,
+        help="Directory for --serve-remote-dashboard snapshots (default: ./.open-maestro/dashboards)",
+    )
+    parser.add_argument(
         "--publish-dashboard",
         metavar="URL",
-        help="Publish the dashboard JSON to a remote endpoint (e.g. https://merven.ai/api/maestro/dashboard)",
+        help=(
+            "Publish the dashboard JSON to a remote endpoint. "
+            "For the standalone receiver use the receiver base URL, e.g. "
+            "https://dashboards.example.com/maestro/dashboard"
+        ),
     )
     parser.add_argument(
         "--sync-milestones",
@@ -464,11 +479,18 @@ async def main_async() -> int:
         store = MilestoneStore(Path.cwd())
         plan = store.load()
         if args.export_dashboard == "json":
-            print(export_dashboard_json(plan))
+            output = export_dashboard_json(plan)
         elif args.export_dashboard == "markdown":
-            print(export_dashboard_markdown(plan))
+            output = export_dashboard_markdown(plan)
         elif args.export_dashboard == "html":
-            print(export_dashboard_html(plan))
+            output = export_dashboard_html(plan)
+        else:
+            output = ""
+        print(output)
+        print(
+            f"Exported {args.export_dashboard} dashboard ({len(output)} bytes) to stdout.",
+            file=sys.stderr,
+        )
         return 0
 
     if args.serve_dashboard:
@@ -476,6 +498,16 @@ async def main_async() -> int:
             Path.cwd(),
             host=args.dashboard_host,
             port=args.dashboard_port,
+            blocking=True,
+        )
+        return 0
+
+    if args.serve_remote_dashboard:
+        serve_remote_dashboard(
+            data_dir=args.dashboard_data_dir,
+            host=args.dashboard_host,
+            port=args.dashboard_port,
+            api_key=args.dashboard_api_key or os.environ.get("MAESTRO_DASHBOARD_API_KEY"),
             blocking=True,
         )
         return 0

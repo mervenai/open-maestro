@@ -11,6 +11,7 @@ import httpx
 
 from open_maestro.milestones.dashboard import export_dashboard_json
 from open_maestro.milestones.models import MilestonePlan
+from open_maestro.milestones.publish_history import DashboardPublishHistoryStore
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,13 @@ class DashboardPublisher:
             raise PublishError(f"Dashboard publish request failed: {exc}") from exc
 
         logger.info("Dashboard published to %s", target)
+        try:
+            if plan.project_path:
+                history_store = DashboardPublishHistoryStore(plan.project_path)
+                history_store.record(url=target, project_token=self.project_token or "")
+        except Exception as exc:
+            logger.debug("Failed to record dashboard publish history: %s", exc)
+
         try:
             return response.json()
         except Exception:

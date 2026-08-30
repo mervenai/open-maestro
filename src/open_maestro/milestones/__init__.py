@@ -10,6 +10,7 @@ from open_maestro.milestones.models import (
     Summary,
 )
 from open_maestro.milestones.commands import (
+    advance_milestone_on_prompt,
     format_prompt_context,
     get_current_or_next_milestone_prompts,
     handle_blocker_command,
@@ -37,6 +38,10 @@ from open_maestro.milestones.prompt_history import (
     format_run_indicator,
 )
 from open_maestro.milestones.publisher import DashboardPublisher, PublishError
+from open_maestro.milestones.publish_history import (
+    DashboardPublishHistoryStore,
+    PublishHistoryRecord,
+)
 from open_maestro.milestones.server import serve_dashboard, stop_dashboard_server
 from open_maestro.milestones.store import MilestoneStore
 from open_maestro.milestones.templates import (
@@ -66,6 +71,7 @@ __all__ = [
     "get_current_or_next_milestone_prompts",
     "get_prompts_for_milestone",
     "format_prompt_context",
+    "advance_milestone_on_prompt",
     "PromptHistoryStore",
     "PromptRunHistory",
     "PromptRunRecord",
@@ -75,6 +81,8 @@ __all__ = [
     "export_dashboard_html",
     "DashboardPublisher",
     "PublishError",
+    "DashboardPublishHistoryStore",
+    "PublishHistoryRecord",
     "serve_dashboard",
     "stop_dashboard_server",
     "default_software_template",
