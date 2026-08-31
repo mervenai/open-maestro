@@ -371,10 +371,10 @@ def export_dashboard_html(plan: MilestonePlan) -> str:
 
 
 def _derive_epic_status(epic: Epic) -> str:
-    """Map an epic's process milestones to one of Not-Started/In-Progress/Complete.
+    """Map an epic's process milestones to Planning/In-Progress/Complete.
 
     The 8 lifecycle milestones are rolled up to 3 high-level statuses:
-      - Milestones 1-4 (Intake through Build Planning) = Not Started
+      - Milestones 1-4 (Intake through Build Planning) = Planning
       - Milestones 5-7 (Implementation through Demo & Delivery) = In Progress
       - Milestone 8 (Retrospective & Findings) = Complete
     """
@@ -383,14 +383,14 @@ def _derive_epic_status(epic: Epic) -> str:
         if m.status not in (MilestoneStatus.NOT_STARTED, MilestoneStatus.SKIPPED)
     ]
     if not active:
-        return "not_started"
+        return "planning"
 
     max_order = max(m.order for m in active)
     if max_order >= 8:
         return "completed"
     if max_order >= 5:
         return "in_progress"
-    return "not_started"
+    return "planning"
 
 
 def _process_track_from_epic(epic: Epic) -> dict[str, Any]:
@@ -466,8 +466,8 @@ def _epic_swimlane(epic: dict[str, Any]) -> str:
     status = epic["status"]
     status_fg = _status_color(status)
     status_bg = _status_bg(status)
-    steps = ["not_started", "in_progress", "completed"]
-    step_labels = ["Not Started", "In Progress", "Complete"]
+    steps = ["planning", "in_progress", "completed"]
+    step_labels = ["Planning", "In Progress", "Complete"]
     step_html = "\n".join(
         f"""<div class="status-step{' active' if s == status else ''}" style="--status-bg: {status_bg if s == status else 'var(--accent)'}; --status-fg: {status_fg if s == status else 'var(--muted-fg)'}">{label}</div>"""
         for s, label in zip(steps, step_labels)
