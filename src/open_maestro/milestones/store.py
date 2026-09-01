@@ -37,10 +37,26 @@ def _normalize_legacy_milestones(raw: dict[str, Any]) -> dict[str, Any]:
     raw = dict(raw)
     raw.pop("summary", None)
 
+    status_aliases = {
+        "complete": "completed",
+        "done": "completed",
+        "in-progress": "in_progress",
+        "not-started": "not_started",
+    }
+
+    def _normalize_status(value: Any) -> Any:
+        if isinstance(value, str):
+            return status_aliases.get(value.lower(), value)
+        return value
+
     for epic in raw.get("epics", []):
+        if "status" in epic:
+            epic["status"] = _normalize_status(epic["status"])
         epic_id = epic.get("id", "unknown")
         for milestone in epic.get("milestones", []):
             milestone_id = milestone.get("id", "unknown")
+            if "status" in milestone:
+                milestone["status"] = _normalize_status(milestone["status"])
             artifacts = milestone.get("artifacts", [])
             normalized_artifacts: list[dict[str, Any]] = []
             for artifact in artifacts:

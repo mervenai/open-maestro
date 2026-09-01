@@ -5,6 +5,16 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.2] - 2026-09-01
+
+### Fixed
+- Hardened milestone loading against hand-edited or agent-written status values.
+  - `MilestoneStore.load()` now normalizes common aliases before validation:
+    `complete`/`done` → `completed`, `in-progress` → `in_progress`,
+    `not-started` → `not_started`.
+  - This fixes the crash when a milestone file contained `status: complete`
+    instead of `status: completed`.
+
 ## [1.9.1] - 2026-08-31
 
 ### Changed
