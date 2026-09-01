@@ -5,6 +5,18 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.3] - 2026-09-01
+
+### Added
+- Registered two higher-capability local/self-hosted models in the default
+  capability registry:
+  - `ollama-qwen2-5-coder-32b` (alias `local-smart`) — strong open-weights
+    coding model comparable to Claude Sonnet 3.5 on many benchmarks.
+  - `ollama-deepseek-coder-v2` (alias `local-reasoning`) — large MoE coding
+    model for harder reasoning tasks.
+  Both are consumed through the existing `openai-sdk` runtime via Ollama's
+  OpenAI-compatible endpoint.
+
 ## [1.9.2] - 2026-09-01
 
 ### Fixed

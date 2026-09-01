@@ -295,6 +295,47 @@ models:
       cost_level: low
       relative_cost: 0.05
 
+  # Higher-capability local coding models. These need more RAM/VRAM than the
+  # small Ollama entries above but are the closest open-weights approximations
+  # to Claude Sonnet / Kimi K3 for software-engineering tasks.
+  ollama-qwen2-5-coder-32b:
+    name: "Ollama Qwen 2.5 Coder 32B"
+    provider: ollama
+    aliases: [local-smart, local-coder]
+    identifiers:
+      openai-sdk: qwen2.5-coder:32b
+    capabilities:
+      tier: standard
+      tool_use: true
+      vision: false
+      computer_use: false
+      reasoning: light
+      coding_strength: high
+      max_context_tokens: 131072
+      max_output_tokens: 8192
+      latency_hint: medium
+      cost_level: low
+      relative_cost: 0.2
+
+  ollama-deepseek-coder-v2:
+    name: "Ollama DeepSeek Coder V2"
+    provider: ollama
+    aliases: [local-reasoning]
+    identifiers:
+      openai-sdk: deepseek-coder-v2
+    capabilities:
+      tier: premium
+      tool_use: true
+      vision: false
+      computer_use: false
+      reasoning: deep
+      coding_strength: high
+      max_context_tokens: 128000
+      max_output_tokens: 8192
+      latency_hint: high
+      cost_level: low
+      relative_cost: 0.3
+
   # Generic local OpenAI-compatible endpoint (vLLM, LM Studio, etc.).
   # Availability depends on OPENAI_BASE_URL being reachable.
   local-openai-generic:
