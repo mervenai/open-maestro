@@ -166,11 +166,82 @@ maestro --runtime openai-sdk "refactor the parser"
 
 For local models (e.g., Ollama):
 
-```bash
-# Ollama on the default port is auto-detected; no API key needed.
-ollama pull qwen3:8b
-ollama serve
+Maestro can route to any OpenAI-compatible local server. The easiest path is
+Ollama, which is auto-detected on the default port (`localhost:11434`).
 
+### Step 1 — Install and start Ollama
+
+```bash
+brew install ollama        # macOS
+# or follow https://ollama.com/download for Linux/Windows
+ollama serve               # skip if already running
+```
+
+If `ollama serve` fails with `address already in use`, Ollama is already running.
+
+### Step 2 — Pull a local model
+
+Recommended models:
+
+- `qwen2.5-coder:32b` — strong open-weights coding model, comparable to Claude
+  Sonnet 3.5 on many coding benchmarks. Requires ~20 GB of disk and roughly
+  24 GB of VRAM (or CPU RAM with quantization).
+- `deepseek-coder-v2` — large MoE coding/reasoning model. Requires ~150 GB of
+  disk and high-end GPU(s); use only if you have the hardware.
+- `qwen3:8b` or `llama3.1:8b` — lightweight options for fast, cheap tasks, but
+  noticeably weaker than Sonnet-level models.
+
+```bash
+ollama pull qwen2.5-coder:32b
+# optional: ollama pull deepseek-coder-v2
+```
+
+Verify the pull:
+
+```bash
+ollama list
+```
+
+### Step 3 — Install the `openai` package
+
+The `openai-sdk` runtime needs the `openai` Python package. If you did not install
+with `OPENAI=1`, add it manually:
+
+```bash
+~/.open-maestro/venv/bin/pip install openai
+```
+
+### Step 4 — Point Maestro at the local endpoint
+
+Either set an environment variable:
+
+```bash
+export OPENAI_BASE_URL="http://localhost:11434/v1"
+```
+
+or pass it per command:
+
+```bash
+maestro --runtime openai-sdk --openai-base-url http://localhost:11434/v1 ...
+```
+
+No API key is needed for Ollama.
+
+### Step 5 — Run Maestro with the local model
+
+Use the model alias registered in the default capability registry:
+
+```bash
+# Qwen 2.5 Coder 32B (alias: local-smart)
+maestro --runtime openai-sdk --model local-smart "refactor the auth module"
+
+# DeepSeek Coder V2 (alias: local-reasoning)
+maestro --runtime openai-sdk --model local-reasoning "design the data migration"
+```
+
+Or let Maestro prefer local models automatically:
+
+```bash
 maestro --prefer-local "summarize the codebase"
 ```
 
@@ -179,7 +250,7 @@ host or port:
 
 ```bash
 export OPENAI_BASE_URL="http://localhost:11434/v1"
-maestro --prefer-local --runtime openai-sdk --model qwen3:8b "summarize the codebase"
+maestro --prefer-local --runtime openai-sdk --model qwen2.5-coder:32b "summarize the codebase"
 ```
 
 ## Default model and runtime preferences
