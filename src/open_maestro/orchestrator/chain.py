@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from open_maestro.agents.registry import _task_requires_writing
 from open_maestro.config.capabilities import (
+    CostLevel,
     ReasoningLevel,
     RequiredCapabilities,
     TaskProfile,
@@ -299,10 +300,12 @@ class ChainExecutor:
         registry: AgentRegistry,
         event_bus: EventBus | None = None,
         base_config: AgentConfig | None = None,
+        prefer_local: bool = False,
     ):
         self.registry = registry
         self.event_bus = event_bus
         self.base_config = base_config or AgentConfig()
+        self.prefer_local = prefer_local
 
     async def execute(
         self,
@@ -345,7 +348,11 @@ class ChainExecutor:
 
             # Pick the cheapest capable runtime/model for this step.
             try:
-                runtime_name, model_id = select_runtime_for_task(profile)
+                runtime_name, model_id = select_runtime_for_task(
+                    profile,
+                    min_cost_level=CostLevel.LOW if self.prefer_local else CostLevel.MEDIUM,
+                    prefer_local=self.prefer_local,
+                )
             except Exception as exc:
                 logger.warning("Chain step %s runtime selection failed: %s", idx, exc)
                 runtime_name = self.base_config.extra.get("runtime_name", "openai-sdk")
@@ -360,6 +367,9 @@ class ChainExecutor:
                     }
                 ),
             )
+            # Forward chain-level events to runtimes that emit them (openai-sdk).
+            if hasattr(runtime, "_event_bus"):
+                runtime._event_bus = self.event_bus
 
             resolved_model = model_id
             if resolved_model is None:

@@ -9,6 +9,7 @@ invoke the async ``tool_guard`` before each tool execution.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -43,6 +44,34 @@ def _import_openai() -> Any:
         ) from exc
 
 
+def _ollama_host() -> str:
+    """Return the Ollama server URL from the environment or the default."""
+    host = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+    if not host.startswith("http"):
+        host = f"http://{host}"
+    return host
+
+
+def _ollama_api_base() -> str | None:
+    """Return the OpenAI-compatible Ollama base URL if the server is reachable."""
+    host = _ollama_host()
+    try:
+        import urllib.request
+        import urllib.error
+
+        req = urllib.request.Request(
+            f"{host}/api/tags",
+            headers={"Accept": "application/json"},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            if resp.status < 500:
+                return f"{host}/v1"
+    except Exception:
+        pass
+    return None
+
+
 class OpenAISDKRuntime(AgentRuntime):
     """Execute agents via an OpenAI-compatible HTTP API with local tool support."""
 
@@ -62,6 +91,17 @@ class OpenAISDKRuntime(AgentRuntime):
         self._model = model
         self._api_key = api_key
         self._base_url = base_url or os.environ.get("OPENAI_BASE_URL")
+        # Auto-detect a local Ollama endpoint when no explicit cloud credentials
+        # or base URL are provided. This keeps the runtime consistent with the
+        # availability probe that already lets Ollama models be selected.
+        if (
+            not self._api_key
+            and not self._base_url
+            and not os.environ.get("OPENAI_API_KEY")
+        ):
+            ollama_base = _ollama_api_base()
+            if ollama_base:
+                self._base_url = ollama_base
         self._max_turns = max_turns or 32
         self._timeout_seconds = timeout_seconds
         # api_key and base_url are client-level settings; do not pass them to
@@ -92,19 +132,22 @@ class OpenAISDKRuntime(AgentRuntime):
         """Available when the OpenAI package is installed and credentials/endpoint are set.
 
         An explicit API key (``OPENAI_API_KEY``) or base URL (``OPENAI_BASE_URL``)
-        is required.  Local Ollama detection is handled by the availability module
-        so that runtime detection stays hermetic in tests.
+        is required for cloud endpoints.  Local Ollama endpoints are detected
+        automatically so that models selected by the availability probe can be
+        used without extra configuration.
         """
         import importlib.util
 
         if importlib.util.find_spec("openai") is None:
             return False
-        return bool(
+        if (
             getattr(self, "_api_key", None)
             or getattr(self, "_base_url", None)
             or os.environ.get("OPENAI_API_KEY")
             or os.environ.get("OPENAI_BASE_URL")
-        )
+        ):
+            return True
+        return _ollama_api_base() is not None
 
     def _ensure_client(self) -> Any:
         if self._client is None:
@@ -282,13 +325,97 @@ class OpenAISDKRuntime(AgentRuntime):
                     kwargs["tool_choice"] = "auto"
 
                 turn_start = time.monotonic()
-                heartbeat = asyncio.create_task(self._heartbeat(turn_start))
+                preview_state: dict[str, str] = {"text": ""}
+                heartbeat = asyncio.create_task(
+                    self._heartbeat(turn_start, preview_state=preview_state)
+                )
                 try:
-                    response = await client.chat.completions.create(
+                    stream = await client.chat.completions.create(
                         model=resolved,
                         messages=messages,
+                        stream=True,
                         **kwargs,
                     )
+                    accumulated_content = ""
+                    tool_buffers: dict[int, dict[str, Any]] = {}
+                    emitted_tool_indices: set[int] = set()
+                    finish_reason: str | None = None
+
+                    def _update_preview(text: str) -> None:
+                        snippet = text.strip().replace("\n", " ")
+                        if len(snippet) > 70:
+                            snippet = snippet[:67].rstrip() + "..."
+                        preview_state["text"] = snippet
+
+                    async for chunk in stream:
+                        # Some endpoints emit usage on the final chunk.
+                        usage = getattr(chunk, "usage", None)
+                        if usage:
+                            total_input_tokens += (
+                                getattr(usage, "prompt_tokens", 0) or 0
+                            )
+                            total_output_tokens += (
+                                getattr(usage, "completion_tokens", 0) or 0
+                            )
+
+                        if not chunk.choices:
+                            continue
+                        choice = chunk.choices[0]
+                        delta = choice.delta
+
+                        if delta.content:
+                            accumulated_content += delta.content
+                            _update_preview(accumulated_content)
+
+                        if delta.tool_calls:
+                            for tc_delta in delta.tool_calls:
+                                idx = tc_delta.index
+                                if idx not in tool_buffers:
+                                    tool_buffers[idx] = {
+                                        "id": tc_delta.id or "",
+                                        "type": "function",
+                                        "function": {"name": "", "arguments": ""},
+                                        "name_emitted": False,
+                                    }
+                                func = tool_buffers[idx]["function"]
+                                if tc_delta.id:
+                                    tool_buffers[idx]["id"] = tc_delta.id
+                                if tc_delta.function:
+                                    if tc_delta.function.name:
+                                        func["name"] += tc_delta.function.name
+                                    if tc_delta.function.arguments:
+                                        func["arguments"] += (
+                                            tc_delta.function.arguments
+                                        )
+
+                                # Emit a tool.call event as soon as we know the
+                                # tool name, so the user sees interim flow
+                                # before the (possibly slow) arguments finish.
+                                if func["name"] and not tool_buffers[idx]["name_emitted"]:
+                                    await self._emit_tool_call(func["name"], {})
+                                    tool_buffers[idx]["name_emitted"] = True
+
+                                # Emit again once the arguments parse as
+                                # complete JSON, so the detail (path, pattern,
+                                # etc.) appears.
+                                if (
+                                    idx not in emitted_tool_indices
+                                    and func["name"]
+                                    and func["arguments"]
+                                ):
+                                    try:
+                                        tool_input = parse_tool_input(
+                                            func["arguments"]
+                                        )
+                                        await self._emit_tool_call(
+                                            func["name"], tool_input
+                                        )
+                                        emitted_tool_indices.add(idx)
+                                    except Exception:
+                                        pass
+
+                        if choice.finish_reason:
+                            finish_reason = choice.finish_reason
                 finally:
                     heartbeat.cancel()
                     try:
@@ -296,81 +423,70 @@ class OpenAISDKRuntime(AgentRuntime):
                     except asyncio.CancelledError:
                         pass
 
-                choice = response.choices[0]
-                message = choice.message
-                usage = getattr(response, "usage", None)
-                if usage:
-                    total_input_tokens += getattr(usage, "prompt_tokens", 0) or 0
-                    total_output_tokens += getattr(usage, "completion_tokens", 0) or 0
-
-                if not message.tool_calls:
+                if not tool_buffers:
                     duration_ms = int((time.monotonic() - start) * 1000)
                     return AgentResult(
-                        text=message.content or "",
-                        session_id=getattr(response, "id", None),
-                        cost_usd=self._extract_cost(response),
+                        text=accumulated_content or "",
+                        session_id=None,
+                        cost_usd=None,
                         num_turns=turns,
                         duration_ms=duration_ms,
                         input_tokens=total_input_tokens,
                         output_tokens=total_output_tokens,
                         tokens_used=total_input_tokens + total_output_tokens,
                         tool_calls=tool_calls_record,
-                        metadata={"finish_reason": choice.finish_reason},
+                        metadata={"finish_reason": finish_reason},
                     )
 
-                messages.append(self._message_to_dict(message))
+                assistant_message: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": accumulated_content or None,
+                    "tool_calls": [
+                        {
+                            "id": buf["id"],
+                            "type": buf.get("type", "function"),
+                            "function": {
+                                "name": buf["function"]["name"],
+                                "arguments": buf["function"]["arguments"],
+                            },
+                        }
+                        for idx, buf in sorted(tool_buffers.items())
+                    ],
+                }
+                messages.append(assistant_message)
 
-                for tool_call in message.tool_calls:
-                    tool_name = tool_call.function.name
-                    tool_input = parse_tool_input(tool_call.function.arguments)
+                for idx, buf in sorted(tool_buffers.items()):
+                    tool_name = buf["function"]["name"]
+                    tool_input = parse_tool_input(buf["function"]["arguments"])
                     tool_calls_record.append(
                         {
-                            "id": tool_call.id,
+                            "id": buf["id"],
                             "name": tool_name,
                             "input": tool_input,
                         }
                     )
-                    await self._event_bus.emit(
-                        "tool.call",
-                        {"tool_name": tool_name, "tool_input": tool_input},
+                    if idx not in emitted_tool_indices:
+                        await self._emit_tool_call(tool_name, tool_input)
+                        emitted_tool_indices.add(idx)
+
+                    result_text = await self._execute_tool(
+                        tool_name, tool_input, tool_map, tool_guard
                     )
-
-                    allowed = True
-                    if tool_guard is not None:
-                        try:
-                            allowed = await tool_guard(tool_name, tool_input)
-                        except Exception as exc:
-                            logger.warning("tool_guard raised %s; denying tool", exc)
-                            allowed = False
-
-                    tool = tool_map.get(tool_name)
-                    if tool is None:
-                        result_text = f"Error: tool '{tool_name}' is not available."
-                    elif not allowed:
-                        result_text = (
-                            f"Error: use of tool '{tool_name}' was denied by the orchestrator. "
-                            "Stop and ask the user how to proceed."
-                        )
-                    else:
-                        try:
-                            result_text = await tool.execute(**tool_input)
-                        except Exception as exc:
-                            logger.warning("Tool %s failed: %s", tool_name, exc)
-                            result_text = f"Error executing {tool_name}: {exc}"
-
                     await self._event_bus.emit(
                         "tool.result",
                         {
                             "tool_name": tool_name,
                             "tool_input": tool_input,
-                            "allowed": allowed,
+                            "allowed": not result_text.startswith(
+                                "Error: use of tool"
+                            ),
                             "result": result_text,
                         },
                     )
                     messages.append(
                         {
                             "role": "tool",
-                            "tool_call_id": tool_call.id,
+                            "tool_call_id": buf["id"],
                             "content": result_text,
                         }
                     )
@@ -396,14 +512,65 @@ class OpenAISDKRuntime(AgentRuntime):
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
 
-    async def _heartbeat(self, start: float, interval: float = 5.0) -> None:
-        """Emit periodic runtime.working events while waiting for the LLM."""
+    async def _emit_tool_call(
+        self, tool_name: str, tool_input: dict[str, Any]
+    ) -> None:
+        """Emit a tool.call event so the UI can show interim progress."""
+        await self._event_bus.emit(
+            "tool.call",
+            {"tool_name": tool_name, "tool_input": tool_input},
+        )
+
+    async def _execute_tool(
+        self,
+        tool_name: str,
+        tool_input: dict[str, Any],
+        tool_map: dict[str, Any],
+        tool_guard: Callable[[str, dict[str, Any]], Coroutine[Any, Any, bool]]
+        | None,
+    ) -> str:
+        """Run a single tool, honouring the optional tool_guard."""
+        allowed = True
+        if tool_guard is not None:
+            try:
+                allowed = await tool_guard(tool_name, tool_input)
+            except Exception as exc:
+                logger.warning("tool_guard raised %s; denying tool", exc)
+                allowed = False
+
+        tool = tool_map.get(tool_name)
+        if tool is None:
+            return f"Error: tool '{tool_name}' is not available."
+        if not allowed:
+            return (
+                f"Error: use of tool '{tool_name}' was denied by the orchestrator. "
+                "Stop and ask the user how to proceed."
+            )
+        try:
+            return await tool.execute(**tool_input)
+        except Exception as exc:
+            logger.warning("Tool %s failed: %s", tool_name, exc)
+            return f"Error executing {tool_name}: {exc}"
+
+    async def _heartbeat(
+        self,
+        start: float,
+        interval: float = 5.0,
+        preview_state: dict[str, str] | None = None,
+    ) -> None:
+        """Emit periodic runtime.working events while waiting for the LLM.
+
+        If *preview_state* contains a non-empty text snippet from the streaming
+        response, it is forwarded so the UI can show what the model is currently
+        generating instead of a generic spinner.
+        """
         while True:
             await asyncio.sleep(interval)
             duration_ms = int((time.monotonic() - start) * 1000)
-            await self._event_bus.emit(
-                "runtime.working", {"duration_ms": duration_ms}
-            )
+            payload: dict[str, Any] = {"duration_ms": duration_ms}
+            if preview_state and preview_state.get("text"):
+                payload["message"] = preview_state["text"]
+            await self._event_bus.emit("runtime.working", payload)
 
     async def resume(
         self,

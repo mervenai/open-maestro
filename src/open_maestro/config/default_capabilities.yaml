@@ -301,7 +301,7 @@ models:
   ollama-qwen2-5-coder-32b:
     name: "Ollama Qwen 2.5 Coder 32B"
     provider: ollama
-    aliases: [local-smart, local-coder]
+    aliases: [local, local-smart, local-coder]
     identifiers:
       openai-sdk: qwen2.5-coder:32b
     capabilities:

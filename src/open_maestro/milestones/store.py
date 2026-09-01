@@ -147,10 +147,12 @@ class MilestoneStore:
     def update(self, plan: MilestonePlan) -> None:
         """Recompute summary, auto-populate work epics if ready, and save."""
         from open_maestro.milestones.auto_populate import (
+            maybe_create_epics_doc,
             maybe_export_dashboard,
             maybe_populate_work_epics,
         )
 
+        maybe_create_epics_doc(plan, self.project_path)
         added, _ = maybe_populate_work_epics(plan, self.project_path)
         plan._recompute_summary()  # noqa: SLF001
         self.save(plan)

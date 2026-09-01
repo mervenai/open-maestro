@@ -111,6 +111,7 @@ class ProjectManager:
         dry_run: bool = False,
         chain: bool = False,
         runtime_config: AgentConfig | None = None,
+        prefer_local: bool = False,
     ) -> AgentResult:
         """Handle a user task by delegating to the best specialist agent."""
         profile = task_profile or TaskProfiler.from_prompt(prompt)
@@ -234,6 +235,7 @@ class ProjectManager:
                 registry=self.registry,
                 event_bus=self.event_bus,
                 base_config=runtime_config or AgentConfig(),
+                prefer_local=prefer_local,
             )
             result = await executor.execute(
                 plan,

@@ -142,6 +142,7 @@ def _banner(
         "  /dry              dry-run the next prompt only\n"
         "  /milestones       show project milestone progress\n"
         "  /next             suggest the next milestone action\n"
+        "  /previous         revisit a completed or in-progress milestone\n"
         "  /select           open a TUI to select and edit suggested prompts\n"
         "  /prompts <milestone> [epic]  list playbook prompts for a milestone\n"
         "  /complete <id>    mark a milestone complete (add --force to override)\n"
@@ -402,6 +403,80 @@ async def _handle_command(
         state.suggested_prompts = []
         if not selected:
             return "No prompts selected."
+        pending: list[tuple[str, str, bool, str]] = []
+        for prompt_id, title, rendered in selected:
+            try:
+                action = await _prompt_action_tui(title)
+            except TUICancelled:
+                state.pending_prompts = []
+                return "Cancelled."
+            if action == "skip":
+                continue
+            edited = False
+            if action == "edit":
+                try:
+                    rendered = await _edit_prompt_tui(rendered)
+                    edited = True
+                except TUICancelled:
+                    state.pending_prompts = []
+                    return "Cancelled."
+            text = rendered.strip()
+            if text:
+                pending.append((prompt_id, text, edited, title))
+        if not pending:
+            return "No prompts selected for execution."
+        state.pending_prompts = pending
+        return f"Selected prompt: {selected[0][1]}"
+
+    if cmd == "previous":
+        store = MilestoneStore(Path.cwd())
+        plan = store.load()
+        candidates: list[tuple[str, Any]] = []
+        for epic in sorted(plan.epics, key=lambda e: e.order):
+            for milestone in sorted(epic.milestones, key=lambda m: m.order):
+                if milestone.status in (
+                    MilestoneStatus.COMPLETED,
+                    MilestoneStatus.IN_PROGRESS,
+                ):
+                    candidates.append((epic.id, milestone))
+        if not candidates:
+            return "No completed or in-progress milestones to revisit."
+
+        try:
+            epic_id, milestone = await _select_previous_milestone_tui(candidates)
+        except TUICancelled:
+            return "Cancelled."
+
+        prompts = get_prompts_for_milestone(
+            Path.cwd(), milestone.id, plan=plan, epic_id=epic_id
+        )
+        if not prompts:
+            return f"No prompts available for '{milestone.name}' in {epic_id}."
+
+        state.current_epic_id = epic_id
+        state.current_milestone_id = milestone.id
+        state.suggested_prompts = [
+            (template.id, template.title, rendered)
+            for template, rendered in prompts
+        ]
+        history_store = PromptHistoryStore(Path.cwd())
+        history_store.backfill_from_artifacts()
+        run_history = history_store.load()
+        try:
+            selected = await _select_prompts_tui(
+                state.suggested_prompts,
+                run_history=run_history,
+                epic_id=epic_id,
+                milestone_id=milestone.id,
+            )
+        except TUICancelled:
+            state.suggested_prompts = []
+            state.pending_prompts = []
+            return "Cancelled."
+        state.suggested_prompts = []
+        if not selected:
+            return "No prompts selected."
+
         pending: list[tuple[str, str, bool, str]] = []
         for prompt_id, title, rendered in selected:
             try:
@@ -1096,6 +1171,39 @@ async def _prompt_action_tui(title: str) -> str:
     return action if action else "skip"
 
 
+async def _select_previous_milestone_tui(
+    candidates: list[tuple[str, Any]],
+) -> tuple[str, Any]:
+    """Show a TUI list of completed/in-progress milestones to revisit.
+
+    *candidates* is a list of ``(epic_id, milestone)`` tuples.  Returns the
+    selected tuple.  Raises :class:`TUICancelled` if the user presses Escape.
+    """
+    import questionary
+
+    if len(candidates) == 1:
+        return candidates[0]
+
+    choices = []
+    for epic_id, milestone in candidates:
+        status_label = milestone.status.value.replace("_", " ")
+        title = (
+            f"{milestone.name} ({epic_id}) — {status_label} "
+            f"({milestone.completion()}%)"
+        )
+        choices.append(questionary.Choice(title=title, value=(epic_id, milestone)))
+
+    question = questionary.select(
+        "Select a milestone to revisit (Esc to cancel):",
+        choices=choices,
+    )
+    _add_escape_binding(question)
+    result = await question.application.run_async()
+    if result is None:
+        raise TUICancelled("No milestone selected")
+    return result
+
+
 async def _confirm_escalation(runtime: str, model: str) -> bool:
     """Ask the user for permission to escalate from a local to a frontier model."""
     import questionary
@@ -1400,6 +1508,7 @@ async def run_interactive(args: Any) -> int:
                     profile,
                     latency_tolerance=args.latency_tolerance,
                     max_cost_level=CostLevel(args.max_cost_level) if args.max_cost_level else None,
+                    min_cost_level=CostLevel.LOW if prefer_local else CostLevel.MEDIUM,
                     prefer_local=prefer_local,
                 )
             except RuntimeError as exc:
@@ -1460,6 +1569,12 @@ async def run_interactive(args: Any) -> int:
             }
         )
         runtime = create_runtime(turn_runtime, config=runtime_config)
+        # Wire the orchestration event bus into runtimes that can emit events.
+        # Without this, tool.call/runtime.working events from the openai-sdk
+        # backend are lost to a separate default event bus.
+        if hasattr(runtime, "_event_bus"):
+            runtime._event_bus = event_bus
+
         if not runtime.is_available() and not (
             state.dry_run_next or state.show_plan_next
         ):
@@ -1521,6 +1636,7 @@ async def run_interactive(args: Any) -> int:
                         dry_run=dry_run,
                         chain=state.chain,
                         runtime_config=runtime_config,
+                        prefer_local=state.prefer_local,
                     )
             return await pm.handle(
                 prompt,
@@ -1538,6 +1654,7 @@ async def run_interactive(args: Any) -> int:
                 dry_run=dry_run,
                 chain=state.chain,
                 runtime_config=runtime_config,
+                prefer_local=state.prefer_local,
             )
 
         try:

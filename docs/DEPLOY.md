@@ -5,7 +5,7 @@ workstations for a team of engineers.
 
 ## Current state (read this first)
 
-Open Maestro **1.6.5** is a functional multi-agent orchestration layer with:
+Open Maestro **1.10.3** is a functional multi-agent orchestration layer with:
 
 - Vendor-agnostic agent routing across Claude, Kimi, and OpenAI-compatible models
 - Model arbitration that picks the cheapest capable backend for a task
@@ -38,23 +38,23 @@ Build the wheel once and share it with the team:
 ```bash
 cd /Users/jj/dev/open-maestro
 python -m build --wheel
-# Share dist/open_maestro-1.6.5-py3-none-any.whl
+# Share dist/open_maestro-1.10.3-py3-none-any.whl
 ```
 
 Each engineer runs the install script:
 
 ```bash
-./install-ubuntu.sh /path/to/open_maestro-1.6.5-py3-none-any.whl
+./install-ubuntu.sh /path/to/open_maestro-1.10.3-py3-none-any.whl
 ```
 
 To also install SDK runtimes and their Python dependencies:
 
 ```bash
 # openai-sdk runtime (cloud OpenAI, Azure, Ollama, vLLM, DashScope, etc.)
-OPENAI=1 ./install-ubuntu.sh /path/to/open_maestro-1.6.5-py3-none-any.whl
+OPENAI=1 ./install-ubuntu.sh /path/to/open_maestro-1.10.3-py3-none-any.whl
 
 # All SDK runtimes
-OPENAI=1 CLAUDE_SDK=1 KIMI_ACP=1 ./install-ubuntu.sh /path/to/open_maestro-1.6.5-py3-none-any.whl
+OPENAI=1 CLAUDE_SDK=1 KIMI_ACP=1 ./install-ubuntu.sh /path/to/open_maestro-1.10.3-py3-none-any.whl
 ```
 
 The `OPENAI=1` flag installs the `openai` package, which is required for the
@@ -131,7 +131,7 @@ claude auth login
 > Anthropic API key. Install the SDK extra and set the key:
 >
 > ```bash
-> CLAUDE_SDK=1 ./install-ubuntu.sh /path/to/open_maestro-1.6.5-py3-none-any.whl
+> CLAUDE_SDK=1 ./install-ubuntu.sh /path/to/open_maestro-1.10.3-py3-none-any.whl
 > export ANTHROPIC_API_KEY="sk-ant-..."
 > ```
 >
@@ -183,17 +183,22 @@ If `ollama serve` fails with `address already in use`, Ollama is already running
 
 Recommended models:
 
-- `qwen2.5-coder:32b` — strong open-weights coding model, comparable to Claude
-  Sonnet 3.5 on many coding benchmarks. Requires ~20 GB of disk and roughly
-  24 GB of VRAM (or CPU RAM with quantization).
-- `deepseek-coder-v2` — large MoE coding/reasoning model. Requires ~150 GB of
+- `deepseek-coder-v2` — large MoE coding/reasoning model. This is the **only**
+  default local entry with `reasoning: deep`, so it is required for architectural
+  analysis, design decisions, and other deep-reasoning tasks. Requires ~150 GB of
   disk and high-end GPU(s); use only if you have the hardware.
-- `qwen3:8b` or `llama3.1:8b` — lightweight options for fast, cheap tasks, but
-  noticeably weaker than Sonnet-level models.
+- `qwen2.5-coder:32b` — strong open-weights coding model, comparable to Claude
+  Sonnet 3.5 on many coding benchmarks. Good for implementation, code review,
+  and standard-tier analysis. Alias `local-smart` / `local-coder` / `local`.
+  Requires ~20 GB of disk and roughly 24 GB of VRAM (or CPU RAM with
+  quantization).
+- `qwen3:8b` or `llama3.1:8b` — lightweight options for fast, cheap tasks only.
+  They are **not** appropriate for architectural analysis or complex design work.
 
 ```bash
 ollama pull qwen2.5-coder:32b
-# optional: ollama pull deepseek-coder-v2
+# Required for deep-reasoning / architecture work:
+ollama pull deepseek-coder-v2
 ```
 
 Verify the pull:
@@ -232,11 +237,14 @@ No API key is needed for Ollama.
 Use the model alias registered in the default capability registry:
 
 ```bash
-# Qwen 2.5 Coder 32B (alias: local-smart)
+# DeepSeek Coder V2 (alias: local-reasoning) — deep reasoning / architecture
+maestro --runtime openai-sdk --model local-reasoning "design the data migration"
+
+# Qwen 2.5 Coder 32B (aliases: local-smart, local-coder, local)
 maestro --runtime openai-sdk --model local-smart "refactor the auth module"
 
-# DeepSeek Coder V2 (alias: local-reasoning)
-maestro --runtime openai-sdk --model local-reasoning "design the data migration"
+# Qwen 3 8B (aliases: local, fast) — quick, cheap tasks only
+maestro --runtime openai-sdk --model local "summarize this file"
 ```
 
 Or let Maestro prefer local models automatically:
@@ -244,6 +252,12 @@ Or let Maestro prefer local models automatically:
 ```bash
 maestro --prefer-local "summarize the codebase"
 ```
+
+When `--prefer-local` is used, Maestro considers every local model in the
+registry and picks the cheapest capable one for the task profile. Because
+`qwen2.5-coder:32b` now carries the `local` alias, standard coding tasks will
+prefer it over `qwen3:8b`. Fast/cheap tasks may still pick `qwen3:8b` because it
+is cheaper and faster. Deep-reasoning tasks require `deepseek-coder-v2`.
 
 You can still set `OPENAI_BASE_URL` explicitly if Ollama runs on a non-default
 host or port:
@@ -268,6 +282,11 @@ Local preference: on. Maestro will ask before escalating to a frontier model.
 # "No capable local model found. Escalate to kimi-cli/kimi-code/k3?"
 # Answer y/n.
 ```
+
+Deep-reasoning tasks such as architectural analysis require a local model with
+`reasoning: deep`. The only default local entry with that capability is
+`deepseek-coder-v2`. If you have not pulled it, `/local` mode will ask to
+escalate to a frontier model (e.g., Kimi K3 or Claude Opus) for those tasks.
 
 Or start interactive mode with the escalation behavior already enabled:
 
@@ -730,19 +749,19 @@ When you release a new wheel:
 
 ```bash
 maestro --version          # note old version
-./install-ubuntu.sh /path/to/open_maestro-1.6.5-py3-none-any.whl
+./install-ubuntu.sh /path/to/open_maestro-1.10.3-py3-none-any.whl
 maestro --version          # confirm new version
 ```
 
 User-level config, sources, and memory in `~/.open-maestro/` are preserved.
 
-### Upgrading to v1.6.5
+### Upgrading to v1.10.3
 
-v1.6.5 is backward-compatible with v1.3.0/v1.4.0/v1.4.1 milestone files. The
+v1.10.3 is backward-compatible with v1.3.0/v1.4.0/v1.4.1 milestone files. The
 main additions are multi-agent chains (`--chain` / `/chain`) and per-step model
 arbitration (v1.4.0), reliable multi-line paste handling in interactive mode
-(v1.4.1), and chain mode defaulting to on in interactive mode (v1.6.5). After
-upgrading the wheel, run `maestro --version` to confirm `1.6.5`.
+(v1.4.1), and chain mode defaulting to on in interactive mode (v1.10.3). After
+upgrading the wheel, run `maestro --version` to confirm `1.10.3`.
 
 ### Upgrading from v1.2.x or earlier (schema migration)
 
@@ -770,7 +789,7 @@ Running the install script again will replace the venv contents while keeping
 your config, sources, and memory:
 
 ```bash
-./install-ubuntu.sh /path/to/open_maestro-1.6.5-py3-none-any.whl
+./install-ubuntu.sh /path/to/open_maestro-1.10.3-py3-none-any.whl
 ```
 
 Use the same feature flags you used the first time (e.g. `OPENAI=1`) so the
@@ -784,7 +803,7 @@ in `~/.open-maestro/` — user config, agent sources, memory databases, and logs
 
 ```bash
 rm -rf ~/.open-maestro/venv
-./install-ubuntu.sh /path/to/open_maestro-1.6.5-py3-none-any.whl
+./install-ubuntu.sh /path/to/open_maestro-1.10.3-py3-none-any.whl
 ```
 
 ## Troubleshooting
@@ -797,6 +816,9 @@ Maestro cannot find a backend that matches your request. Common causes:
   is available.
 - You used `--prefer-local` but no local model is reachable. Ensure Ollama is
   running (`curl http://localhost:11434/api/tags`) and the model is pulled.
+- You used `--prefer-local` for a deep-reasoning / architectural task but did not
+  pull `deepseek-coder-v2`. Either pull it (`ollama pull deepseek-coder-v2`) or
+  allow Maestro to escalate to a frontier model.
 - You asked for the `openai-sdk` runtime (directly or via `--prefer-local`) but
   the `openai` Python package is missing. Install it:
 

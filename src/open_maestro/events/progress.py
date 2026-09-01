@@ -47,6 +47,20 @@ class InteractiveProgressHandler:
     def _message_for(
         self, event_type: str, payload: dict[str, Any]
     ) -> str | None:
+        if event_type == "runtime.working":
+            # Update the spinner message to show elapsed time instead of
+            # printing a new line every heartbeat interval. If the runtime
+            # provides a content preview (e.g. openai-sdk streaming), show it.
+            if self._indicator is not None:
+                duration_ms = payload.get("duration_ms", 0)
+                seconds = duration_ms // 1000
+                preview = payload.get("message", "")
+                if preview:
+                    self._indicator.set_message(f"{preview} ({seconds}s)")
+                else:
+                    self._indicator.set_message(f"Thinking ({seconds}s)")
+            return None
+
         if event_type == "memory.recalled":
             count = payload.get("count", 0)
             if count:
