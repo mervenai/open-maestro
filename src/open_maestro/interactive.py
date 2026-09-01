@@ -112,6 +112,7 @@ class InteractiveState:
     reasoning: bool = False
     fast: bool = False
     chain: bool = True
+    prefer_local: bool = False
     turn: int = 0
     # Prompts most recently shown by /next or /prompts, available for selection
     # by typing their number (1-indexed). Each tuple is (prompt_id, title, rendered_text).
@@ -151,6 +152,7 @@ def _banner(
         "  /todo ...         manage project todos (add/list/done/block/delete/clear)\n"
         "  /reasoning        toggle reasoning preference\n"
         "  /fast             toggle fast/cheap preference\n"
+        "  /local            prefer local models; ask before escalating to frontier\n"
         "  /chain            toggle multi-agent chain mode (default: on)\n"
         "  /reset            clear conversation history\n"
         "  /help             show this message\n"
@@ -298,6 +300,13 @@ async def _handle_command(
     if cmd == "fast":
         state.fast = not state.fast
         return f"Fast/cheap preference: {'on' if state.fast else 'off'}."
+
+    if cmd == "local":
+        state.prefer_local = not state.prefer_local
+        return (
+            f"Local preference: {'on' if state.prefer_local else 'off'}."
+            + (" Maestro will ask before escalating to a frontier model." if state.prefer_local else "")
+        )
 
     if cmd == "chain":
         state.chain = not state.chain
@@ -1087,6 +1096,18 @@ async def _prompt_action_tui(title: str) -> str:
     return action if action else "skip"
 
 
+async def _confirm_escalation(runtime: str, model: str) -> bool:
+    """Ask the user for permission to escalate from a local to a frontier model."""
+    import questionary
+
+    question = questionary.confirm(
+        f"No capable local model found. Escalate to {runtime}/{model}?"
+    )
+    _add_escape_binding(question)
+    result = await question.application.run_async()
+    return bool(result)
+
+
 def _read_input_with_paste(prompt: str = "> ") -> str:
     """Read a line, then drain any immediately-pending stdin bytes.
 
@@ -1280,6 +1301,7 @@ async def run_interactive(args: Any) -> int:
         reasoning=args.reasoning,
         fast=args.fast,
         chain=getattr(args, "chain", True),
+        prefer_local=args.prefer_local or getattr(args, "ask_escalate", False),
     )
 
     publish_line = DashboardPublishHistoryStore(Path.cwd()).format_last()
@@ -1371,31 +1393,62 @@ async def run_interactive(args: Any) -> int:
         # this specific task profile, unless the user pinned a runtime/model.
         turn_runtime = args.runtime
         turn_model = state.model
+        prefer_local = state.prefer_local or args.prefer_local
         if turn_runtime is None:
             try:
                 selected_runtime, selected_model = select_runtime_for_task(
                     profile,
                     latency_tolerance=args.latency_tolerance,
                     max_cost_level=CostLevel(args.max_cost_level) if args.max_cost_level else None,
-                    prefer_local=args.prefer_local,
+                    prefer_local=prefer_local,
                 )
             except RuntimeError as exc:
-                print(f"Error: {exc}", file=sys.stderr)
-                if args.prefer_local:
+                if state.prefer_local:
+                    # Ask permission before escalating to a frontier (cloud) model.
+                    try:
+                        frontier_runtime, frontier_model = select_runtime_for_task(
+                            profile,
+                            latency_tolerance=args.latency_tolerance,
+                            max_cost_level=CostLevel(args.max_cost_level) if args.max_cost_level else None,
+                            prefer_local=False,
+                        )
+                    except RuntimeError:
+                        print(f"Error: {exc}", file=sys.stderr)
+                        print(
+                            "No local or frontier model can handle this task.",
+                            file=sys.stderr,
+                        )
+                        continue
+                    try:
+                        approved = await _confirm_escalation(frontier_runtime, frontier_model)
+                    except TUICancelled:
+                        print("Escalation cancelled.", file=sys.stderr)
+                        continue
+                    if not approved:
+                        print("Escalation declined. Keeping the previous state.", file=sys.stderr)
+                        continue
+                    turn_runtime = frontier_runtime
+                    if turn_model is None:
+                        turn_model = frontier_model
+                    print(f"Escalating to {turn_runtime}/{turn_model}.")
+                elif args.prefer_local:
+                    print(f"Error: {exc}", file=sys.stderr)
                     print(
                         "No local models are available. Start Ollama or set "
                         "OPENAI_BASE_URL to a local OpenAI-compatible endpoint "
                         "(e.g., http://localhost:11434/v1).",
                         file=sys.stderr,
                     )
+                    continue
                 else:
+                    print(f"Error: {exc}", file=sys.stderr)
                     print(
                         "Check that a backend is installed and configured "
                         "(kimi, claude, openai SDK, or a local endpoint via "
                         "OPENAI_BASE_URL).",
                         file=sys.stderr,
                     )
-                continue
+                    continue
             turn_runtime = selected_runtime
             if turn_model is None:
                 turn_model = selected_model

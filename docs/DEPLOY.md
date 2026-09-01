@@ -253,6 +253,33 @@ export OPENAI_BASE_URL="http://localhost:11434/v1"
 maestro --prefer-local --runtime openai-sdk --model qwen2.5-coder:32b "summarize the codebase"
 ```
 
+### Interactive mode with permission-based escalation
+
+In `maestro --interactive`, you can prefer local models while keeping frontier
+(cloud) models as a permission-based fallback:
+
+```bash
+maestro --interactive
+> /local
+Local preference: on. Maestro will ask before escalating to a frontier model.
+
+> design the data migration API
+# If no capable local model is available, Maestro asks:
+# "No capable local model found. Escalate to kimi-cli/kimi-code/k3?"
+# Answer y/n.
+```
+
+Or start interactive mode with the escalation behavior already enabled:
+
+```bash
+maestro --ask-escalate --interactive
+```
+
+`/local` is a toggle; run it again to turn local preference off. When local
+preference is on and the task is beyond the local model's capability, Maestro
+proposes the specific vendor/runtime and model it would switch to and waits for
+your approval.
+
 ## Default model and runtime preferences
 
 Maestro picks the runtime and model in one of two ways:

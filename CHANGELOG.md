@@ -5,6 +5,17 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.5] - 2026-09-01
+
+### Added
+- Interactive permission-based escalation from local to frontier models.
+  - New `/local` command in `maestro --interactive` toggles local preference.
+  - When local preference is on and no capable local model exists, Maestro asks
+    for approval before switching to the proposed frontier runtime/model
+    (e.g. `kimi-cli/kimi-code/k3`).
+  - New CLI flag `--ask-escalate` starts interactive mode with this behavior
+    already enabled.
+
 ## [1.9.4] - 2026-09-01
 
 ### Changed

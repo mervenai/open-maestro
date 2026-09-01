@@ -200,6 +200,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Prefer local/self-hosted models (Ollama, vLLM, etc.)",
     )
     parser.add_argument(
+        "--ask-escalate",
+        action="store_true",
+        help="In interactive mode, ask for permission before falling back to a frontier (cloud) model when no capable local model is available",
+    )
+    parser.add_argument(
         "--latency-tolerance",
         type=float,
         default=1.2,
