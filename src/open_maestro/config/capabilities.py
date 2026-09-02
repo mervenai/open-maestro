@@ -309,6 +309,22 @@ class TaskProfiler:
         "across repos",
         "across services",
         "level of effort",
+        "architectural",
+        "architectural assumptions",
+        "architectural analysis",
+        "architecture review",
+        "design decision",
+        "design decisions",
+        "ratified",
+        "go/no-go",
+        "go no-go",
+        "execution plan",
+        "system boundary",
+        "system boundaries",
+        "cross-cutting",
+        "cross cutting",
+        "contract mismatch",
+        "integration seams",
     }
 
     _CODING_KEYWORDS = {
@@ -334,6 +350,15 @@ class TaskProfiler:
         "serializer",
         "endpoint",
         "handler",
+        "codebase",
+        "repository",
+        "repo",
+        "repos",
+        "services",
+        "service impact",
+        "impact map",
+        "contracts",
+        "file:line",
     }
 
     _HIGH_CODING_KEYWORDS = {
@@ -344,6 +369,11 @@ class TaskProfiler:
         "critical",
         "core",
         "complex logic",
+        "architecture",
+        "architectural",
+        "execution plan",
+        "system boundary",
+        "cross-cutting",
     }
 
     _FAST_KEYWORDS = {
