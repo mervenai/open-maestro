@@ -583,22 +583,30 @@ async def _handle_command(
     return f"Unknown command '/{cmd}'. Type /help for available commands."
 
 
-_REPO_ANALYSIS_KEYWORDS = {
+# Strong action verbs that signal a request to perform repo analysis.
+_REPO_ANALYSIS_ACTIONS = {
     "analyze",
-    "analysis",
     "analyse",
-    "codebase",
-    "code base",
-    "repo",
-    "repository",
-    "project",
     "review",
     "examine",
     "inspect",
     "audit",
     "explore",
-    "understand",
     "study",
+    "look at",
+    "check out",
+}
+
+# Weak context keywords: mentioning these alone is not enough to trigger repo
+# clarification; they need to appear with an action verb or explicit path/URL.
+_REPO_ANALYSIS_CONTEXT = {
+    "codebase",
+    "code base",
+    "repo",
+    "repository",
+    "project",
+    "folder",
+    "directory",
 }
 
 # Phrases that indicate project-management follow-ups rather than repo analysis.
@@ -658,8 +666,17 @@ def _extract_candidate_paths(prompt: str) -> list[Path]:
 
 
 def _looks_like_repo_analysis(prompt: str) -> bool:
+    """Return True only when the user explicitly asks for new repo work.
+
+    A request needs either a strong action verb ("analyze the codebase") or an
+    explicit filesystem path / remote URL.  Merely mentioning "analysis",
+    "repo", "project", or a filename is not enough to trigger clarification.
+    """
     lowered = prompt.lower()
-    return any(kw in lowered for kw in _REPO_ANALYSIS_KEYWORDS)
+    has_action = any(kw in lowered for kw in _REPO_ANALYSIS_ACTIONS)
+    has_context = any(kw in lowered for kw in _REPO_ANALYSIS_CONTEXT)
+    has_explicit_path = bool(_extract_remote_urls(prompt) or _extract_candidate_paths(prompt))
+    return has_action or (has_context and has_explicit_path)
 
 
 def _is_url(text: str) -> bool:
@@ -687,6 +704,15 @@ _FOLLOW_UP_PHRASES = {
     "update the dashboard",
     "sync the dashboard",
     "publish the dashboard",
+    "this is confusing",
+    "this doesn't make sense",
+    "this does not make sense",
+    "the file",
+    "in the file",
+    ".md file",
+    "referenced",
+    "references",
+    "mentions",
 }
 
 _QUESTION_PREFIXES = {
@@ -716,6 +742,7 @@ _QUESTION_PREFIXES = {
     "why were",
     "can you tell me",
     "could you tell me",
+    "why does",
 }
 
 
@@ -727,16 +754,31 @@ def _looks_like_follow_up(
     """Return True if the prompt refers to previous work rather than new repo work."""
     lowered = prompt.lower()
 
-    # Direct question about a past action.
-    if any(lowered.startswith(prefix) for prefix in _QUESTION_PREFIXES):
-        return True
+    # Direct question about a past action. Allow the question prefix to appear
+    # anywhere (e.g. after a leading statement like "this is confusing.").
+    if any(prefix in lowered for prefix in _QUESTION_PREFIXES):
+        # If the question is explicitly asking to start new repo work, do not
+        # treat it as a follow-up.
+        if not any(action in lowered for action in _REPO_ANALYSIS_ACTIONS):
+            return True
 
     # Contains follow-up phrasing and does NOT also request new repo exploration.
     has_follow_up_phrase = any(phrase in lowered for phrase in _FOLLOW_UP_PHRASES)
     requests_new_repo_work = any(
-        action in lowered for action in _REPO_ANALYSIS_KEYWORDS
+        action in lowered for action in _REPO_ANALYSIS_ACTIONS
     )
     if has_follow_up_phrase and not requests_new_repo_work:
+        return True
+
+    # Question-like prompt ending in ? with memory/history context and no
+    # explicit action verb is a follow-up about prior work.
+    if (
+        prompt.strip().endswith("?")
+        and (len(history) > 2 or memories)
+        and not requests_new_repo_work
+        and not _extract_remote_urls(prompt)
+        and not _extract_candidate_paths(prompt)
+    ):
         return True
 
     # Short, vague prompt with conversation/memory context and no explicit path.
