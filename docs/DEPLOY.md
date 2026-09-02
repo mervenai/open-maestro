@@ -184,9 +184,13 @@ If `ollama serve` fails with `address already in use`, Ollama is already running
 Recommended models:
 
 - `deepseek-coder-v2` — large MoE coding/reasoning model. This is the **only**
-  default local entry with `reasoning: deep`, so it is required for architectural
-  analysis, design decisions, and other deep-reasoning tasks. Requires ~150 GB of
-  disk and high-end GPU(s); use only if you have the hardware.
+  default local entry with `reasoning: deep`. However, the Ollama image does not
+  expose function calling through the OpenAI-compatible endpoint, so Maestro
+  marks it as `tool_use: false`. It is the best local choice for non-tool deep
+  reasoning (e.g., design explanations, migration plans), but for deep-reasoning
+  tasks that must search the codebase or invoke tools, Maestro will fall back to
+  `qwen2.5-coder:32b` or escalate to a frontier model. Requires ~150 GB of disk
+  and high-end GPU(s); use only if you have the hardware.
 - `qwen2.5-coder:32b` — strong open-weights coding model, comparable to Claude
   Sonnet 3.5 on many coding benchmarks. Good for implementation, code review,
   and standard-tier analysis. Alias `local-smart` / `local-coder` / `local`.

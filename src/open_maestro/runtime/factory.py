@@ -11,13 +11,13 @@ from open_maestro.config.capabilities import (
     CostLevel,
     LatencyHint,
     ReasoningLevel,
+    TaskProfile,
     Tier,
 )
 from open_maestro.runtime.availability import is_model_available, is_runtime_available
 from open_maestro.runtime.latency import LatencyCache, model_latency_score
 
 if TYPE_CHECKING:
-    from open_maestro.config.capabilities import TaskProfile
     from open_maestro.runtime.base import AgentConfig, AgentRuntime
 
 logger = logging.getLogger(__name__)
@@ -185,6 +185,82 @@ def select_runtime_for_task(
             LOW to allow cheap/local models, HIGH to restrict to frontier models.
         prefer_local: If True, only consider local/self-hosted models.
     """
+    candidates = _build_candidates(
+        profile,
+        runtime_type=runtime_type,
+        latency_tolerance=latency_tolerance,
+        max_cost_level=max_cost_level,
+        min_cost_level=min_cost_level,
+        prefer_local=prefer_local,
+    )
+
+    # When local preference is on and no model satisfies the full profile,
+    # relax reasoning by one level so the strongest available local tool model
+    # can take the task instead of immediately escalating to a frontier model.
+    if not candidates and prefer_local and profile.reasoning_depth == ReasoningLevel.DEEP:
+        logger.info(
+            "No local model satisfies deep reasoning + tools; relaxing to light reasoning"
+        )
+        relaxed_profile = TaskProfile(
+            needs_tools=profile.needs_tools,
+            needs_vision=profile.needs_vision,
+            reasoning_depth=ReasoningLevel.LIGHT,
+            coding_strength=profile.coding_strength,
+            context_tokens_estimate=profile.context_tokens_estimate,
+            latency_preference=profile.latency_preference,
+            cost_preference=profile.cost_preference,
+        )
+        candidates = _build_candidates(
+            relaxed_profile,
+            runtime_type=runtime_type,
+            latency_tolerance=latency_tolerance,
+            max_cost_level=max_cost_level,
+            min_cost_level=min_cost_level,
+            prefer_local=prefer_local,
+        )
+
+    if not candidates:
+        if runtime_type:
+            raise RuntimeError(
+                f"No model found for runtime '{runtime_type}' and task profile."
+            )
+        raise RuntimeError("No available runtime can satisfy the task profile.")
+
+    # Only enforce a strict latency window when we have real measurements.
+    # Declared latency hints are too coarse to exclude cheaper models before
+    # we have measured their actual throughput.
+    has_measurements = any(c[4] for c in candidates)
+    if has_measurements:
+        fastest = min(c[3] for c in candidates)
+        max_allowed_latency = fastest * max(latency_tolerance, 1.0)
+        candidates = [c for c in candidates if c[3] <= max_allowed_latency]
+
+    # For deep-reasoning tasks, prefer higher-tier models even if more expensive.
+    # Otherwise sort by cost first so "cheapest capable model" wins.
+    if profile.reasoning_depth == ReasoningLevel.DEEP:
+        candidates.sort(key=lambda c: (-c[1], c[0], c[2], c[5], c[6]))
+    else:
+        candidates.sort(key=lambda c: (c[0], c[1], c[2], c[5], c[6]))
+    selected_runtime, selected_model = candidates[0][5], candidates[0][6]
+    logger.debug(
+        "Selected cheapest runtime/model within %.2fx latency: %s / %s",
+        latency_tolerance,
+        selected_runtime,
+        selected_model,
+    )
+    return selected_runtime, selected_model
+
+
+def _build_candidates(
+    profile: TaskProfile,
+    *,
+    runtime_type: str | None,
+    latency_tolerance: float,
+    max_cost_level: CostLevel | None,
+    min_cost_level: CostLevel | None,
+    prefer_local: bool,
+) -> list[tuple[float, int, int, float, bool, str, str]]:
+    """Build the candidate list for select_runtime_for_task."""
     from open_maestro.config.capabilities import (
         CapabilityRegistry,
         _score_model,
@@ -192,7 +268,6 @@ def select_runtime_for_task(
 
     registry = CapabilityRegistry.load()
     latency_cache = LatencyCache.load()
-
     runtimes = list_runtimes()
     prefer_cli = os.environ.get("OPEN_MAESTRO_PREFER_CLI", "").lower() in (
         "1",
@@ -286,36 +361,7 @@ def select_runtime_for_task(
                 )
             )
 
-    if not candidates:
-        if runtime_type:
-            raise RuntimeError(
-                f"No model found for runtime '{runtime_type}' and task profile."
-            )
-        raise RuntimeError("No available runtime can satisfy the task profile.")
-
-    # Only enforce a strict latency window when we have real measurements.
-    # Declared latency hints are too coarse to exclude cheaper models before
-    # we have measured their actual throughput.
-    has_measurements = any(c[4] for c in candidates)
-    if has_measurements:
-        fastest = min(c[3] for c in candidates)
-        max_allowed_latency = fastest * max(latency_tolerance, 1.0)
-        candidates = [c for c in candidates if c[3] <= max_allowed_latency]
-
-    # For deep-reasoning tasks, prefer higher-tier models even if more expensive.
-    # Otherwise sort by cost first so "cheapest capable model" wins.
-    if profile.reasoning_depth == ReasoningLevel.DEEP:
-        candidates.sort(key=lambda c: (-c[1], c[0], c[2], c[5], c[6]))
-    else:
-        candidates.sort(key=lambda c: (c[0], c[1], c[2], c[5], c[6]))
-    selected_runtime, selected_model = candidates[0][5], candidates[0][6]
-    logger.debug(
-        "Selected cheapest runtime/model within %.2fx latency: %s / %s",
-        latency_tolerance,
-        selected_runtime,
-        selected_model,
-    )
-    return selected_runtime, selected_model
+    return candidates
 
 
 def _tier_rank(tier: Tier) -> int:

@@ -324,8 +324,12 @@ models:
     identifiers:
       openai-sdk: deepseek-coder-v2
     capabilities:
+      # Ollama's deepseek-coder-v2 image supports completion/insert but not
+      # function calling through the OpenAI-compatible endpoint, so tool_use is
+      # false. It remains the best local choice for non-tool deep reasoning
+      # (e.g., design explanations, migration plans, algorithm discussion).
       tier: premium
-      tool_use: true
+      tool_use: false
       vision: false
       computer_use: false
       reasoning: deep
