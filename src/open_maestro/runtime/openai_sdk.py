@@ -44,6 +44,52 @@ def _import_openai() -> Any:
         ) from exc
 
 
+def _extract_json_objects_with_spans(text: str) -> list[tuple[int, int, Any]]:
+    """Return all top-level JSON objects found in *text* with byte spans."""
+    objects: list[tuple[int, int, Any]] = []
+    i = 0
+    while i < len(text):
+        if text[i] != "{":
+            i += 1
+            continue
+        # Find the matching closing brace, accounting for nested objects and
+        # strings. This is intentionally simple: it does not handle escaped
+        # braces inside strings perfectly, but json.loads will reject false
+        # positives.
+        depth = 0
+        in_string = False
+        escape = False
+        start = i
+        for j in range(i, len(text)):
+            ch = text[j]
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        objects.append(
+                            (start, j + 1, json.loads(text[start : j + 1]))
+                        )
+                    except json.JSONDecodeError:
+                        pass
+                    i = j
+                    break
+        i += 1
+    return objects
+
+
 def _ollama_host() -> str:
     """Return the Ollama server URL from the environment or the default."""
     host = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
@@ -423,6 +469,34 @@ class OpenAISDKRuntime(AgentRuntime):
                     except asyncio.CancelledError:
                         pass
 
+                # Fallback: some local endpoints (Ollama) return tool calls as
+                # plain text in the assistant's content instead of structured
+                # tool_calls deltas. Parse those and synthesise tool buffers,
+                # stripping the raw JSON from the content so the model does not
+                # loop on its own emitted JSON in later turns.
+                if not tool_buffers and accumulated_content:
+                    extracted, cleaned_content = self._extract_tool_calls_from_content(
+                        accumulated_content
+                    )
+                    if extracted:
+                        accumulated_content = cleaned_content
+                    for ext_idx, ext in enumerate(extracted):
+                        arguments = ext.get("arguments", {})
+                        if isinstance(arguments, str):
+                            try:
+                                arguments = json.loads(arguments)
+                            except json.JSONDecodeError:
+                                arguments = {"raw": arguments}
+                        tool_buffers[ext_idx] = {
+                            "id": f"extracted-{ext_idx}",
+                            "type": "function",
+                            "function": {
+                                "name": ext["name"],
+                                "arguments": json.dumps(arguments),
+                            },
+                            "name_emitted": False,
+                        }
+
                 if not tool_buffers:
                     duration_ms = int((time.monotonic() - start) * 1000)
                     return AgentResult(
@@ -520,6 +594,83 @@ class OpenAISDKRuntime(AgentRuntime):
             "tool.call",
             {"tool_name": tool_name, "tool_input": tool_input},
         )
+
+    @staticmethod
+    def _extract_tool_calls_from_content(
+        content: str,
+    ) -> tuple[list[dict[str, Any]], str]:
+        """Parse tool calls embedded in the assistant's content text.
+
+        Some local endpoints (notably Ollama) return tool calls as plain text
+        rather than as structured ``tool_calls`` deltas.  We scan the text for
+        JSON objects with ``name`` and ``arguments`` keys and synthesise
+        OpenAI-style tool-call records so the tool loop can execute them.
+
+        Returns a tuple of (tool_calls, cleaned_content).  The cleaned content
+        has the raw JSON tool-call blobs removed so the model does not see its
+        own emitted JSON on subsequent turns and loop forever.
+        """
+        if not content:
+            return [], content
+
+        text = content.strip()
+        original_text = text
+
+        # If the content is wrapped in markdown fences, strip them.
+        if text.startswith("```"):
+            lines = text.splitlines()
+            if len(lines) > 2 and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            text = "\n".join(lines).strip()
+
+        # Try parsing the whole block as JSON first.
+        data: Any = None
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        if isinstance(data, dict):
+            if "name" in data and "arguments" in data:
+                return [data], ""
+            for key in ("tool_calls", "calls", "tools"):
+                if key in data and isinstance(data[key], list):
+                    return (
+                        [
+                            item
+                            for item in data[key]
+                            if isinstance(item, dict) and "name" in item and "arguments" in item
+                        ],
+                        "",
+                    )
+
+        # Fall back to scanning for individual JSON objects. This handles text
+        # that contains explanatory prose mixed with one or more tool-call JSON
+        # blobs.
+        results: list[dict[str, Any]] = []
+        removed_spans: list[tuple[int, int]] = []
+        for start, end, candidate in _extract_json_objects_with_spans(text):
+            if isinstance(candidate, dict) and "name" in candidate and "arguments" in candidate:
+                results.append(candidate)
+                removed_spans.append((start, end))
+
+        if not results:
+            return [], original_text
+
+        # Build cleaned content by removing the JSON blobs and normalising
+        # whitespace. Preserve the original text order.
+        cleaned_parts: list[str] = []
+        last_end = 0
+        for start, end in sorted(removed_spans):
+            if start > last_end:
+                cleaned_parts.append(text[last_end:start])
+            last_end = end
+        if last_end < len(text):
+            cleaned_parts.append(text[last_end:])
+        cleaned = "\n".join(part.strip() for part in cleaned_parts if part.strip())
+        return results, cleaned
 
     async def _execute_tool(
         self,
