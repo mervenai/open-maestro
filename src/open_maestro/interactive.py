@@ -135,7 +135,7 @@ def _banner(
         "Open Maestro interactive mode\n"
         + session_line
         + publish_section
-        + "Type a task and press Enter. Commands:\n"
+        + "Type a task and press Enter (Ctrl+J or Alt+Enter for a new line). Commands:\n"
         "  /agent <id>       pin an agent for the next turn(s)\n"
         "  /model <model>    override the model for the next turn(s)\n"
         "  /plan             show the execution plan for the next prompt only\n"
@@ -1295,9 +1295,59 @@ def _read_input_with_paste(prompt: str = "> ") -> str:
     return "\n".join(lines)
 
 
+def _read_input_tui(prompt: str = "> ") -> str:
+    """Read multi-line input with Ctrl+J / Alt+Enter to insert newlines.
+
+    Enter submits the prompt. Ctrl+J (or Alt+Enter) inserts a newline so
+    users can compose multi-line prompts interactively. This is the closest
+    portable equivalent to kimi-cli's Shift+Return: prompt_toolkit 3.0.x
+    does not expose a reliable Shift+Enter key, but Ctrl+J works across
+    most terminals. Escape cancels the current input.
+    """
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.keys import Keys
+
+    bindings = KeyBindings()
+
+    @bindings.add(Keys.Enter)
+    def submit(event):
+        event.current_buffer.validate_and_handle()
+
+    # Ctrl+J and Alt+Enter insert a newline. Alt+Enter is represented as
+    # Escape followed by Enter in most terminal emulators.
+    @bindings.add(Keys.ControlJ)
+    @bindings.add(Keys.Escape, Keys.Enter)
+    def insert_newline(event):
+        event.current_buffer.insert_text("\n")
+
+    @bindings.add(Keys.Escape)
+    def cancel(event):
+        event.app.exit(exception=KeyboardInterrupt, style="class:aborting")
+
+    session = PromptSession(
+        f"{prompt}",
+        key_bindings=bindings,
+        multiline=False,
+        enable_suspend=True,
+    )
+    try:
+        return session.prompt()
+    except (EOFError, KeyboardInterrupt):
+        return ""
+
+
 async def _read_line(prompt: str = "> ") -> str:
-    """Read a line (or pasted multi-line block) from stdin."""
+    """Read a line (or multi-line block) from stdin.
+
+    Uses a TUI input with Shift+Enter support when stdin is a TTY; otherwise
+    falls back to plain input with paste draining.
+    """
+    import sys
+
     loop = asyncio.get_event_loop()
+    if sys.stdin.isatty():
+        return await loop.run_in_executor(None, _read_input_tui, prompt)
     return await loop.run_in_executor(None, _read_input_with_paste, prompt)
 
 
