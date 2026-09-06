@@ -39,10 +39,20 @@ class PromptTemplate:
             self.tags = []
 
     def render(self, context: dict[str, str]) -> str:
-        """Resolve placeholders in the prompt text."""
+        """Resolve placeholders in the prompt text.
+
+        Prompts with a non-empty ``artifact_target`` automatically end with an
+        instruction to write the output there, unless the prompt text already
+        contains that line (e.g. older project playbook overrides).
+        """
         text = self.prompt
+        target = self.artifact_target
         for key, value in context.items():
             text = text.replace(f"{{{key}}}", value)
+            target = target.replace(f"{{{key}}}", value)
+        artifact_line = "Write the output to {artifact_target}."
+        if target and artifact_line not in self.prompt:
+            text = text.rstrip("\n") + f"\nWrite the output to {target}.\n"
         return text
 
 

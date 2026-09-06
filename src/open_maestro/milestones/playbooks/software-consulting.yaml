@@ -3,7 +3,7 @@
 # Override per project at: .open-maestro/playbook.yaml
 
 playbook_id: software-consulting
-version: "1.0.0"
+version: "1.1.0"
 source_project: M3BudgetUpload
 milestone_prompts:
   intake-discovery:
@@ -18,10 +18,10 @@ milestone_prompts:
         Produce a concise synthesis that covers:
         - Business goal and user value proposition
         - Scope IN/OUT (what is explicitly included and excluded)
-        - Top 5-8 open questions that could block design or implementation
+        - Top 5-8 open questions that could block design or implementation, ranked by blocking severity
+        - Any additional open questions (brief, uncapped — do not drop them)
         - Top 5-8 risks with proposed mitigations
         - Reuse opportunities in existing codebase or services
-        Write the output to {artifact_target}.
 
     - id: intake-002
       title: Identify existing service/code reuse
@@ -33,7 +33,6 @@ milestone_prompts:
         Search the codebase for existing capabilities that could be reused for this feature.
         Look for: similar controllers, services, UI components, events, integration patterns, and auth/permissions models.
         Produce a reuse assessment with file paths, estimated level of effort to reuse (High/Medium/Low), and any contract mismatches.
-        Write the output to {artifact_target}.
 
     - id: intake-003
       title: Create a risk register
@@ -45,7 +44,6 @@ milestone_prompts:
         Based on the PRD, synthesis, and reuse assessment, create a risk register.
         For each risk include: description, likelihood, impact, owner, and mitigation.
         Flag any risks that should block the design phase until resolved.
-        Write the output to {artifact_target}.
 
   execution-planning:
     - id: plan-001
@@ -61,7 +59,6 @@ milestone_prompts:
         - Note any contract mismatch or missing dependency
         - Propose a ratified design decision
         Produce an execution plan with the corrected architecture, repo/service impact map, and a go/no-go recommendation for design.
-        Write the output to {artifact_target}.
 
     - id: plan-002
       title: Define ratified design decisions
@@ -73,18 +70,6 @@ milestone_prompts:
         From the execution plan, extract the 3-6 architectural decisions that must be frozen before design begins.
         Use an ADR-style format: context, decision, consequences, rejected alternatives.
         Ensure each decision is numbered (D1, D2, ...) and references real code or docs.
-        Write the output to {artifact_target}.
-
-    - id: plan-003
-      title: Build repo/service impact map
-      order: 3
-      agent_hint: researcher
-      tags: [planning, architecture]
-      artifact_target: docs/repo-impact-map.md
-      prompt: |
-        Create a repo/service impact map showing which repositories and services will change for each epic/workstream.
-        Include expected file patterns, integration seams, and ownership.
-        Write the output to {artifact_target}.
 
   design-blueprint:
     - id: design-001
@@ -101,7 +86,6 @@ milestone_prompts:
         - Endpoint URLs and methods
         - Integration events and their payloads
         Cite existing code patterns from the codebase.
-        Write the output to {artifact_target}.
 
     - id: design-002
       title: Create UX/template spec
@@ -113,7 +97,6 @@ milestone_prompts:
         Create a UX/template specification for the user-facing part of the {epic_name} epic.
         Cover: screen/layout structure, user flow, validation messages, empty/error states, and any file/template formats (e.g., Excel columns).
         Reference existing UI components and platform conventions.
-        Write the output to {artifact_target}.
 
     - id: design-003
       title: Generate Jira stories with BDD acceptance criteria
@@ -125,7 +108,6 @@ milestone_prompts:
         Convert the {epic_name} requirements into Jira-ready user stories with BDD acceptance criteria.
         Each story should have: ID, title, description, acceptance criteria (Given/When/Then), priority, and linked FR.
         Output as a CSV and a Markdown summary.
-        Write the output to {artifact_target}.
 
     - id: design-004
       title: Conduct design review and sign-off
@@ -137,7 +119,6 @@ milestone_prompts:
         Review the data contract, UX spec, and Jira stories for {epic_name}.
         Identify inconsistencies, unresolved open questions, and risks.
         Produce a design sign-off checklist with open items that must close before build planning.
-        Write the output to {artifact_target}.
 
   build-planning:
     - id: build-001
@@ -154,7 +135,6 @@ milestone_prompts:
         - Target files and expected changes
         - Dependencies and parallelization opportunities
         Cite real file paths from the codebase.
-        Write the output to {artifact_target}.
 
     - id: build-002
       title: Build traceability matrix
@@ -168,7 +148,6 @@ milestone_prompts:
         - Implementation file(s)
         - Unit/E2E test file(s)
         - Status (Not Started / In Progress / Done)
-        Write the output to {artifact_target}.
 
     - id: build-003
       title: Prepare test fixtures
@@ -191,7 +170,6 @@ milestone_prompts:
       prompt: |
         Verify that local dev environments for all affected services run and can talk to each other.
         Document startup steps, required env vars, and any failures or workarounds.
-        Write the output to {artifact_target}.
 
   implementation:
     - id: impl-001
@@ -233,8 +211,8 @@ milestone_prompts:
       tags: [build]
       artifact_target: ""
       prompt: |
-        Work through the {epic_name} build plan phase by phase, replacing stubs and 501 responses with real logic.
-        After each phase, run the relevant unit tests and update the traceability matrix.
+        Work through the {epic_name} build plan phase by phase, replacing each 501 stub and unimplemented branch from impl-001 with real logic.
+        After each phase, run the phase's unit tests before moving on, and update the traceability matrix.
 
   qa-integration:
     - id: qa-001
@@ -268,7 +246,6 @@ milestone_prompts:
       prompt: |
         Create a UAT playbook for the {epic_name} epic.
         Include: prerequisites, test scenarios with steps, expected results, known issues, and sign-off checklist.
-        Write the output to {artifact_target}.
 
     - id: qa-004
       title: Produce test report and sign-off
@@ -279,7 +256,6 @@ milestone_prompts:
       prompt: |
         Run the full test suite for {epic_name} and produce a test report.
         Include: scope tested, pass/fail counts, linked failures, risks, and a go/no-go recommendation.
-        Write the output to {artifact_target}.
 
   demo-delivery:
     - id: demo-001
@@ -291,7 +267,6 @@ milestone_prompts:
       prompt: |
         Write a demo script for the {epic_name} epic.
         Include: setup steps, narrative flow, key clicks/inputs, expected outcomes, and fallback notes.
-        Write the output to {artifact_target}.
 
     - id: demo-002
       title: Conduct dry-run and capture notes
@@ -302,7 +277,6 @@ milestone_prompts:
       prompt: |
         Run through the demo script for {epic_name} and capture dry-run notes.
         Record any issues, timing, and fixes needed before the real demo.
-        Write the output to {artifact_target}.
 
     - id: demo-003
       title: Create handoff and sign-off docs
@@ -313,7 +287,6 @@ milestone_prompts:
       prompt: |
         Create handoff documentation for the {epic_name} epic.
         Include: what was built, how to run it, known issues, support contacts, and sign-off checklist.
-        Write the output to {artifact_target}.
 
   retrospective-findings:
     - id: retro-001
@@ -325,7 +298,6 @@ milestone_prompts:
       prompt: |
         Facilitate a lessons-learned review for the {epic_name} epic.
         Document what went well, what did not, root causes, and actionable improvements.
-        Write the output to {artifact_target}.
 
     - id: retro-002
       title: Capture known issues and backlog
@@ -336,7 +308,6 @@ milestone_prompts:
       prompt: |
         Capture known issues, deferred work, and follow-up backlog items for the {epic_name} epic.
         Prioritize by impact and effort; link to existing tickets if available.
-        Write the output to {artifact_target}.
 
     - id: retro-003
       title: Update team playbooks
@@ -347,7 +318,6 @@ milestone_prompts:
       prompt: |
         Update relevant team playbooks with lessons from the {epic_name} epic.
         Focus on repeatable procedures, environment setup, debugging recipes, and conventions.
-        Write the output to {artifact_target}.
 
 placeholders:
   - name: date
