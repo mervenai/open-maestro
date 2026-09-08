@@ -200,6 +200,21 @@ Following integration memory: "Validate all external data sources and APIs"
 
 ## Secret Detection Protocol
 
+### 0. Tool-Backed Primary Path
+
+Before any manual pattern work, run the tool-backed scan and build the report from
+its output:
+
+- **Secrets**: `gitleaks detect --no-banner` (repo + history). If gitleaks is not
+  installed, fall back to the manual Detection Phase below and note the fallback
+  in the report.
+- **SAST**: `semgrep scan --config auto` for injection, authz, and dangerous-call
+  findings. Use the manual attack-vector patterns below only to interpret or
+  supplement semgrep output.
+
+Tools first, manual patterns as fallback — the tools are deterministic and catch
+what a pattern cache misses.
+
 When scanning for secrets and sensitive data:
 
 ### 1. Detection Phase

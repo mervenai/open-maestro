@@ -29,14 +29,11 @@ three independent dimensions and gate on the worst:
 - **Obsolescence:** score the gap to latest version; majors-behind or unmaintained
   upstream is elevated risk.
 
-See `references/open-source-safety.md` for the full framework, tier tables, the CVE
-weighting model, obsolescence scoring, and the transitive-dependency trust model.
+The tier tables, CVE weighting model, obsolescence scoring, and
+transitive-dependency trust model are documented inline above; this section is the
+authoritative copy.
 
 ## Load Next (References)
 
 - `references/tooling-matrix.md`
-- `references/ci-workflows.md`
-- `references/triage-and-remediation.md`
-- `references/common-findings-and-fixes.md`
 - `references/supply-chain-and-sbom.md`
-- `references/open-source-safety.md`

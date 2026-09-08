@@ -3,7 +3,7 @@
 # Override per project at: .open-maestro/playbook.yaml
 
 playbook_id: software-consulting
-version: "1.1.0"
+version: "1.2.0"
 source_project: M3BudgetUpload
 milestone_prompts:
   intake-discovery:
@@ -213,6 +213,22 @@ milestone_prompts:
       prompt: |
         Work through the {epic_name} build plan phase by phase, replacing each 501 stub and unimplemented branch from impl-001 with real logic.
         After each phase, run the phase's unit tests before moving on, and update the traceability matrix.
+
+    - id: impl-005
+      title: Run security scan gate
+      order: 5
+      agent_hint: security
+      tags: [build, verify, security]
+      artifact_target: docs/security/scan-report-{date}.md
+      prompt: |
+        Run the security scan suite for the {epic_name} epic before QA handoff.
+        For each tool below: if it is not installed on this machine, skip it and record the skip in the report — do not fail the gate.
+        - Secrets: gitleaks detect --no-banner. Record findings with file:line; if a secret is in a git-tracked file, flag it for immediate rotation.
+        - SAST: semgrep scan --config auto. Record findings by severity and rule.
+        - SCA: npm audit --json if package.json exists, otherwise pip-audit if requirements.txt or pyproject.toml exists. Record critical/high CVEs.
+        - SBOM: syft . -o cyclonedx-json=docs/security/sbom-{date}.json
+        Group findings by severity (critical/high/medium/low), note which tool produced each, and give a go/no-go recommendation for QA handoff.
+        Critical or high findings are blockers until triaged with an owner.
 
   qa-integration:
     - id: qa-001

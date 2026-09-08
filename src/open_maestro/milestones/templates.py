@@ -106,6 +106,7 @@ _STANDARD_MILESTONES = [
             "All P0 stories implemented",
             "Unit/integration tests passing",
             "Code merged to feature branch",
+            "Security scan report produced with no unaddressed critical/high findings",
         ],
     ),
     Milestone(
