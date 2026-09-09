@@ -13,6 +13,13 @@ from open_maestro.config.capabilities import (
     TaskProfile,
 )
 from open_maestro.milestones import MilestoneStatus
+from open_maestro.orchestrator import critic as critic_mod
+from open_maestro.orchestrator.critic import (
+    extract_findings,
+    parse_diff_stat,
+    parse_verdict,
+    should_trigger,
+)
 from open_maestro.orchestrator.pm import ProjectManager
 from open_maestro.runtime.base import AgentConfig, AgentResult, AgentRuntime
 from open_maestro.session.store import SessionRecord, SessionStore
@@ -504,3 +511,173 @@ class TestProjectManagerMilestoneContext:
         assert runtime.last_prompt is not None
         assert "Project milestone context" in runtime.last_prompt
         assert "Design Blueprint" in runtime.last_prompt
+
+
+class CriticFakeRuntime(FakeRuntime):
+    """Runtime that returns a structured critic verdict for review prompts."""
+
+    async def run(self, prompt: str, config: AgentConfig | None = None) -> AgentResult:
+        self.last_method = "run"
+        self.last_prompt = prompt
+        self.last_config = config
+        self.calls.append(("run", config.model if config else None))
+        if "Review the implementation that was just completed" in prompt:
+            return AgentResult(
+                text=(
+                    "## Verdict: BLOCK\n\n## Findings\n\n"
+                    "| Severity | File | Line | Issue | Fix |\n"
+                    "|----------|------|------|-------|-----|\n"
+                    "| CRITICAL | src/app.py | 42 | SQL injection | parameterize |\n"
+                ),
+                session_id="critic_session",
+                metadata={},
+            )
+        return AgentResult(text="implemented", session_id="new_session", metadata={})
+
+
+def _critic_registry(*, with_critic: bool = True) -> AgentRegistry:
+    engineer = AgentDefinition(
+        id="engineer",
+        name="Engineer",
+        role="engineer",
+        tools=["Read", "Edit", "Write", "Bash"],
+    )
+    agents = {"engineer": engineer}
+    if with_critic:
+        agents["code-critic"] = AgentDefinition(
+            id="code-critic",
+            name="Code Critic",
+            role="qa",
+            tools=["Read", "Grep"],
+            blocked_tools=["Write", "Edit", "MultiEdit", "ApplyPatch"],
+        )
+    return AgentRegistry(agents)
+
+
+class TestCriticGate:
+    def test_should_trigger_respects_thresholds(self):
+        assert should_trigger([("src/app.py", 60)])  # >50 code lines
+        assert should_trigger([("src/a.py", 10), ("src/b.py", 5)])  # >1 code file
+        assert not should_trigger([("src/app.py", 50)])  # boundary: not >50
+        assert not should_trigger([("src/app.py", 3)])  # trivial single-file fix
+        assert not should_trigger([("docs/readme.md", 400)])  # docs only
+        assert not should_trigger([("pyproject.toml", 200)])  # config only
+        assert not should_trigger([])
+
+    def test_parse_diff_stat_skips_summary_lines(self):
+        stat = (
+            " src/app.py  | 12 +++---\n"
+            " docs/x.md   |  3 +\n"
+            " 2 files changed, 15 insertions(+), 1 deletion(-)\n"
+        )
+        assert parse_diff_stat(stat) == [("src/app.py", 12), ("docs/x.md", 3)]
+
+    def test_parse_verdict_and_extract_findings(self):
+        assert parse_verdict("## Verdict: BLOCK\n...") == "BLOCK"
+        assert parse_verdict("## verdict: approve") == "APPROVE"
+        assert parse_verdict("no verdict here") is None
+        findings = extract_findings(
+            "## Findings\n\n| Severity | File |\n|---|---|\n| CRITICAL | a.py |\n"
+        )
+        assert any("CRITICAL" in row for row in findings)
+
+    async def test_gate_dispatches_critic_after_mutating_turn(self, monkeypatch):
+        monkeypatch.setenv("MAESTRO_CRITIC_GATE", "on")
+        monkeypatch.setattr(critic_mod, "snapshot_head", lambda p: "abc123")
+        monkeypatch.setattr(
+            critic_mod, "detect_source_changes", lambda p, ref: [("src/app.py", 60)]
+        )
+        runtime = CriticFakeRuntime()
+        pm = ProjectManager(runtime=runtime, registry=_critic_registry())
+
+        result = await pm.handle(
+            "implement the budget import endpoint", agent_id="engineer"
+        )
+
+        assert result.is_error is False
+        assert result.metadata.get("critic_verdict") == "BLOCK"
+        assert "Code review (code-critic): BLOCK" in result.text
+        assert "SQL injection" in result.text
+        assert len(runtime.calls) == 2  # engineer + critic
+
+    async def test_gate_skips_read_only_agent(self, monkeypatch):
+        monkeypatch.setenv("MAESTRO_CRITIC_GATE", "on")
+        monkeypatch.setattr(critic_mod, "snapshot_head", lambda p: "abc123")
+        monkeypatch.setattr(
+            critic_mod, "detect_source_changes", lambda p, ref: [("src/app.py", 60)]
+        )
+        runtime = CriticFakeRuntime()
+        researcher = AgentDefinition(
+            id="researcher",
+            name="Researcher",
+            role="research",
+            tools=["Read", "Grep"],
+            blocked_tools=["Write", "Edit"],
+        )
+        registry = AgentRegistry({"researcher": researcher, **_critic_registry()._agents})
+        pm = ProjectManager(runtime=runtime, registry=registry)
+
+        await pm.handle("analyze the codebase structure", agent_id="researcher")
+
+        assert len(runtime.calls) == 1  # no critic pass
+
+    async def test_gate_recursion_guard_on_critic_turn(self, monkeypatch):
+        monkeypatch.setenv("MAESTRO_CRITIC_GATE", "on")
+        monkeypatch.setattr(critic_mod, "snapshot_head", lambda p: "abc123")
+        monkeypatch.setattr(
+            critic_mod, "detect_source_changes", lambda p, ref: [("src/app.py", 60)]
+        )
+        runtime = CriticFakeRuntime()
+        pm = ProjectManager(runtime=runtime, registry=_critic_registry())
+
+        result = await pm.handle("review this code", agent_id="code-critic")
+
+        assert "critic_verdict" not in result.metadata
+        assert len(runtime.calls) == 1
+
+    async def test_gate_disabled_by_env(self, monkeypatch):
+        monkeypatch.setenv("MAESTRO_CRITIC_GATE", "off")
+        monkeypatch.setattr(critic_mod, "snapshot_head", lambda p: "abc123")
+        monkeypatch.setattr(
+            critic_mod, "detect_source_changes", lambda p, ref: [("src/app.py", 60)]
+        )
+        runtime = CriticFakeRuntime()
+        pm = ProjectManager(runtime=runtime, registry=_critic_registry())
+
+        result = await pm.handle(
+            "implement the budget import endpoint", agent_id="engineer"
+        )
+
+        assert "critic_verdict" not in result.metadata
+        assert len(runtime.calls) == 1
+
+    async def test_gate_tolerates_missing_critic_agent(self, monkeypatch):
+        monkeypatch.setenv("MAESTRO_CRITIC_GATE", "on")
+        monkeypatch.setattr(critic_mod, "snapshot_head", lambda p: "abc123")
+        monkeypatch.setattr(
+            critic_mod, "detect_source_changes", lambda p, ref: [("src/app.py", 60)]
+        )
+        runtime = CriticFakeRuntime()
+        pm = ProjectManager(runtime=runtime, registry=_critic_registry(with_critic=False))
+
+        result = await pm.handle(
+            "implement the budget import endpoint", agent_id="engineer"
+        )
+
+        assert result.is_error is False
+        assert "critic_verdict" not in result.metadata
+        assert len(runtime.calls) == 1
+
+    async def test_gate_not_triggered_without_code_changes(self, monkeypatch):
+        monkeypatch.setenv("MAESTRO_CRITIC_GATE", "on")
+        monkeypatch.setattr(critic_mod, "snapshot_head", lambda p: "abc123")
+        monkeypatch.setattr(critic_mod, "detect_source_changes", lambda p, ref: [])
+        runtime = CriticFakeRuntime()
+        pm = ProjectManager(runtime=runtime, registry=_critic_registry())
+
+        result = await pm.handle(
+            "implement the budget import endpoint", agent_id="engineer"
+        )
+
+        assert "critic_verdict" not in result.metadata
+        assert len(runtime.calls) == 1

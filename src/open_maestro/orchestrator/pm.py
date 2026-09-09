@@ -8,6 +8,7 @@ through a vendor-neutral ``AgentRuntime``.
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -27,6 +28,7 @@ from open_maestro.context.budget import ContextBudget
 from open_maestro.context.monitor import ContextMonitor, ContextSnapshot
 from open_maestro.events.bus import EventBus
 from open_maestro.milestones import format_prompt_context
+from open_maestro.orchestrator import critic as critic_mod
 from open_maestro.orchestrator.chain import ChainExecutor, ChainPlanner
 from open_maestro.runtime.base import AgentConfig, AgentResult, AgentRuntime
 from open_maestro.runtime.latency import record_result
@@ -78,6 +80,7 @@ class ProjectManager:
         session_store: SessionStore | None = None,
         context_budget: ContextBudget | None = None,
         event_bus: EventBus | None = None,
+        critic_gate: bool = True,
     ):
         self.runtime = runtime
         self.registry = registry
@@ -88,6 +91,8 @@ class ProjectManager:
         self.context_budget = context_budget or ContextBudget()
         self.context_monitor = ContextMonitor(budget=self.context_budget)
         self.event_bus = event_bus or EventBus()
+        env_flag = os.environ.get("MAESTRO_CRITIC_GATE", "").strip().lower()
+        self.critic_gate = critic_gate and env_flag not in {"off", "0", "false", "no"}
 
     async def handle(
         self,
@@ -268,6 +273,13 @@ class ProjectManager:
                 },
             )
 
+        # 8.5 Snapshot git HEAD so the critic gate can attribute source changes
+        #     to this turn. None outside a git repo — the gate then only sees
+        #     uncommitted changes, if any.
+        before_ref = (
+            critic_mod.snapshot_head(Path.cwd()) if self.critic_gate else None
+        )
+
         # 9. Handoff: if the task requires writing but the selected agent is
         #    read-only, run the read-only agent first for analysis, then delegate
         #    the writing step to a mutating agent.
@@ -310,6 +322,32 @@ class ProjectManager:
                     resume=resume,
                     fork=fork,
                     dry_run=dry_run,
+                )
+
+        # 9.5 Critic gate: implementation turns that changed source code get an
+        #     automatic adversarial review pass before the result is returned.
+        if (
+            self.critic_gate
+            and not dry_run
+            and not executed_as_chain
+            and not result.is_error
+            and _agent_can_mutate(ctx.selected_agent)
+            and ctx.selected_agent.id != "code-critic"
+        ):
+            changes = critic_mod.detect_source_changes(Path.cwd(), before_ref)
+            if changes and critic_mod.should_trigger(changes):
+                result = await self._run_critic_pass(
+                    ctx,
+                    profile,
+                    resolved_model,
+                    result,
+                    changes,
+                    allowed_tools=allowed_tools,
+                    blocked_tools=blocked_tools,
+                    permission_mode=permission_mode,
+                    deny_dangerous=deny_dangerous,
+                    max_turns=max_turns,
+                    mcp_servers=mcp_servers,
                 )
 
         # 10. Credit the vendor and model used for this turn.
@@ -808,6 +846,80 @@ class ProjectManager:
         final_result.metadata["handoff_from"] = read_only_agent.id
         final_result.metadata["handoff_analysis"] = first_result.text
         return final_result, writer_config
+
+    async def _run_critic_pass(
+        self,
+        ctx: OrchestrationContext,
+        profile: TaskProfile,
+        resolved_model: str | None,
+        result: AgentResult,
+        changes: list[tuple[str, int]],
+        *,
+        allowed_tools: list[str] | None,
+        blocked_tools: list[str] | None,
+        permission_mode: str | None,
+        deny_dangerous: bool,
+        max_turns: int | None,
+        mcp_servers: dict[str, Any] | None,
+    ) -> AgentResult:
+        """Dispatch the code-critic agent to review this turn's source changes.
+
+        The critic receives the original request as the spec and the changed
+        file list as scope; its own agent definition enforces context isolation
+        (no implementer rationale). BLOCK verdicts are surfaced loudly but never
+        auto-revert code.
+        """
+        try:
+            critic = self.registry.get("code-critic")
+        except KeyError:
+            logger.warning(
+                "Critic gate: 'code-critic' agent not in registry; skipping review pass"
+            )
+            return result
+
+        change_lines = "\n".join(
+            f"- {path} ({lines} lines)" for path, lines in changes
+        )
+        critic_prompt = (
+            "Review the implementation that was just completed. Judge the code in "
+            "the repository against the original request only — do not look for "
+            "commit messages or implementer rationale.\n\n"
+            f"Original request:\n{ctx.original_prompt}\n\n"
+            f"Files changed in this implementation:\n{change_lines}"
+        )
+
+        critic_result, _ = await self._execute_agent(
+            ctx,
+            profile,
+            resolved_model,
+            prompt=critic_prompt,
+            agent=critic,
+            allowed_tools=allowed_tools,
+            blocked_tools=blocked_tools,
+            permission_mode=permission_mode,
+            deny_dangerous=deny_dangerous,
+            max_turns=max_turns,
+            mcp_servers=mcp_servers,
+            session_id=None,
+            resume=False,
+            fork=False,
+            dry_run=False,
+        )
+
+        verdict = critic_mod.parse_verdict(critic_result.text)
+        if verdict is None:
+            verdict = "WARN"
+        findings = critic_mod.extract_findings(critic_result.text)
+        summary = f"\n\n---\nCode review (code-critic): {verdict}"
+        if findings:
+            summary += "\n" + "\n".join(findings)
+        result.text += summary
+        result.metadata["critic_verdict"] = verdict
+        result.metadata["critic_agent"] = critic.id
+        logger.info(
+            "Critic gate: verdict=%s (%d finding lines)", verdict, len(findings)
+        )
+        return result
 
     def _select_writer_agent(self) -> AgentDefinition | None:
         """Pick the best agent to receive a write-step handoff."""

@@ -200,6 +200,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Prefer local/self-hosted models (Ollama, vLLM, etc.)",
     )
     parser.add_argument(
+        "--no-critic-gate",
+        action="store_true",
+        help="Disable the automatic code-critic review pass after implementation turns",
+    )
+    parser.add_argument(
         "--ask-escalate",
         action="store_true",
         help="In interactive mode, ask for permission before falling back to a frontier (cloud) model when no capable local model is available",
@@ -455,6 +460,8 @@ async def main_async() -> int:
         os.environ["OPENAI_BASE_URL"] = args.base_url
     if args.api_key:
         os.environ["OPENAI_API_KEY"] = args.api_key
+    if getattr(args, "no_critic_gate", False):
+        os.environ["MAESTRO_CRITIC_GATE"] = "off"
 
     if args.list_runtimes:
         for name, available in list_runtimes().items():
