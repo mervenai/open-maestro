@@ -5,6 +5,58 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0] - 2026-09-11
+
+### Added
+- Orchestrator-enforced code-critic gate: after an implementation turn that
+  changes >50 code lines or >1 source file, a `code-critic` review pass runs
+  automatically and appends an APPROVE/WARN/BLOCK verdict with top findings to
+  the result (metadata: `critic_verdict`). Disable with `--no-critic-gate` or
+  `MAESTRO_CRITIC_GATE=off`. (MSTRO-83)
+
+### Fixed
+- Write-step handoff writer selection was task-blind: the first `engineer`-role
+  agent in registry load order won regardless of the task. Writers are now
+  ranked by task relevance via `registry.select()` scoring; engineer-first load
+  order is only a fallback. (MSTRO-84)
+- `playwright` skill added to the `qa` agent (qa-002 E2E prompt routes there).
+
+## [1.12.0] - 2026-09-10
+
+### Added
+- Security scan gate: new `impl-005` "Run security scan gate" prompt at the end
+  of the implementation milestone — gitleaks (secrets), semgrep (SAST),
+  npm audit / pip-audit (SCA by manifest), syft CycloneDX SBOM. Missing tools
+  are recorded as skips, never fail the gate. Implementation milestone exit
+  criterion requires a scan report with no unaddressed critical/high findings.
+  (MSTRO-79..82)
+- Security-scanning skill references: `tooling-matrix.md` (per-ecosystem
+  install/run/coverage/false-positives) and `supply-chain-and-sbom.md`
+  (CycloneDX vs SPDX, delivery targets, accuracy rules); four dangling
+  reference links pruned.
+- `agents/security.md` now leads with gitleaks/semgrep as the primary scanning
+  paths; the regex protocol is the documented fallback.
+
+## [1.11.0] - 2026-09-08
+
+### Added
+- Multi-line prompt input in interactive mode (Ctrl+J / Alt+Enter) for pasting
+  multi-line content.
+
+### Changed
+- Streamlined milestone playbook (playbook 1.1.0): removed duplicate `plan-003`
+  (repo/service impact map already produced by plan-001); the
+  "Write the output to {artifact_target}." line is now auto-appended by
+  `PromptTemplate.render()` instead of repeated in 21 prompts; `impl-004` names
+  the impl-001 501-stub handoff contract; `intake-001` keeps an uncapped
+  overflow list for open questions beyond the top 5-8.
+
+### Fixed
+- No longer asks for a repo path on follow-up questions about prior analysis.
+- Ollama tool calls emitted as content text are now executed.
+- Architectural analysis prompts are classified as deep reasoning; tool-using
+  deep-reasoning tasks route to the strongest local model.
+
 ## [1.10.3] - 2026-09-01
 
 ### Changed
