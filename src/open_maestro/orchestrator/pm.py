@@ -801,7 +801,7 @@ class ProjectManager:
             dry_run=False,
         )
 
-        writer = self._select_writer_agent()
+        writer = self._select_writer_agent(ctx.original_prompt)
         if writer is None:
             logger.warning(
                 "No mutating agent available for handoff; returning analysis only"
@@ -921,14 +921,28 @@ class ProjectManager:
         )
         return result
 
-    def _select_writer_agent(self) -> AgentDefinition | None:
-        """Pick the best agent to receive a write-step handoff."""
+    def _select_writer_agent(self, task_description: str = "") -> AgentDefinition | None:
+        """Pick the best agent to receive a write-step handoff.
+
+        Candidates are mutating, non-read-only agents. When the task text has
+        usable keywords, rank candidates with the same scoring registry.select
+        uses so the writer matches the task (previously the first engineer-role
+        agent in load order won regardless of the task — which handed an
+        architecture write-up to visual-basic-engineer). Falls back to the
+        first engineer, then any mutating agent.
+        """
         candidates = [
             a for a in self.registry.list()
             if _agent_can_mutate(a) and not _agent_is_read_only(a)
         ]
         if not candidates:
             return None
+        if task_description:
+            ranked = [
+                a for a in self.registry.select(task_description) if a in candidates
+            ]
+            if ranked:
+                return ranked[0]
         # Prefer engineer, then any mutating agent.
         for agent in candidates:
             if agent.role.lower() == "engineer":

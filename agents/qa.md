@@ -32,6 +32,7 @@ skills:
 - testing-anti-patterns
 - mutation-testing
 - webapp-testing
+- playwright
 - bug-fix-verification
 - pre-merge-verification
 - screenshot-verification

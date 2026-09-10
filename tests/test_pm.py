@@ -485,6 +485,52 @@ class TestProjectManagerHandoff:
         assert len(runtime.calls) == 1
         assert result.metadata.get("handoff_from") is None
 
+    async def test_writer_selection_matches_task_not_load_order(self, monkeypatch):
+        monkeypatch.setattr(critic_mod, "snapshot_head", lambda p: None)
+        monkeypatch.setattr(critic_mod, "detect_source_changes", lambda p, ref: [])
+        runtime = FakeRuntime()
+        vb_engineer = AgentDefinition(
+            id="visual-basic-engineer",
+            name="Visual Basic Engineer",
+            role="engineer",
+            instructions="Expert in Visual Basic 6 and VBA macros",
+            tools=["Read", "Edit", "Write", "Bash"],
+        )
+        ts_engineer = AgentDefinition(
+            id="typescript-engineer",
+            name="TypeScript Engineer",
+            role="engineer",
+            instructions="Expert in TypeScript and React",
+            tools=["Read", "Edit", "Write", "Bash"],
+        )
+        researcher = AgentDefinition(
+            id="researcher",
+            name="Researcher",
+            role="research",
+            tools=["Read", "Grep"],
+            blocked_tools=["Write", "Edit"],
+        )
+        # visual-basic-engineer first in load order — the old bug's setup.
+        registry = AgentRegistry(
+            {
+                "researcher": researcher,
+                "visual-basic-engineer": vb_engineer,
+                "typescript-engineer": ts_engineer,
+            }
+        )
+        pm = ProjectManager(runtime=runtime, registry=registry)
+
+        result = await pm.handle(
+            "verify the react component architecture and write the "
+            "execution plan to docs/plan.md",
+            agent_id="researcher",
+        )
+
+        assert result.is_error is False
+        # Researcher analyzes, then the writer must be the TypeScript engineer.
+        assert result.metadata.get("handoff_from") == "researcher"
+        assert result.metadata.get("selected_agent") == "typescript-engineer"
+
 
 class TestProjectManagerMilestoneContext:
     async def test_prompt_includes_milestone_context(self, tmp_path, monkeypatch):
