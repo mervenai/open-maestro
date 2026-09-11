@@ -90,7 +90,7 @@ class SupabaseDashboardPublisher:
     """Publish milestone dashboard snapshots to Supabase.
 
     Credentials come from ``MAESTRO_SUPABASE_URL`` and
-    ``MAESTRO_SUPABASE_SERVICE_KEY`` (or constructor args). The public render
+    ``MAESTRO_SUPABASE_ANON_KEY`` (or constructor args). The public render
     URL is ``<public_base>/<project_token>`` where public_base defaults to
     ``https://merven.ai/dashboard`` and can be overridden with
     ``MAESTRO_DASHBOARD_PUBLIC_BASE``.
@@ -99,13 +99,11 @@ class SupabaseDashboardPublisher:
     def __init__(
         self,
         url: str | None = None,
-        service_key: str | None = None,
+        anon_key: str | None = None,
         public_base: str | None = None,
     ):
         self.url = (url or os.environ.get("MAESTRO_SUPABASE_URL") or "").rstrip("/")
-        self.service_key = service_key or os.environ.get(
-            "MAESTRO_SUPABASE_SERVICE_KEY"
-        )
+        self.anon_key = anon_key or os.environ.get("MAESTRO_SUPABASE_ANON_KEY")
         self.public_base = (
             public_base
             or os.environ.get("MAESTRO_DASHBOARD_PUBLIC_BASE")
@@ -116,8 +114,8 @@ class SupabaseDashboardPublisher:
         missing = []
         if not self.url:
             missing.append("MAESTRO_SUPABASE_URL")
-        if not self.service_key:
-            missing.append("MAESTRO_SUPABASE_SERVICE_KEY")
+        if not self.anon_key:
+            missing.append("MAESTRO_SUPABASE_ANON_KEY")
         if missing:
             raise PublishError(
                 "Supabase publishing is not configured. Set "
@@ -128,8 +126,8 @@ class SupabaseDashboardPublisher:
     def _headers(self) -> dict[str, str]:
         return {
             "Content-Type": "application/json",
-            "apikey": self.service_key or "",
-            "Authorization": f"Bearer {self.service_key}",
+            "apikey": self.anon_key or "",
+            "Authorization": f"Bearer {self.anon_key}",
             # Merge on project_token conflict and return the upserted row.
             "Prefer": "resolution=merge-duplicates,return=representation",
         }

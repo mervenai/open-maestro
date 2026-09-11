@@ -271,7 +271,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "For the standalone receiver use the receiver base URL, e.g. "
             "https://dashboards.example.com/maestro/dashboard. "
             "Use 'supabase' to publish to the Supabase/Lovable backend "
-            "(requires MAESTRO_SUPABASE_URL and MAESTRO_SUPABASE_SERVICE_KEY; "
+            "(requires MAESTRO_SUPABASE_URL and MAESTRO_SUPABASE_ANON_KEY; "
             "see docs/dashboard-infra-setup.md)"
         ),
     )

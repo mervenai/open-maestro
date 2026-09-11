@@ -25,9 +25,8 @@ Architecture: Maestro CLI publishes a dashboard snapshot to Supabase; Lovable se
 2. Copy and save these values:
    - **Project URL** (e.g. `https://abcdefghijklmnop.supabase.co`)
    - **anon public** API key (starts with `eyJ...`)
-   - **service_role** secret API key (starts with `eyJ...`)
 
-> The `service_role` key must stay secret. Maestro uses it to publish. Lovable uses only the `anon` key to read.
+> Only the `anon` key is needed. Maestro publishes with it and Lovable reads with it. The `service_role` key is not used by this setup and should stay disabled/secret.
 
 ### Step 3: Create the dashboards table
 
@@ -62,16 +61,16 @@ Architecture: Maestro CLI publishes a dashboard snapshot to Supabase; Lovable se
   true
   ```
 
-**Policy 2: Service-role write**
-- Name: `Service role can upsert dashboards`
-- Target roles: `service_role`
+**Policy 2: Public upsert (publishing)**
+- Name: `Anon can upsert dashboards`
+- Target roles: `anon`, `authenticated`
 - Operation: `ALL`
 - Using expression:
   ```sql
   true
   ```
 
-> Because the `SELECT` policy is open, the only protection is the random `project_token`. This is intentional — it lets you share dashboard URLs with clients without login.
+> The write policy is intentionally open because publishing uses the public `anon` key — anyone who can reach the Supabase API can upsert a row if they know its `project_token`. The random token (>=32 chars) is the access control, for both reading and writing.
 
 ### Step 5: (Optional) Add updated_at trigger
 
@@ -195,10 +194,10 @@ On the machine where you run Maestro:
 
 ```bash
 export MAESTRO_SUPABASE_URL="https://abcdefghijklmnop.supabase.co"
-export MAESTRO_SUPABASE_SERVICE_KEY="your-service-role-key"
+export MAESTRO_SUPABASE_ANON_KEY="your-anon-key"
 ```
 
-For persistence, add these to your shell profile (`~/.zshrc` or `~/.bashrc`).
+The anon key is public by design (it also ships in the Lovable frontend), so it is safe to keep in your shell profile. For persistence, add these to `~/.zshrc` or `~/.bashrc`.
 
 ### Step 12: Publish the dashboard
 
@@ -225,10 +224,9 @@ Open the printed URL in a browser. You should see the rendered dashboard.
 
 ## Phase 4: Security checklist
 
-- [ ] `MAESTRO_SUPABASE_SERVICE_KEY` is never committed to Git.
-- [ ] Lovable only uses the `anon` key, not the service key.
+- [ ] Only the `anon` key is used anywhere; the `service_role` key stays disabled/unused.
 - [ ] `project_token` is random and at least 32 characters.
-- [ ] The Supabase `SELECT` policy is intentionally public; the token is the access control.
+- [ ] The Supabase `SELECT` and write policies are intentionally public; the token is the access control for both reading and writing. Anyone who guesses a token can overwrite that dashboard — rotate the token if compromised.
 - [ ] If a dashboard is compromised, rotate the token in `.open-maestro/config.yaml` and re-publish.
 
 ---

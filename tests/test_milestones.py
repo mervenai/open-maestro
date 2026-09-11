@@ -606,7 +606,7 @@ class TestSupabaseDashboardPublisher:
     def test_first_publish_generates_and_persists_token(self, tmp_path, monkeypatch):
         calls = {}
         monkeypatch.setenv("MAESTRO_SUPABASE_URL", "https://xyz.supabase.co")
-        monkeypatch.setenv("MAESTRO_SUPABASE_SERVICE_KEY", "service-key")
+        monkeypatch.setenv("MAESTRO_SUPABASE_ANON_KEY", "anon-key")
         self._patch_post(monkeypatch, calls)
 
         publisher = SupabaseDashboardPublisher()
@@ -622,7 +622,7 @@ class TestSupabaseDashboardPublisher:
             == "https://xyz.supabase.co/rest/v1/maestro_dashboards?on_conflict=project_token"
         )
         assert "resolution=merge-duplicates" in calls["headers"]["Prefer"]
-        assert calls["headers"]["apikey"] == "service-key"
+        assert calls["headers"]["apikey"] == "anon-key"
         assert calls["json"]["project_token"] == token
         assert "overall_completion" in calls["json"]["dashboard_json"]
 
@@ -640,7 +640,7 @@ class TestSupabaseDashboardPublisher:
         )
         calls = {}
         monkeypatch.setenv("MAESTRO_SUPABASE_URL", "https://xyz.supabase.co")
-        monkeypatch.setenv("MAESTRO_SUPABASE_SERVICE_KEY", "service-key")
+        monkeypatch.setenv("MAESTRO_SUPABASE_ANON_KEY", "service-key")
         self._patch_post(monkeypatch, calls)
 
         publisher = SupabaseDashboardPublisher()
@@ -657,7 +657,7 @@ class TestSupabaseDashboardPublisher:
 
     def test_missing_credentials_raise(self, tmp_path, monkeypatch):
         monkeypatch.delenv("MAESTRO_SUPABASE_URL", raising=False)
-        monkeypatch.delenv("MAESTRO_SUPABASE_SERVICE_KEY", raising=False)
+        monkeypatch.delenv("MAESTRO_SUPABASE_ANON_KEY", raising=False)
         publisher = SupabaseDashboardPublisher()
         with pytest.raises(PublishError) as excinfo:
             publisher.publish(self._plan(tmp_path))
@@ -673,7 +673,7 @@ class TestSupabaseDashboardPublisher:
         )
         calls = {}
         monkeypatch.setenv("MAESTRO_SUPABASE_URL", "https://xyz.supabase.co")
-        monkeypatch.setenv("MAESTRO_SUPABASE_SERVICE_KEY", "service-key")
+        monkeypatch.setenv("MAESTRO_SUPABASE_ANON_KEY", "service-key")
         self._patch_post(monkeypatch, calls, response=err)
 
         publisher = SupabaseDashboardPublisher()
@@ -684,7 +684,7 @@ class TestSupabaseDashboardPublisher:
     def test_public_base_env_override(self, tmp_path, monkeypatch):
         calls = {}
         monkeypatch.setenv("MAESTRO_SUPABASE_URL", "https://xyz.supabase.co")
-        monkeypatch.setenv("MAESTRO_SUPABASE_SERVICE_KEY", "service-key")
+        monkeypatch.setenv("MAESTRO_SUPABASE_ANON_KEY", "service-key")
         monkeypatch.setenv("MAESTRO_DASHBOARD_PUBLIC_BASE", "https://cdn.example.com/d")
         self._patch_post(monkeypatch, calls)
 

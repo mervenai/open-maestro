@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   random per-project token (>=32 chars) is generated and persisted to
   `.open-maestro/config.yaml` (`dashboard.project_token`); later publishes
   reuse it. Credentials come from `MAESTRO_SUPABASE_URL` and
-  `MAESTRO_SUPABASE_SERVICE_KEY`; the public render URL is
+  `MAESTRO_SUPABASE_ANON_KEY`; the public render URL is
   `MAESTRO_DASHBOARD_PUBLIC_BASE` (default `https://merven.ai/dashboard`) plus
   the token. See `docs/dashboard-infra-setup.md`.
 
