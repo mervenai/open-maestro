@@ -1,52 +1,135 @@
 # Dashboard Infrastructure Setup
 
-Step-by-step directions for publishing Maestro dashboards to **merven.ai** using **Supabase** as the backend and **Lovable** as the frontend host.
+Step-by-step directions for publishing Maestro dashboards to **merven.ai**.
 
-Architecture: Maestro CLI publishes a dashboard snapshot to Supabase; Lovable serves a standalone page at `https://merven.ai/dashboard/<project_token>`.
+- **Backend**: Lovable Cloud (Lovable's white-labeled Supabase). It speaks the
+  standard Supabase REST API, which is what Maestro publishes to.
+- **Frontend**: the merven.ai Lovable app, a standalone page at
+  `/dashboard/<project_token>`.
+
+Architecture: Maestro CLI upserts a dashboard snapshot into the
+`maestro_dashboards` table; the Lovable app reads the row by `project_token`
+and renders it. Access control is the random per-project token — no login.
 
 ---
 
-## Phase 1: Supabase backend
+## Phase 1: Create the backend (Lovable Cloud)
 
-> **Option: Lovable Cloud.** Lovable now white-labels Supabase as **Lovable
-> Cloud**, and it works with Maestro unchanged — the REST endpoint, `apikey`
-> header, and merge-duplicates upsert are the same. Instead of Steps 1-6 on
-> supabase.com, just prompt Lovable to create the backend, e.g.: *"Create a
-> `maestro_dashboards` table in this project's backend with columns id,
-> project_token (unique), dashboard_json, metadata (default empty),
-> published_at, updated_at (auto-refresh on change). Enable RLS with public
-> read by anyone and upsert allowed with the publishable key."* Lovable returns
-> a `https://<project>.supabase.co` URL and a `sb_publishable_...` key — use
-> those in Step 11. Skip the rest of Phase 1 and Phase 2 (the frontend is the
-> Lovable app itself).
+### Step 1: Create the table
 
-### Step 1: Create a Supabase project
+Open the merven.ai project in Lovable and paste this prompt:
 
-1. Go to [https://supabase.com](https://supabase.com) and sign in.
-2. Click **New project**.
-3. Choose your organization.
-4. Fill in:
-   - **Project name**: `merven-dashboard` (or any name)
-   - **Database password**: strong password, save it in a password manager
-   - **Region**: pick the region closest to your users
-5. Click **Create new project** and wait ~2 minutes for provisioning.
+```
+Create a `maestro_dashboards` table in this project's backend with columns:
+id (uuid, primary key, default gen_random_uuid()), project_token (text,
+unique), dashboard_json (jsonb), metadata (jsonb, default empty),
+published_at (timestamptz, default now()), updated_at (timestamptz,
+auto-refresh on change). Enable row-level security with public read by
+anyone and upsert allowed with the publishable key.
+```
 
-### Step 2: Get your Supabase credentials
+Lovable confirms when the table is live and reports the publishing details,
+e.g.:
 
-1. In the Supabase dashboard, go to **Project Settings** → **API**.
-2. Copy and save these values:
-   - **Project URL** (e.g. `https://abcdefghijklmnop.supabase.co`)
-   - **anon public** API key (`eyJ...` on Supabase, or `sb_publishable_...` on Lovable Cloud)
+```
+URL: https://blmhsgltngpurywjkofo.supabase.co
+Public key: sb_publishable_...
+Endpoint: POST /rest/v1/maestro_dashboards?on_conflict=project_token
+```
 
-> Only the `anon` key is needed. Maestro publishes with it and Lovable reads with it. The `service_role` key is not used by this setup and should stay disabled/secret.
+### Step 2: Save the credentials
 
-### Step 3: Create the dashboards table
+Keep these two values — they are the only ones needed anywhere (Maestro CLI
+and Lovable both use them):
 
-1. In Supabase, go to **Table Editor**.
-2. Click **New table**.
-3. Name it `maestro_dashboards`.
-4. Enable **Row Level Security (RLS)**.
-5. Add these columns:
+- **URL**: `https://<project>.supabase.co`
+- **Publishable key**: `sb_publishable_...`
+
+The publishable key is public by design; it also ships in the Lovable
+frontend. Nothing secret is involved in this setup.
+
+---
+
+## Phase 2: Create the dashboard page
+
+### Step 3: Prompt Lovable for the page
+
+In the merven.ai Lovable project:
+
+```
+Create a standalone page at route /dashboard/:token. It reads the token URL
+parameter, fetches the row from the maestro_dashboards table where
+project_token equals the token, and renders dashboard_json: project name,
+overall completion percentage, and per-epic status with milestone progress
+and blockers. Show a "Dashboard not found" state for unknown tokens and a
+loading state while fetching.
+```
+
+Lovable Cloud injects the Supabase client and its environment variables
+automatically — you do **not** need to write `createClient` code or edit
+`.env` by hand. If the generated page references env vars, verify `.env`
+contains `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` (Lovable
+Cloud sets both); if anything is missing, ask Lovable to fix the connection.
+
+### Step 4: Deploy
+
+1. In Lovable, click **Deploy**.
+2. If using a custom domain (merven.ai), ensure it is connected and SSL is active.
+
+---
+
+## Phase 3: Publish from Maestro
+
+### Step 5: Set Maestro environment variables
+
+On the machine where you run Maestro:
+
+```bash
+export MAESTRO_SUPABASE_URL="https://<project>.supabase.co"
+export MAESTRO_SUPABASE_ANON_KEY="sb_publishable_..."
+```
+
+For persistence, add these to `~/.zshrc` or `~/.bashrc`.
+
+### Step 6: Publish the dashboard
+
+From inside your project folder:
+
+```bash
+maestro --publish-dashboard supabase
+```
+
+On first publish, Maestro will:
+1. Generate a random `project_token` (>=32 chars).
+2. Save it to `.open-maestro/config.yaml`.
+3. Upsert the dashboard snapshot into `maestro_dashboards`.
+4. Print the public URL:
+   ```
+   https://merven.ai/dashboard/<project_token>
+   ```
+
+Later publishes reuse the persisted token and update the same row.
+
+### Step 7: Test the URL
+
+Open the printed URL in a browser. You should see the rendered dashboard.
+
+---
+
+## Security checklist
+
+- [ ] Only the publishable/anon key is used anywhere; no `service_role` key exists in this flow.
+- [ ] `project_token` is random and at least 32 characters.
+- [ ] The `SELECT` and write policies are intentionally public; the token is the access control for both reading and writing. Anyone who guesses a token can overwrite that dashboard — rotate the token if compromised.
+- [ ] If a dashboard is compromised, rotate the token in `.open-maestro/config.yaml` and re-publish.
+
+---
+
+## Alternative: standalone Supabase project (no Lovable Cloud)
+
+If the backend is a regular Supabase project instead of Lovable Cloud, create
+the same table in the Supabase console (**Table Editor** → new table
+`maestro_dashboards`, RLS enabled) with columns:
 
 | Name | Type | Default | Other |
 |---|---|---|---|
@@ -57,36 +140,13 @@ Architecture: Maestro CLI publishes a dashboard snapshot to Supabase; Lovable se
 | `published_at` | `timestamptz` | `now()` | — |
 | `updated_at` | `timestamptz` | `now()` | — |
 
-6. Click **Save**.
+Add the same two RLS policies (**Authentication** → **Policies**), both with
+using expression `true`:
 
-### Step 4: Add RLS policies
+1. `Public can read dashboards by token` — `SELECT` for `anon`, `authenticated`.
+2. `Anon can upsert dashboards` — `ALL` for `anon`, `authenticated`.
 
-1. Go to **Authentication** → **Policies**.
-2. Find `maestro_dashboards` and create these policies:
-
-**Policy 1: Public read**
-- Name: `Public can read dashboards by token`
-- Target roles: `anon`, `authenticated`
-- Operation: `SELECT`
-- Using expression:
-  ```sql
-  true
-  ```
-
-**Policy 2: Public upsert (publishing)**
-- Name: `Anon can upsert dashboards`
-- Target roles: `anon`, `authenticated`
-- Operation: `ALL`
-- Using expression:
-  ```sql
-  true
-  ```
-
-> The write policy is intentionally open because publishing uses the public `anon` key — anyone who can reach the Supabase API can upsert a row if they know its `project_token`. The random token (>=32 chars) is the access control, for both reading and writing.
-
-### Step 5: (Optional) Add updated_at trigger
-
-In the **SQL Editor**, run:
+Optionally add an `updated_at` auto-refresh trigger in the SQL Editor:
 
 ```sql
 create or replace function public.set_updated_at()
@@ -103,143 +163,9 @@ for each row
 execute function public.set_updated_at();
 ```
 
----
-
-## Phase 2: Lovable frontend
-
-### Step 6: Create the dashboard page
-
-1. Open your merven.ai project in Lovable.
-2. In the chat/agent prompt, say:
-
-   ```
-   Create a new page at route /dashboard/:token that reads a token URL parameter, fetches a dashboard snapshot from Supabase, and renders it.
-   ```
-
-3. Lovable should create a page component. If it does not create a dynamic route, prompt:
-
-   ```
-   Use React Router v6 useParams to read the token from /dashboard/:token.
-   ```
-
-### Step 7: Add Supabase fetch logic
-
-In the dashboard page component, Lovable should generate code similar to:
-
-```tsx
-import { useParams } from "react-router-dom";
-import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
-);
-
-export default function DashboardPage() {
-  const { token } = useParams();
-  const [dashboard, setDashboard] = useState<any>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!token) return;
-
-    supabase
-      .from("maestro_dashboards")
-      .select("dashboard_json")
-      .eq("project_token", token)
-      .single()
-      .then(({ data, error }) => {
-        if (error || !data) {
-          setError("Dashboard not found");
-        } else {
-          setDashboard(data.dashboard_json);
-        }
-      });
-  }, [token]);
-
-  if (error) return <div className="p-8">{error}</div>;
-  if (!dashboard) return <div className="p-8">Loading...</div>;
-
-  return (
-    <div className="p-8">
-      <h1 className="text-2xl font-bold">{dashboard.project_name}</h1>
-      <p>Overall completion: {dashboard.summary?.overall_completion}%</p>
-      {/* Render epics, milestones, blockers here */}
-    </div>
-  );
-}
-```
-
-### Step 8: Configure Supabase environment variables in Lovable
-
-1. In Lovable, open **Code** → `.env`.
-2. Add:
-
-   ```
-   VITE_SUPABASE_URL=https://abcdefghijklmnop.supabase.co
-   VITE_SUPABASE_PUBLISHABLE_KEY=your-anon-key
-   ```
-
-3. Save. Lovable will embed these at build time.
-
-### Step 9: Add route to App.tsx
-
-If Lovable did not add it automatically, ensure `src/App.tsx` has:
-
-```tsx
-<Route path="/dashboard/:token" element={<DashboardPage />} />
-```
-
-### Step 10: Deploy the Lovable app
-
-1. In Lovable, click **Deploy**.
-2. If using a custom domain (merven.ai), ensure it is connected and SSL is active.
-
----
-
-## Phase 3: Maestro publisher setup
-
-### Step 11: Set Maestro environment variables
-
-On the machine where you run Maestro:
-
-```bash
-export MAESTRO_SUPABASE_URL="https://abcdefghijklmnop.supabase.co"
-export MAESTRO_SUPABASE_ANON_KEY="your-anon-key"
-```
-
-The anon key is public by design (it also ships in the Lovable frontend), so it is safe to keep in your shell profile. For persistence, add these to `~/.zshrc` or `~/.bashrc`.
-
-### Step 12: Publish the dashboard
-
-From inside your project folder:
-
-```bash
-maestro --publish-dashboard supabase
-```
-
-On first publish, Maestro will:
-1. Generate a random `project_token`.
-2. Save it to `.open-maestro/config.yaml`.
-3. Upsert the dashboard snapshot into Supabase.
-4. Print the public URL:
-   ```
-   https://merven.ai/dashboard/<project_token>
-   ```
-
-### Step 13: Test the URL
-
-Open the printed URL in a browser. You should see the rendered dashboard.
-
----
-
-## Phase 4: Security checklist
-
-- [ ] Only the `anon` key is used anywhere; the `service_role` key stays disabled/unused.
-- [ ] `project_token` is random and at least 32 characters.
-- [ ] The Supabase `SELECT` and write policies are intentionally public; the token is the access control for both reading and writing. Anyone who guesses a token can overwrite that dashboard — rotate the token if compromised.
-- [ ] If a dashboard is compromised, rotate the token in `.open-maestro/config.yaml` and re-publish.
+The credentials are then the **Project URL** and the **anon public** key
+(`eyJ...`) from **Project Settings** → **API** — use them in place of the
+Lovable Cloud values in Steps 5-6. Everything else is identical.
 
 ---
 
