@@ -8,6 +8,18 @@ Architecture: Maestro CLI publishes a dashboard snapshot to Supabase; Lovable se
 
 ## Phase 1: Supabase backend
 
+> **Option: Lovable Cloud.** Lovable now white-labels Supabase as **Lovable
+> Cloud**, and it works with Maestro unchanged — the REST endpoint, `apikey`
+> header, and merge-duplicates upsert are the same. Instead of Steps 1-6 on
+> supabase.com, just prompt Lovable to create the backend, e.g.: *"Create a
+> `maestro_dashboards` table in this project's backend with columns id,
+> project_token (unique), dashboard_json, metadata (default empty),
+> published_at, updated_at (auto-refresh on change). Enable RLS with public
+> read by anyone and upsert allowed with the publishable key."* Lovable returns
+> a `https://<project>.supabase.co` URL and a `sb_publishable_...` key — use
+> those in Step 11. Skip the rest of Phase 1 and Phase 2 (the frontend is the
+> Lovable app itself).
+
 ### Step 1: Create a Supabase project
 
 1. Go to [https://supabase.com](https://supabase.com) and sign in.
@@ -24,7 +36,7 @@ Architecture: Maestro CLI publishes a dashboard snapshot to Supabase; Lovable se
 1. In the Supabase dashboard, go to **Project Settings** → **API**.
 2. Copy and save these values:
    - **Project URL** (e.g. `https://abcdefghijklmnop.supabase.co`)
-   - **anon public** API key (starts with `eyJ...`)
+   - **anon public** API key (`eyJ...` on Supabase, or `sb_publishable_...` on Lovable Cloud)
 
 > Only the `anon` key is needed. Maestro publishes with it and Lovable reads with it. The `service_role` key is not used by this setup and should stay disabled/secret.
 
