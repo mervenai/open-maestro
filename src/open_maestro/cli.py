@@ -30,6 +30,7 @@ from open_maestro.milestones import (
     MervenSyncError,
     MilestoneDetector,
     MilestoneStore,
+    SupabaseDashboardPublisher,
     export_dashboard_html,
     export_dashboard_json,
     export_dashboard_markdown,
@@ -268,7 +269,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Publish the dashboard JSON to a remote endpoint. "
             "For the standalone receiver use the receiver base URL, e.g. "
-            "https://dashboards.example.com/maestro/dashboard"
+            "https://dashboards.example.com/maestro/dashboard. "
+            "Use 'supabase' to publish to the Supabase/Lovable backend "
+            "(requires MAESTRO_SUPABASE_URL and MAESTRO_SUPABASE_SERVICE_KEY; "
+            "see docs/dashboard-infra-setup.md)"
         ),
     )
     parser.add_argument(
@@ -544,6 +548,20 @@ async def main_async() -> int:
     if args.publish_dashboard:
         store = MilestoneStore(Path.cwd())
         plan = store.load()
+        if args.publish_dashboard == "supabase":
+            publisher = SupabaseDashboardPublisher()
+            try:
+                response = publisher.publish(
+                    plan,
+                    project_token=args.dashboard_project_token,
+                    extra_metadata={"source": "maestro-cli"},
+                )
+                print("Dashboard published.")
+                print(f"Public URL: {response['public_url']}")
+            except Exception as exc:
+                print(f"Error: {exc}", file=sys.stderr)
+                return 1
+            return 0
         publisher = DashboardPublisher(
             api_key=args.dashboard_api_key,
             project_token=args.dashboard_project_token,

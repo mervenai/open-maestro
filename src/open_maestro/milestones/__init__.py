@@ -44,6 +44,12 @@ from open_maestro.milestones.publish_history import (
 )
 from open_maestro.milestones.server import serve_dashboard, stop_dashboard_server
 from open_maestro.milestones.store import MilestoneStore
+from open_maestro.milestones.supabase_publisher import (
+    SupabaseDashboardPublisher,
+    load_project_token,
+    resolve_project_token,
+    save_project_token,
+)
 from open_maestro.milestones.templates import (
     default_software_template,
     software_template_with_epics,
@@ -81,6 +87,10 @@ __all__ = [
     "export_dashboard_html",
     "DashboardPublisher",
     "PublishError",
+    "SupabaseDashboardPublisher",
+    "load_project_token",
+    "resolve_project_token",
+    "save_project_token",
     "DashboardPublishHistoryStore",
     "PublishHistoryRecord",
     "serve_dashboard",

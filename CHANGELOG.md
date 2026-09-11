@@ -5,6 +5,19 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.0] - 2026-09-11
+
+### Added
+- Supabase dashboard publisher for the Lovable-hosted merven.ai frontend:
+  `maestro --publish-dashboard supabase` upserts the dashboard snapshot into the
+  Supabase `maestro_dashboards` table via the REST API. On first publish a
+  random per-project token (>=32 chars) is generated and persisted to
+  `.open-maestro/config.yaml` (`dashboard.project_token`); later publishes
+  reuse it. Credentials come from `MAESTRO_SUPABASE_URL` and
+  `MAESTRO_SUPABASE_SERVICE_KEY`; the public render URL is
+  `MAESTRO_DASHBOARD_PUBLIC_BASE` (default `https://merven.ai/dashboard`) plus
+  the token. See `docs/dashboard-infra-setup.md`.
+
 ## [1.13.0] - 2026-09-11
 
 ### Added

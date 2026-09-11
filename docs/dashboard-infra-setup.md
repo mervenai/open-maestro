@@ -233,6 +233,8 @@ Open the printed URL in a browser. You should see the rendered dashboard.
 
 ---
 
-## Next step
+## Status
 
-Once the Supabase project is created, implement the `SupabaseDashboardPublisher` in Maestro and wire it to `--publish-dashboard supabase`.
+Implemented in Maestro **v1.14.0**: `SupabaseDashboardPublisher`
+(`src/open_maestro/milestones/supabase_publisher.py`), wired to
+`maestro --publish-dashboard supabase`. See the CHANGELOG for details.

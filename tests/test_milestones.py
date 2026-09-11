@@ -34,6 +34,11 @@ from open_maestro.milestones.dashboard import (
 from open_maestro.milestones.publisher import DashboardPublisher, PublishError
 from open_maestro.milestones.server import serve_dashboard, stop_dashboard_server
 from open_maestro.milestones.store import MilestoneStore, _normalize_project_id
+from open_maestro.milestones.supabase_publisher import (
+    SupabaseDashboardPublisher,
+    load_project_token,
+    save_project_token,
+)
 from open_maestro.milestones.templates import default_software_template
 
 
@@ -567,3 +572,122 @@ class TestDashboardPublisher:
         publisher = DashboardPublisher(url="http://127.0.0.1:18083/noop")
         with pytest.raises(PublishError):
             publisher.publish(plan, timeout=1.0)
+
+
+class TestSupabaseDashboardPublisher:
+    def _plan(self, tmp_path):
+        store = MilestoneStore(tmp_path)
+        plan = store.load()
+        plan.project_path = str(tmp_path)
+        return plan
+
+    def _patch_post(self, monkeypatch, calls, response=None):
+        import httpx
+
+        from open_maestro.milestones import supabase_publisher
+
+        class _Resp:
+            status_code = 200
+            text = ""
+
+            def raise_for_status(self):
+                return None
+
+        def fake_post(url, json=None, headers=None, timeout=None):
+            calls["url"] = url
+            calls["json"] = json
+            calls["headers"] = headers
+            if response is not None:
+                raise response
+            return _Resp()
+
+        monkeypatch.setattr(supabase_publisher.httpx, "post", fake_post)
+
+    def test_first_publish_generates_and_persists_token(self, tmp_path, monkeypatch):
+        calls = {}
+        monkeypatch.setenv("MAESTRO_SUPABASE_URL", "https://xyz.supabase.co")
+        monkeypatch.setenv("MAESTRO_SUPABASE_SERVICE_KEY", "service-key")
+        self._patch_post(monkeypatch, calls)
+
+        publisher = SupabaseDashboardPublisher()
+        response = publisher.publish(
+            self._plan(tmp_path), extra_metadata={"source": "maestro-cli"}
+        )
+
+        token = response["project_token"]
+        assert len(token) >= 32
+        assert response["public_url"] == f"https://merven.ai/dashboard/{token}"
+        assert (
+            calls["url"]
+            == "https://xyz.supabase.co/rest/v1/maestro_dashboards?on_conflict=project_token"
+        )
+        assert "resolution=merge-duplicates" in calls["headers"]["Prefer"]
+        assert calls["headers"]["apikey"] == "service-key"
+        assert calls["json"]["project_token"] == token
+        assert "overall_completion" in calls["json"]["dashboard_json"]
+
+        saved = yaml.safe_load(
+            (tmp_path / ".open-maestro" / "config.yaml").read_text()
+        )
+        assert saved["dashboard"]["project_token"] == token
+
+    def test_second_publish_reuses_persisted_token(self, tmp_path, monkeypatch):
+        existing = "existingtoken-0123456789abcdef"
+        config_dir = tmp_path / ".open-maestro"
+        config_dir.mkdir(parents=True)
+        (config_dir / "config.yaml").write_text(
+            f"dashboard:\n  project_token: {existing}\n"
+        )
+        calls = {}
+        monkeypatch.setenv("MAESTRO_SUPABASE_URL", "https://xyz.supabase.co")
+        monkeypatch.setenv("MAESTRO_SUPABASE_SERVICE_KEY", "service-key")
+        self._patch_post(monkeypatch, calls)
+
+        publisher = SupabaseDashboardPublisher()
+        response = publisher.publish(self._plan(tmp_path))
+
+        assert response["project_token"] == existing
+        assert calls["json"]["project_token"] == existing
+        # No new token was generated or written.
+        assert load_project_token(tmp_path) == existing
+
+    def test_token_helpers_round_trip(self, tmp_path):
+        save_project_token(tmp_path, "tok-123")
+        assert load_project_token(tmp_path) == "tok-123"
+
+    def test_missing_credentials_raise(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("MAESTRO_SUPABASE_URL", raising=False)
+        monkeypatch.delenv("MAESTRO_SUPABASE_SERVICE_KEY", raising=False)
+        publisher = SupabaseDashboardPublisher()
+        with pytest.raises(PublishError) as excinfo:
+            publisher.publish(self._plan(tmp_path))
+        assert "MAESTRO_SUPABASE_URL" in str(excinfo.value)
+
+    def test_http_error_raises(self, tmp_path, monkeypatch):
+        import httpx
+
+        err = httpx.HTTPStatusError(
+            "boom",
+            request=httpx.Request("POST", "http://x"),
+            response=httpx.Response(500, text="server error"),
+        )
+        calls = {}
+        monkeypatch.setenv("MAESTRO_SUPABASE_URL", "https://xyz.supabase.co")
+        monkeypatch.setenv("MAESTRO_SUPABASE_SERVICE_KEY", "service-key")
+        self._patch_post(monkeypatch, calls, response=err)
+
+        publisher = SupabaseDashboardPublisher()
+        with pytest.raises(PublishError) as excinfo:
+            publisher.publish(self._plan(tmp_path), project_token="tok-x")
+        assert "500" in str(excinfo.value)
+
+    def test_public_base_env_override(self, tmp_path, monkeypatch):
+        calls = {}
+        monkeypatch.setenv("MAESTRO_SUPABASE_URL", "https://xyz.supabase.co")
+        monkeypatch.setenv("MAESTRO_SUPABASE_SERVICE_KEY", "service-key")
+        monkeypatch.setenv("MAESTRO_DASHBOARD_PUBLIC_BASE", "https://cdn.example.com/d")
+        self._patch_post(monkeypatch, calls)
+
+        publisher = SupabaseDashboardPublisher()
+        response = publisher.publish(self._plan(tmp_path))
+        assert response["public_url"].startswith("https://cdn.example.com/d/")
