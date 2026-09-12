@@ -1,8 +1,10 @@
 # Dashboard Setup & Updating
 
-> **Status:** the dashboard mechanism is being reworked. This document covers
-> the current (v1.13.0) mechanism — export, local serve, the self-hosted
-> receiver, and the legacy Merven integration. New dashboard work lands here.
+> **Status:** publishing to **merven.ai** is live since v1.14.0 via Supabase
+> (Lovable Cloud) — see "Publish to merven.ai" below and
+> [dashboard-infra-setup.md](dashboard-infra-setup.md) for the one-time setup.
+> This document also covers export, local serve, the self-hosted receiver,
+> and the legacy Merven integration.
 
 Referenced from [DEPLOY.md](DEPLOY.md). For workstation install and runtime
 setup, see the deploy guide.
@@ -30,6 +32,25 @@ maestro --export-dashboard markdown > dashboard.md
 # HTML (styled like merven.ai)
 maestro --export-dashboard html > dashboard.html
 ```
+
+### Publish to merven.ai (recommended)
+
+Since v1.14.0, Maestro publishes dashboard snapshots to Supabase (Lovable
+Cloud); the merven.ai Lovable app renders them at
+`https://merven.ai/dashboard/<project_token>`. One-time setup (table, page,
+env vars) is in [dashboard-infra-setup.md](dashboard-infra-setup.md).
+
+From inside a project directory:
+
+```bash
+export MAESTRO_SUPABASE_URL="https://<project>.supabase.co"
+export MAESTRO_SUPABASE_ANON_KEY="sb_publishable_..."
+maestro --publish-dashboard supabase
+```
+
+First publish generates a random project token and saves it to
+`.open-maestro/config.yaml`; later publishes reuse it and update the same
+row. The command prints the public URL.
 
 ### Link a Maestro project to Merven
 

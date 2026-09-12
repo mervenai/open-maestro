@@ -471,12 +471,15 @@ Create `~/.open-maestro/mcp.json` or `./.open-maestro/mcp.json`:
 
 ## Milestone dashboards
 
-Maestro tracks project milestones and exposes a client-facing dashboard
-(local export, local serve, a self-hosted receiver, and a legacy Merven
-integration). Dashboard setup and updating live in a separate guide so this
-one stays focused on workstation installation:
+Maestro tracks project milestones and exposes a client-facing dashboard.
+The primary publishing path is **merven.ai** via Supabase (Lovable Cloud),
+`maestro --publish-dashboard supabase` (v1.14.0+); local export, local serve,
+a self-hosted receiver, and a legacy Merven integration also exist. Dashboard
+setup and updating live in separate guides so this one stays focused on
+workstation installation:
 
-**→ See [Dashboard Setup & Updating](DASHBOARD.md)**
+**→ See [Dashboard Setup & Updating](DASHBOARD.md)** — export, serve, publish
+**→ See [Dashboard Infrastructure Setup](dashboard-infra-setup.md)** — one-time merven.ai/Supabase setup
 
 ## Recommended starting workflow
 
@@ -617,8 +620,9 @@ models:
 - `kimi-cli` ignores `--max-turns` and does not support `--allowed-tools` / `--blocked-tools` natively.
 - Streaming output and progress indicators are functional but minimal.
 - Vision support depends on the chosen model and runtime.
-- The remote dashboard receiver endpoint is implemented in the Merven core on
-  `staging.merven.ai`; Maestro ships the publishing client only.
+- The legacy Merven receiver endpoint is implemented in the Merven core on
+  `staging.merven.ai`; Maestro ships the publishing client only. The
+  recommended Supabase/Lovable publishing path is self-contained in Maestro.
 
 ## Getting help
 
