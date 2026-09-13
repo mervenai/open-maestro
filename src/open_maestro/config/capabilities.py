@@ -204,6 +204,32 @@ class RequiredCapabilities:
 
 
 @dataclass
+class ModelEndpoint:
+    """Per-model API endpoint override for SDK-style runtimes.
+
+    Some providers (Z.ai, OpenRouter, vLLM clouds) expose an OpenAI-compatible
+    API at their own base URL with their own key.  When a model entry declares
+    an endpoint, the openai-sdk runtime talks to that endpoint with the key
+    from *api_key_env* instead of the global ``OPENAI_BASE_URL`` /
+    ``OPENAI_API_KEY``.
+    """
+
+    runtime: str
+    base_url: str
+    api_key_env: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> ModelEndpoint | None:
+        if not data:
+            return None
+        return cls(
+            runtime=str(data.get("runtime", "openai-sdk")),
+            base_url=str(data["base_url"]).rstrip("/"),
+            api_key_env=str(data["api_key_env"]),
+        )
+
+
+@dataclass
 class ModelCapability:
     """A vendor-neutral model entry with per-runtime identifiers."""
 
@@ -213,6 +239,7 @@ class ModelCapability:
     aliases: list[str] = field(default_factory=list)
     identifiers: dict[str, str] = field(default_factory=dict)
     capabilities: Capabilities = field(default_factory=Capabilities)
+    endpoint: ModelEndpoint | None = None
 
     @classmethod
     def from_dict(cls, model_id: str, data: dict[str, Any]) -> ModelCapability:
@@ -223,6 +250,7 @@ class ModelCapability:
             aliases=_normalize_str_list(data.get("aliases", [])),
             identifiers=dict(data.get("identifiers", {})),
             capabilities=Capabilities.from_dict(data.get("capabilities", {})),
+            endpoint=ModelEndpoint.from_dict(data.get("endpoint")),
         )
 
     def identifier_for(self, runtime: str) -> str | None:
@@ -545,6 +573,15 @@ class CapabilityRegistry:
         if runtime:
             models = [m for m in models if m.supports_runtime(runtime)]
         return models
+
+    def model_for_identifier(
+        self, runtime: str, identifier: str
+    ) -> ModelCapability | None:
+        """Return the model entry for a concrete *runtime* identifier, if known."""
+        model_id = self._identifier_to_id.get((runtime, identifier))
+        if model_id is None:
+            return None
+        return self.models.get(model_id)
 
     def resolve(
         self,

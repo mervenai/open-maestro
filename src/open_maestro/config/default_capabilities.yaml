@@ -5,6 +5,14 @@
 # Capabilities are approximate and should be updated as providers release new
 # models.  Users can add new entries, override identifiers for a runtime, or
 # tweak capability flags without changing code.
+#
+# Optional per-model endpoint (OpenAI-compatible runtimes only):
+#   endpoint:
+#     runtime: openai-sdk
+#     base_url: https://api.example.com/v1
+#     api_key_env: EXAMPLE_API_KEY   # env var holding the key
+# When set, the openai-sdk runtime talks to that base URL with that key
+# instead of the global OPENAI_BASE_URL / OPENAI_API_KEY.
 
 models:
   kimi-coding-fast:
@@ -101,6 +109,36 @@ models:
       latency_hint: high
       cost_level: high
       relative_cost: 8.0
+
+  # Z.ai (Zhipu) GLM-5.3-Flash: open-weights (320B-A18B MoE) frontier-adjacent
+  # coding model at ~1/40th of Opus pricing ($0.15/$0.50 per M tokens).
+  # Serves as the cheap cloud workhorse for routine implementation, review,
+  # and synthesis tasks; deep-reasoning prompts still route to premium tiers.
+  # Get a key at https://z.ai and export ZAI_API_KEY.
+  # OpenRouter alternative: base_url https://openrouter.ai/api/v1,
+  # api_key_env OPENROUTER_API_KEY, identifier z-ai/glm-5.3-flash.
+  glm-5-3-flash:
+    name: "GLM 5.3 Flash"
+    provider: zai
+    aliases: [fast]
+    identifiers:
+      openai-sdk: glm-5.3-flash
+    endpoint:
+      runtime: openai-sdk
+      base_url: https://api.z.ai/v1
+      api_key_env: ZAI_API_KEY
+    capabilities:
+      tier: fast
+      tool_use: true
+      vision: true
+      computer_use: false
+      reasoning: light
+      coding_strength: high
+      max_context_tokens: 1000000
+      max_output_tokens: 131072
+      latency_hint: low
+      cost_level: low
+      relative_cost: 0.9
 
   openai-gpt4o-mini:
     name: "GPT-4o mini"

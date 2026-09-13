@@ -350,7 +350,9 @@ class ChainExecutor:
             try:
                 runtime_name, model_id = select_runtime_for_task(
                     profile,
-                    min_cost_level=CostLevel.LOW if self.prefer_local else CostLevel.MEDIUM,
+                    # No cost floor: capability scoring enforces minimum bars,
+                    # so cheap capable models take routine steps.
+                    min_cost_level=CostLevel.LOW,
                     prefer_local=self.prefer_local,
                 )
             except Exception as exc:

@@ -199,7 +199,9 @@ class TestModelResolverCapabilities:
             cost_preference=CostLevel.MEDIUM,
         )
         resolved = resolver.select_for_task("openai-sdk", profile)
-        assert resolved == "gpt-4o"
+        # GLM-5.3-Flash satisfies vision + high coding with lower cost and
+        # latency than gpt-4o, so it wins this profile.
+        assert resolved == "glm-5.3-flash"
 
 
 class TestCapabilityRegistryMerge:
@@ -287,3 +289,62 @@ class TestCapabilityRegistryMerge:
             user_paths=[user_file],
         )
         assert list(registry.models.keys()) == ["first", "second", "third"]
+
+
+class TestModelEndpoint:
+    def test_endpoint_parsed_from_dict(self) -> None:
+        model = ModelCapability.from_dict(
+            "demo",
+            {
+                "name": "Demo",
+                "provider": "demo",
+                "identifiers": {"openai-sdk": "demo-model"},
+                "endpoint": {
+                    "runtime": "openai-sdk",
+                    "base_url": "https://api.demo.com/v1/",
+                    "api_key_env": "DEMO_API_KEY",
+                },
+            },
+        )
+        assert model.endpoint is not None
+        assert model.endpoint.runtime == "openai-sdk"
+        assert model.endpoint.base_url == "https://api.demo.com/v1"
+        assert model.endpoint.api_key_env == "DEMO_API_KEY"
+
+    def test_endpoint_defaults_to_none(self) -> None:
+        model = ModelCapability.from_dict("demo", {"name": "Demo"})
+        assert model.endpoint is None
+
+    def test_default_registry_glm_endpoint(self) -> None:
+        registry = CapabilityRegistry.load()
+        model = registry.models["glm-5-3-flash"]
+        assert model.provider == "zai"
+        assert model.identifier_for("openai-sdk") == "glm-5.3-flash"
+        assert model.endpoint is not None
+        assert model.endpoint.base_url == "https://api.z.ai/v1"
+        assert model.endpoint.api_key_env == "ZAI_API_KEY"
+
+    def test_model_for_identifier(self) -> None:
+        registry = CapabilityRegistry.load()
+        entry = registry.model_for_identifier("openai-sdk", "glm-5.3-flash")
+        assert entry is not None
+        assert entry.id == "glm-5-3-flash"
+        assert registry.model_for_identifier("openai-sdk", "no-such-model") is None
+
+    def test_user_override_replaces_endpoint(self, tmp_path: Path) -> None:
+        override = tmp_path / "capabilities.yaml"
+        override.write_text(
+            "models:\n"
+            "  glm-5-3-flash:\n"
+            "    endpoint:\n"
+            "      runtime: openai-sdk\n"
+            "      base_url: https://openrouter.ai/api/v1\n"
+            "      api_key_env: OPENROUTER_API_KEY\n"
+        )
+        registry = CapabilityRegistry.load(user_paths=[override])
+        model = registry.models["glm-5-3-flash"]
+        assert model.endpoint is not None
+        assert model.endpoint.base_url == "https://openrouter.ai/api/v1"
+        assert model.endpoint.api_key_env == "OPENROUTER_API_KEY"
+        # Capabilities from the default registry survive the override.
+        assert model.capabilities.tool_use is True

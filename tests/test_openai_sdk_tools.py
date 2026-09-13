@@ -274,3 +274,26 @@ class TestOpenAISDKToolLoop:
         assert len(called_with) == 1
         assert called_with[0] != "default"
         assert called_with[0] != ""
+
+
+class TestPerModelEndpointClient:
+    def test_glm_model_uses_registry_endpoint_client(self, monkeypatch):
+        monkeypatch.setenv("ZAI_API_KEY", "zai-test")
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+        runtime = OpenAISDKRuntime()
+
+        client = runtime._client_for_model("glm-5.3-flash")
+        assert str(client.base_url) == "https://api.z.ai/v1/"
+        # Clients are cached per endpoint.
+        assert runtime._client_for_model("glm-5.3-flash") is client
+
+    def test_model_without_endpoint_uses_default_client(self, monkeypatch):
+        monkeypatch.setenv("ZAI_API_KEY", "zai-test")
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+        runtime = OpenAISDKRuntime()
+
+        client = runtime._client_for_model("gpt-4o")
+        assert client is runtime._ensure_client()
+        assert runtime._endpoint_clients == {}

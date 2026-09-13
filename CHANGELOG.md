@@ -5,6 +5,28 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.0] - 2026-09-11
+
+### Added
+- **GLM-5.3-Flash (Z.ai) as the cheap cloud workhorse.** New registry entry
+  (`glm-5-3-flash`, `fast` alias) with a per-model endpoint override: the
+  openai-sdk runtime talks to `https://api.z.ai/v1` using the `ZAI_API_KEY`
+  env var, independent of the global `OPENAI_BASE_URL`/`OPENAI_API_KEY`.
+  Set the key and routine implementation/review/synthesis tasks route to it;
+  deep-reasoning prompts still route to premium tiers (K3/Opus). OpenRouter
+  alternative documented in `default_capabilities.yaml`.
+- Per-model `endpoint` support in the capability registry (user-editable via
+  `~/.open-maestro/capabilities.yaml`): any model can declare its own
+  OpenAI-compatible base URL and API-key env var.
+
+### Changed
+- Interactive and chain routing no longer apply a MEDIUM cost floor: capability
+  scoring already enforces minimum reasoning/coding bars, so cheap capable
+  models take routine tasks. Behavior change: `fast`-class models (GLM-5.3
+  Flash, Haiku, gpt-4o-mini, kimi-for-coding, qwen-coder-plus) are now
+  eligible for light/medium tasks they were previously excluded from.
+  One-shot CLI runs keep the `--cost-preference` flags unchanged.
+
 ## [1.14.0] - 2026-09-11
 
 ### Added

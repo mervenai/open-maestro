@@ -59,6 +59,22 @@ def _probe_url(url: str, timeout: float = 2.0) -> bool:
         return False
 
 
+def _configured_model_endpoints() -> list[Any]:
+    """Return endpoint overrides declared by registry models for openai-sdk."""
+    try:
+        from open_maestro.config.capabilities import CapabilityRegistry
+
+        registry = CapabilityRegistry.load()
+    except Exception as exc:
+        logger.debug("Could not load capability registry: %s", exc)
+        return []
+    return [
+        m.endpoint
+        for m in registry.list_models(runtime="openai-sdk")
+        if m.endpoint is not None and m.endpoint.runtime == "openai-sdk"
+    ]
+
+
 def _openai_sdk_cloud_available() -> bool:
     """Return True when the openai-sdk runtime looks configured for a cloud endpoint."""
     base_url = os.environ.get("OPENAI_BASE_URL", "").rstrip("/")
@@ -66,7 +82,12 @@ def _openai_sdk_cloud_available() -> bool:
     is_local_url = bool(base_url) and (
         "localhost" in base_url or "127.0.0.1" in base_url
     )
-    return bool(os.environ.get("OPENAI_API_KEY") or (base_url and not is_local_url))
+    if bool(os.environ.get("OPENAI_API_KEY") or (base_url and not is_local_url)):
+        return True
+    # A model-specific endpoint (e.g. Z.ai) also makes the runtime usable.
+    return any(
+        os.environ.get(endpoint.api_key_env) for endpoint in _configured_model_endpoints()
+    )
 
 
 def _openai_sdk_local_available(identifier: str | None = None) -> bool:
@@ -176,6 +197,8 @@ def is_model_available(runtime_name: str, model: ModelCapability) -> bool:
         provider = model.provider.lower()
         if provider in ("ollama", "local"):
             return _openai_sdk_local_available(identifier)
+        if model.endpoint is not None and model.endpoint.runtime == "openai-sdk":
+            return bool(os.environ.get(model.endpoint.api_key_env))
         return _openai_sdk_cloud_available()
 
     return False

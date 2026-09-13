@@ -1600,7 +1600,11 @@ async def run_interactive(args: Any) -> int:
                     profile,
                     latency_tolerance=args.latency_tolerance,
                     max_cost_level=CostLevel(args.max_cost_level) if args.max_cost_level else None,
-                    min_cost_level=CostLevel.LOW if prefer_local else CostLevel.MEDIUM,
+                    # No cost floor: capability scoring already enforces
+                    # minimum reasoning/coding bars, so cheap capable models
+                    # (e.g. GLM-5.3-Flash) take routine tasks and premium
+                    # tiers keep deep-reasoning work.
+                    min_cost_level=CostLevel.LOW,
                     prefer_local=prefer_local,
                 )
             except RuntimeError as exc:

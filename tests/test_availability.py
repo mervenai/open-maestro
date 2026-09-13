@@ -85,3 +85,26 @@ def test_is_model_available_cli_runtime_unavailable(registry: CapabilityRegistry
     model = registry.models["claude-sonnet"]
     with mock.patch("shutil.which", return_value=None):
         assert availability.is_model_available("claude-cli", model) is False
+
+
+def test_glm_model_available_only_with_zai_key(registry: CapabilityRegistry) -> None:
+    model = registry.models["glm-5-3-flash"]
+    assert model.endpoint is not None
+    with mock.patch.object(availability, "_sdk_package_available", return_value=True):
+        with mock.patch.dict("os.environ", {"ZAI_API_KEY": "zai-test"}, clear=True):
+            assert availability.is_model_available("openai-sdk", model) is True
+        with mock.patch.dict("os.environ", {}, clear=True):
+            assert availability.is_model_available("openai-sdk", model) is False
+
+
+def test_openai_sdk_runtime_available_with_only_zai_key(registry: CapabilityRegistry) -> None:
+    with mock.patch.object(availability, "_sdk_package_available", return_value=True):
+        with mock.patch.dict(
+            "os.environ", {"ZAI_API_KEY": "zai-test"}, clear=True
+        ):
+            assert availability.is_runtime_available("openai-sdk") is True
+        with mock.patch.dict("os.environ", {}, clear=True):
+            with mock.patch.object(
+                availability, "_openai_sdk_local_available", return_value=False
+            ):
+                assert availability.is_runtime_available("openai-sdk") is False

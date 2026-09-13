@@ -15,7 +15,7 @@ import os
 import time
 from typing import TYPE_CHECKING, Any
 
-from open_maestro.config.capabilities import TaskProfile
+from open_maestro.config.capabilities import CapabilityRegistry, TaskProfile
 from open_maestro.config.models import ModelResolver
 from open_maestro.events.bus import EventBus
 from open_maestro.mcp.client import MCPClient
@@ -155,6 +155,10 @@ class OpenAISDKRuntime(AgentRuntime):
         self._extra = {k: v for k, v in (extra or {}).items() if k not in ("api_key", "base_url")}
         self._resolver = ModelResolver()
         self._client: Any | None = None
+        # Per-endpoint clients for models that declare their own base URL
+        # (e.g. Z.ai), keyed by base_url.
+        self._endpoint_clients: dict[str, Any] = {}
+        self._registry: CapabilityRegistry | None = None
         self._tool_registry = tool_registry or ToolRegistry.default()
         self._event_bus = event_bus or EventBus()
 
@@ -193,7 +197,11 @@ class OpenAISDKRuntime(AgentRuntime):
             or os.environ.get("OPENAI_BASE_URL")
         ):
             return True
-        return _ollama_api_base() is not None
+        from open_maestro.runtime.availability import (
+            _openai_sdk_cloud_available,
+        )
+
+        return _openai_sdk_cloud_available() or _ollama_api_base() is not None
 
     def _ensure_client(self) -> Any:
         if self._client is None:
@@ -214,6 +222,39 @@ class OpenAISDKRuntime(AgentRuntime):
                 kwargs["timeout"] = self._timeout_seconds
             self._client = openai.AsyncOpenAI(**kwargs)
         return self._client
+
+    def _client_for_model(self, resolved_model: str) -> Any:
+        """Return the API client to use for *resolved_model*.
+
+        Models that declare a registry ``endpoint`` (their own base URL and
+        API-key env var) get a dedicated client for that endpoint; everything
+        else uses the default client built from config/env.
+        """
+        if self._registry is None:
+            try:
+                self._registry = CapabilityRegistry.load()
+            except Exception as exc:
+                logger.debug("Capability registry unavailable: %s", exc)
+                self._registry = CapabilityRegistry({})
+        entry = self._registry.model_for_identifier(
+            self.runtime_name, resolved_model
+        )
+        endpoint = entry.endpoint if entry is not None else None
+        if endpoint is None or endpoint.runtime != self.runtime_name:
+            return self._ensure_client()
+
+        client = self._endpoint_clients.get(endpoint.base_url)
+        if client is None:
+            openai = _import_openai()
+            kwargs: dict[str, Any] = {
+                "api_key": os.environ.get(endpoint.api_key_env, "maestro"),
+                "base_url": endpoint.base_url,
+            }
+            if self._timeout_seconds:
+                kwargs["timeout"] = self._timeout_seconds
+            client = openai.AsyncOpenAI(**kwargs)
+            self._endpoint_clients[endpoint.base_url] = client
+        return client
 
     def _resolve_model(
         self, model: str | None, profile: TaskProfile | None = None
@@ -352,7 +393,7 @@ class OpenAISDKRuntime(AgentRuntime):
                 or "gpt-4o"
             )
 
-        client = self._ensure_client()
+        client = self._client_for_model(resolved)
         messages = self._build_messages(prompt, config)
         tool_schemas, tool_map = self._select_tools(config, extra_tools=extra_tools)
 

@@ -537,5 +537,6 @@ class TestOpenAIFallbackAliases:
 
         resolver = ModelResolver()
         assert resolver.resolve("default", "openai-sdk") == "gpt-4o"
-        assert resolver.resolve("fast", "openai-sdk") == "gpt-4o-mini"
+        # glm-5-3-flash is the first openai-sdk entry with the "fast" alias.
+        assert resolver.resolve("fast", "openai-sdk") == "glm-5.3-flash"
         assert resolver.resolve("reasoning", "openai-sdk") == "o3-mini"
