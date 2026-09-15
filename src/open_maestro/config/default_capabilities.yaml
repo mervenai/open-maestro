@@ -125,7 +125,7 @@ models:
       openai-sdk: glm-5.3-flash
     endpoint:
       runtime: openai-sdk
-      base_url: https://api.z.ai/v1
+      base_url: https://api.z.ai/api/paas/v4
       api_key_env: ZAI_API_KEY
     capabilities:
       tier: fast

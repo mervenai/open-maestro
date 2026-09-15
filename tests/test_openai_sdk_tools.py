@@ -284,7 +284,7 @@ class TestPerModelEndpointClient:
         runtime = OpenAISDKRuntime()
 
         client = runtime._client_for_model("glm-5.3-flash")
-        assert str(client.base_url) == "https://api.z.ai/v1/"
+        assert str(client.base_url) == "https://api.z.ai/api/paas/v4/"
         # Clients are cached per endpoint.
         assert runtime._client_for_model("glm-5.3-flash") is client
 

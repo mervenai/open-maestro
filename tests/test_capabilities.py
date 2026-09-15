@@ -321,7 +321,7 @@ class TestModelEndpoint:
         assert model.provider == "zai"
         assert model.identifier_for("openai-sdk") == "glm-5.3-flash"
         assert model.endpoint is not None
-        assert model.endpoint.base_url == "https://api.z.ai/v1"
+        assert model.endpoint.base_url == "https://api.z.ai/api/paas/v4"
         assert model.endpoint.api_key_env == "ZAI_API_KEY"
 
     def test_model_for_identifier(self) -> None:
