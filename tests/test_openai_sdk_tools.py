@@ -297,3 +297,65 @@ class TestPerModelEndpointClient:
         client = runtime._client_for_model("gpt-4o")
         assert client is runtime._ensure_client()
         assert runtime._endpoint_clients == {}
+
+
+class TestCostEstimation:
+    def test_glm_price_parsed_from_default_capabilities(self):
+        from open_maestro.config.capabilities import CapabilityRegistry
+
+        registry = CapabilityRegistry.load()
+        entry = registry.model_for_identifier("openai-sdk", "glm-5.3-flash")
+        assert entry is not None
+        assert entry.capabilities.price_input_per_million == 0.15
+        assert entry.capabilities.price_output_per_million == 0.50
+
+    def test_model_without_price_returns_none(self):
+        from open_maestro.config.capabilities import CapabilityRegistry
+
+        registry = CapabilityRegistry.load()
+        entry = registry.model_for_identifier("openai-sdk", "gpt-4o")
+        if entry is None:
+            return  # No registry entry: nothing to price.
+        assert entry.capabilities.price_input_per_million is None
+        assert entry.capabilities.price_output_per_million is None
+
+    def test_estimate_cost_uses_registry_prices(self):
+        runtime = OpenAISDKRuntime()
+
+        class _Caps:
+            price_input_per_million = 0.15
+            price_output_per_million = 0.50
+
+        class _Entry:
+            capabilities = _Caps()
+
+        class _Registry:
+            def model_for_identifier(self, runtime_name, model):
+                return _Entry()
+
+        runtime._registry = _Registry()
+        # 2M input tokens, 0.5M output tokens at $0.15/$0.50 per M.
+        cost = runtime._estimate_cost("glm-5.3-flash", 2_000_000, 500_000)
+        assert cost == round(2 * 0.15 + 0.5 * 0.50, 6)
+
+    def test_estimate_cost_returns_none_without_price(self):
+        runtime = OpenAISDKRuntime()
+
+        class _Caps:
+            price_input_per_million = None
+            price_output_per_million = None
+
+        class _Entry:
+            capabilities = _Caps()
+
+        class _Registry:
+            def model_for_identifier(self, runtime_name, model):
+                return _Entry()
+
+        runtime._registry = _Registry()
+        assert runtime._estimate_cost("gpt-4o", 1000, 1000) is None
+
+    def test_estimate_cost_returns_none_without_registry(self):
+        runtime = OpenAISDKRuntime()
+        runtime._registry = None
+        assert runtime._estimate_cost("glm-5.3-flash", 1000, 1000) is None

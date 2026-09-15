@@ -5,6 +5,17 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.2] - 2026-09-11
+
+### Added
+- **Per-model pricing for cost estimates.** `Capabilities` now carries optional
+  `price_input_per_million` / `price_output_per_million` fields, and the
+  openai-sdk runtime computes `cost_usd` on `AgentResult` from the resolved
+  model's registry prices (previously always `None` for that runtime). GLM
+  5.3-Flash is priced at $0.15 / $0.50 per million input/output tokens. The
+  reported `input_tokens` now uses the latest turn's prompt count instead of
+  summing per-turn counts (which double-counted the conversation).
+
 ## [1.15.1] - 2026-09-11
 
 ### Fixed

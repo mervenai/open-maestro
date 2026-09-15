@@ -261,6 +261,33 @@ class OpenAISDKRuntime(AgentRuntime):
     ) -> str | None:
         return self._resolver.resolve(model, self.runtime_name, profile=profile)
 
+    def _estimate_cost(
+        self, resolved_model: str, input_tokens: int, output_tokens: int
+    ) -> float | None:
+        """Estimate USD cost from per-model prices in the capability registry.
+
+        *input_tokens* should be the latest turn's prompt-token count (each
+        turn re-sends the conversation, so summing across turns would
+        double-count). Returns ``None`` when no price is known.
+        """
+        if self._registry is None:
+            return None
+        entry = self._registry.model_for_identifier(
+            self.runtime_name, resolved_model
+        )
+        caps = entry.capabilities if entry is not None else None
+        if caps is None or (
+            caps.price_input_per_million is None
+            and caps.price_output_per_million is None
+        ):
+            return None
+        cost = 0.0
+        if caps.price_input_per_million is not None:
+            cost += input_tokens / 1_000_000 * caps.price_input_per_million
+        if caps.price_output_per_million is not None:
+            cost += output_tokens / 1_000_000 * caps.price_output_per_million
+        return round(cost, 6)
+
     def _build_messages(
         self, prompt: str, config: AgentConfig | None = None
     ) -> list[dict[str, Any]]:
@@ -399,8 +426,11 @@ class OpenAISDKRuntime(AgentRuntime):
 
         start = time.monotonic()
         tool_calls_record: list[dict[str, Any]] = []
-        total_input_tokens = 0
         total_output_tokens = 0
+        # Per-turn prompt_tokens includes the whole conversation, so keep the
+        # latest turn's count for cost/context accounting (summing would
+        # double-count earlier turns).
+        last_input_tokens = 0
         turns = 0
 
         try:
@@ -438,12 +468,14 @@ class OpenAISDKRuntime(AgentRuntime):
                         # Some endpoints emit usage on the final chunk.
                         usage = getattr(chunk, "usage", None)
                         if usage:
-                            total_input_tokens += (
+                            prompt_tokens = (
                                 getattr(usage, "prompt_tokens", 0) or 0
                             )
-                            total_output_tokens += (
+                            completion_tokens = (
                                 getattr(usage, "completion_tokens", 0) or 0
                             )
+                            total_output_tokens += completion_tokens
+                            last_input_tokens = prompt_tokens
 
                         if not chunk.choices:
                             continue
@@ -543,12 +575,14 @@ class OpenAISDKRuntime(AgentRuntime):
                     return AgentResult(
                         text=accumulated_content or "",
                         session_id=None,
-                        cost_usd=None,
+                        cost_usd=self._estimate_cost(
+                            resolved, last_input_tokens, total_output_tokens
+                        ),
                         num_turns=turns,
                         duration_ms=duration_ms,
-                        input_tokens=total_input_tokens,
+                        input_tokens=last_input_tokens,
                         output_tokens=total_output_tokens,
-                        tokens_used=total_input_tokens + total_output_tokens,
+                        tokens_used=last_input_tokens + total_output_tokens,
                         tool_calls=tool_calls_record,
                         metadata={"finish_reason": finish_reason},
                     )
@@ -612,9 +646,12 @@ class OpenAISDKRuntime(AgentRuntime):
                 text="Reached the maximum number of tool turns without a final response.",
                 duration_ms=duration_ms,
                 num_turns=turns,
-                input_tokens=total_input_tokens,
+                cost_usd=self._estimate_cost(
+                    resolved, last_input_tokens, total_output_tokens
+                ),
+                input_tokens=last_input_tokens,
                 output_tokens=total_output_tokens,
-                tokens_used=total_input_tokens + total_output_tokens,
+                tokens_used=last_input_tokens + total_output_tokens,
                 tool_calls=tool_calls_record,
                 is_error=True,
             )

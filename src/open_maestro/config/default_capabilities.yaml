@@ -139,6 +139,8 @@ models:
       latency_hint: low
       cost_level: low
       relative_cost: 0.9
+      price_input_per_million: 0.15
+      price_output_per_million: 0.50
 
   openai-gpt4o-mini:
     name: "GPT-4o mini"

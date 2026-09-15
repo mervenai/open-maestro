@@ -92,6 +92,10 @@ class Capabilities:
     latency_hint: LatencyHint = LatencyHint.MEDIUM
     cost_level: CostLevel = CostLevel.MEDIUM
     relative_cost: float = 0.0
+    # Optional USD price per million tokens, used for cost estimates when the
+    # runtime's own usage payload does not carry a cost (e.g. openai-sdk).
+    price_input_per_million: float | None = None
+    price_output_per_million: float | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Capabilities:
@@ -117,6 +121,12 @@ class Capabilities:
                 data.get("cost_level", "medium"), CostLevel
             ),
             relative_cost=float(data.get("relative_cost", 0.0)),
+            price_input_per_million=_optional_float(
+                data.get("price_input_per_million")
+            ),
+            price_output_per_million=_optional_float(
+                data.get("price_output_per_million")
+            ),
         )
 
 
@@ -749,6 +759,12 @@ def _optional_int(value: Any) -> int | None:
     if value is None:
         return None
     return int(value)
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    return float(value)
 
 
 def _normalize_str_list(value: Any) -> list[str]:
