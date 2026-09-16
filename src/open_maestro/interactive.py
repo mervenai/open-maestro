@@ -33,6 +33,7 @@ from open_maestro.events.progress import InteractiveProgressHandler, ProgressInd
 from open_maestro.events.stream import StreamingHandler
 from open_maestro.mcp.config import load_mcp_config
 from open_maestro.memory.kuzu_client import KuzuMemoryClient
+from open_maestro.orchestrator.critic import CODE_EXTENSIONS
 from open_maestro.milestones import (
     DashboardPublishHistoryStore,
     MilestoneDetector,
@@ -679,6 +680,63 @@ def _looks_like_repo_analysis(prompt: str) -> bool:
     return has_action or (has_context and has_explicit_path)
 
 
+# Keywords indicating a prompt's *deliverable* depends on source code being
+# present (reuse assessments, codebase verification). Unlike
+# _REPO_ANALYSIS_ACTIONS these never trigger on follow-ups; they only matter
+# for the playbook gate in _maybe_clarify_repo_path, and only fire when the
+# current directory has no source files at all.
+_CODE_DEPENDENT_KEYWORDS = {
+    "codebase",
+    "code base",
+    "source code",
+    "reuse",
+    "reused",
+    "repo",
+    "repository",
+    "existing code",
+    "existing services",
+}
+
+_SOURCE_PROBE_SKIP_DIRS = {
+    ".git", ".hg", ".svn", "node_modules", ".venv", "venv", "env",
+    "__pycache__", ".idea", ".vscode", "dist", "build", ".next",
+    "target", "bin", "obj", ".cache", "vendor",
+}
+
+
+def _prompt_needs_code(prompt: str) -> bool:
+    """Return True when the prompt's required output depends on source code."""
+    lowered = prompt.lower()
+    return any(keyword in lowered for keyword in _CODE_DEPENDENT_KEYWORDS)
+
+
+def _cwd_has_source_files(root: Path, max_depth: int = 4) -> bool:
+    """Cheap probe: does *root* contain any source-code files?
+
+    Skips dependency/build directories and gives up after *max_depth* levels.
+    """
+    try:
+        root = root.resolve()
+    except OSError:
+        return True  # don't block clarification on resolution failures
+    stack: list[tuple[Path, int]] = [(root, 0)]
+    while stack:
+        current, depth = stack.pop()
+        if depth > max_depth:
+            continue
+        try:
+            entries = list(current.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.is_dir():
+                if entry.name not in _SOURCE_PROBE_SKIP_DIRS:
+                    stack.append((entry, depth + 1))
+            elif entry.suffix.lower() in CODE_EXTENSIONS:
+                return True
+    return False
+
+
 def _is_url(text: str) -> bool:
     """Return True if *text* looks like a remote URL rather than a local path."""
     lowered = text.lower()
@@ -815,13 +873,19 @@ async def _maybe_clarify_repo_path(
 
     if remote_urls:
         pass  # proceed to clarification
+    elif from_playbook and not remote_urls:
+        # Playbook prompts are scoped to the current project — except when
+        # the prompt's deliverable depends on source code (reuse assessment,
+        # codebase verification) and the current directory has none to
+        # analyze (docs-only project folders). In that case fall through to
+        # clarification so the user can point at the real codebase.
+        if not _prompt_needs_code(prompt) or _cwd_has_source_files(Path.cwd()):
+            return prompt, None
+        if _looks_like_follow_up(prompt, history, memories):
+            return prompt, None
     elif _looks_like_follow_up(prompt, history, memories):
         return prompt, None
     elif not _looks_like_repo_analysis(prompt):
-        return prompt, None
-    elif from_playbook and not remote_urls:
-        # Playbook prompts are scoped to the current project; only ask if the
-        # prompt itself points somewhere else explicitly.
         return prompt, None
 
     candidates = _extract_candidate_paths(prompt)

@@ -18,6 +18,7 @@ milestone_prompts:
         Produce a concise synthesis that covers:
         - Business goal and user value proposition
         - Scope IN/OUT (what is explicitly included and excluded)
+        - Superseded decisions (anything the PRD marks resolved, rejected, or "must not be built" — state the decision and what it supersedes, so the team never re-litigates it)
         - Top 5-8 open questions that could block design or implementation, ranked by blocking severity
         - Any additional open questions (brief, uncapped — do not drop them)
         - Top 5-8 risks with proposed mitigations

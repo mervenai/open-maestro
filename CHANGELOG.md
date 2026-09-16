@@ -5,6 +5,25 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.4] - 2026-09-11
+
+### Added
+- **Repo picker for code-dependent playbook prompts in docs-only folders.**
+  Playbook prompts stay scoped to the current project by default, but when a
+  prompt's deliverable depends on source code (reuse assessment, codebase
+  verification — detected via code-dependent keywords) and the current
+  directory contains no source files, the repo picker now fires so the user
+  can point the analysis at the real codebase (e.g. running intake prompts
+  from a docs-only `M3RFP/*` folder instead of the codebase clone). The
+  picker is evaluated before the generic repo-analysis classifier so canned
+  prompts don't need action verbs to qualify; follow-up detection still
+  applies. A cheap directory probe (extension match, dependency dirs skipped,
+  depth-limited) decides whether the current folder "has code".
+- **intake-001 playbook prompt now requires a "Superseded decisions" section**
+  (anything the PRD marks resolved, rejected, or "must not be built"), after
+  two independent model runs dropped all four resolved OQ decisions — the
+  single most intake-relevant content in PRD §10.
+
 ## [1.15.3] - 2026-09-11
 
 ### Added
