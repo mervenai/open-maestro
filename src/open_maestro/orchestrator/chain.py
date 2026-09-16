@@ -11,9 +11,10 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from open_maestro.agents.registry import _task_requires_writing
+from open_maestro.agents.registry import _agent_can_mutate, _task_requires_writing
 from open_maestro.config.capabilities import (
     CostLevel,
     ReasoningLevel,
@@ -21,6 +22,7 @@ from open_maestro.config.capabilities import (
     TaskProfile,
     TaskProfiler,
 )
+from open_maestro.orchestrator import critic as critic_mod
 from open_maestro.runtime.base import AgentConfig, AgentResult
 
 if TYPE_CHECKING:
@@ -301,11 +303,13 @@ class ChainExecutor:
         event_bus: EventBus | None = None,
         base_config: AgentConfig | None = None,
         prefer_local: bool = False,
+        critic_gate: bool = True,
     ):
         self.registry = registry
         self.event_bus = event_bus
         self.base_config = base_config or AgentConfig()
         self.prefer_local = prefer_local
+        self.critic_gate = critic_gate
 
     async def execute(
         self,
@@ -323,13 +327,6 @@ class ChainExecutor:
         mcp_servers: dict[str, Any] | None = None,
     ) -> AgentResult:
         """Run each step of *plan* and return grouped output."""
-        from open_maestro.config.models import ModelResolver
-        from open_maestro.runtime.factory import (
-            create_runtime,
-            select_runtime_for_task,
-        )
-        from open_maestro.security.policy import PermissionPolicy, evaluate
-
         step_results: list[StepResult] = []
         prior_outputs: list[str] = []
 
@@ -343,44 +340,22 @@ class ChainExecutor:
 
             agent = self.registry.get(step.agent_id)
 
-            # Resolve per-step task profile.
+            # Per-step critic gate: capture a git baseline before mutating
+            # steps so the post-step diff can be attributed to this step.
+            # Read-only agents skip both the snapshot and the review.
+            baseline: dict[str, int] | None = None
+            before_ref: str | None = None
+            if (
+                self.critic_gate
+                and _agent_can_mutate(agent)
+                and agent.id != "code-critic"
+            ):
+                before_ref = critic_mod.snapshot_head(Path.cwd())
+                baseline = dict(
+                    critic_mod.detect_source_changes(Path.cwd(), None)
+                )
+
             profile = self._step_profile(step, agent, base_profile)
-
-            # Pick the cheapest capable runtime/model for this step.
-            try:
-                runtime_name, model_id = select_runtime_for_task(
-                    profile,
-                    # No cost floor: capability scoring enforces minimum bars,
-                    # so cheap capable models take routine steps.
-                    min_cost_level=CostLevel.LOW,
-                    prefer_local=self.prefer_local,
-                )
-            except Exception as exc:
-                logger.warning("Chain step %s runtime selection failed: %s", idx, exc)
-                runtime_name = self.base_config.extra.get("runtime_name", "openai-sdk")
-                model_id = None
-
-            runtime = create_runtime(
-                runtime_name,
-                config=AgentConfig(
-                    extra={
-                        "api_key": self.base_config.extra.get("api_key"),
-                        "base_url": self.base_config.extra.get("base_url"),
-                    }
-                ),
-            )
-            # Forward chain-level events to runtimes that emit them (openai-sdk).
-            if hasattr(runtime, "_event_bus"):
-                runtime._event_bus = self.event_bus
-
-            resolved_model = model_id
-            if resolved_model is None:
-                resolver = ModelResolver()
-                resolved_model = resolver.resolve(
-                    agent.model,
-                    runtime_name,
-                    profile=profile,
-                )
 
             step_prompt = self._build_step_prompt(
                 step,
@@ -391,80 +366,57 @@ class ChainExecutor:
                 code_results=code_results,
             )
 
-            agent_config = agent.to_config()
-            agent_config["model"] = resolved_model
-            if permission_mode:
-                agent_config["permission_mode"] = permission_mode
-            if max_turns is not None:
-                agent_config["max_turns"] = max_turns
-            if mcp_servers is not None:
-                agent_config["mcp_servers"] = mcp_servers
-
-            blocked = set(agent_config.get("blocked_tools") or set())
-            if blocked_tools:
-                blocked.update(blocked_tools)
-                agent_config["blocked_tools"] = blocked
-
-            allowed = set(agent_config.get("allowed_tools") or set())
-            if allowed_tools:
-                allowed.update(allowed_tools)
-                agent_config["allowed_tools"] = sorted(allowed)
-
-            config = AgentConfig(
-                **agent_config,
-                task_profile=profile,
-            )
-
-            policy = PermissionPolicy(
-                mode=permission_mode or "allow",
-                dangerous_checks_enabled=deny_dangerous,
-                blocked_tools=blocked,
-                allowed_tools=allowed if allowed else None,
-            )
-
-            await self._emit("agent.selected", {
-                "agent_id": agent.id,
-                "role": agent.role,
-                "model": config.model,
-            })
-            await self._emit("runtime.started", {
-                "runtime": runtime_name,
-                "agent_id": agent.id,
-                "model": config.model,
-            })
-
             try:
-                if blocked or policy.is_active():
-                    guard_text = policy.guard_text(blocked)
-                    if guard_text:
-                        config = self._with_guard_text(config, guard_text)
-
-                    async def tool_guard(
-                        tool_name: str, tool_input: dict[str, Any]
-                    ) -> bool:
-                        return await evaluate(tool_name, tool_input, agent, policy)
-
-                    result = await runtime.run_with_hooks(
-                        step_prompt,
-                        tool_guard=tool_guard,
-                        blocked_tools=blocked,
-                        config=config,
-                    )
-                else:
-                    result = await runtime.run(step_prompt, config=config)
+                runtime_name, config, result = await self._run_agent(
+                    agent,
+                    step_prompt,
+                    idx=idx,
+                    profile=profile,
+                    blocked_tools=blocked_tools,
+                    allowed_tools=allowed_tools,
+                    permission_mode=permission_mode,
+                    deny_dangerous=deny_dangerous,
+                    max_turns=max_turns,
+                    mcp_servers=mcp_servers,
+                )
             except Exception as exc:
                 logger.exception("Chain step %s failed", idx)
                 result = AgentResult(
                     text=f"Step failed: {exc}",
                     is_error=True,
                 )
+                runtime_name, config = "unknown", AgentConfig()
 
-            result.metadata["selected_agent"] = agent.id
-            await self._emit("runtime.completed", {
-                "runtime": runtime_name,
-                "agent_id": agent.id,
-                "is_error": result.is_error,
-            })
+            # Per-step critic gate: review only the delta this step produced.
+            if (
+                self.critic_gate
+                and baseline is not None
+                and not result.is_error
+            ):
+                current = dict(
+                    critic_mod.detect_source_changes(Path.cwd(), before_ref)
+                )
+                step_changes = [
+                    (path, lines - baseline.get(path, 0))
+                    for path, lines in current.items()
+                    if lines - baseline.get(path, 0) > 0
+                ]
+                if step_changes and critic_mod.should_trigger(step_changes):
+                    result = await self._run_critic_pass(
+                        result,
+                        step=step,
+                        agent=agent,
+                        original_prompt=original_prompt,
+                        changes=step_changes,
+                        base_profile=base_profile,
+                        blocked_tools=blocked_tools,
+                        allowed_tools=allowed_tools,
+                        permission_mode=permission_mode,
+                        deny_dangerous=deny_dangerous,
+                        max_turns=max_turns,
+                        mcp_servers=mcp_servers,
+                    )
+
             await self._emit("chain.step_completed", {
                 "step": idx,
                 "total": len(plan.steps),
@@ -489,6 +441,226 @@ class ChainExecutor:
                 break
 
         return self._synthesize(plan, step_results)
+
+    async def _run_agent(
+        self,
+        agent: AgentDefinition,
+        prompt: str,
+        *,
+        idx: int,
+        profile: TaskProfile,
+        blocked_tools: list[str] | None = None,
+        allowed_tools: list[str] | None = None,
+        permission_mode: str | None = None,
+        deny_dangerous: bool = False,
+        max_turns: int | None = None,
+        mcp_servers: dict[str, Any] | None = None,
+    ) -> tuple[str, AgentConfig, AgentResult]:
+        """Run one agent on a prompt and return (runtime, config, result).
+
+        Shared by the step loop and the per-step critic gate so both go
+        through identical runtime/model selection, policy, and guard handling.
+        """
+        from open_maestro.config.models import ModelResolver
+        from open_maestro.runtime.factory import (
+            create_runtime,
+            select_runtime_for_task,
+        )
+        from open_maestro.security.policy import PermissionPolicy, evaluate
+
+        # Pick the cheapest capable runtime/model for this run.
+        try:
+            runtime_name, model_id = select_runtime_for_task(
+                profile,
+                # No cost floor: capability scoring enforces minimum bars,
+                # so cheap capable models take routine steps.
+                min_cost_level=CostLevel.LOW,
+                prefer_local=self.prefer_local,
+            )
+        except Exception as exc:
+            logger.warning("Chain step %s runtime selection failed: %s", idx, exc)
+            runtime_name = self.base_config.extra.get("runtime_name", "openai-sdk")
+            model_id = None
+
+        runtime = create_runtime(
+            runtime_name,
+            config=AgentConfig(
+                extra={
+                    "api_key": self.base_config.extra.get("api_key"),
+                    "base_url": self.base_config.extra.get("base_url"),
+                }
+            ),
+        )
+        # Forward chain-level events to runtimes that emit them (openai-sdk).
+        if hasattr(runtime, "_event_bus"):
+            runtime._event_bus = self.event_bus
+
+        resolved_model = model_id
+        if resolved_model is None:
+            resolver = ModelResolver()
+            resolved_model = resolver.resolve(
+                agent.model,
+                runtime_name,
+                profile=profile,
+            )
+
+        agent_config = agent.to_config()
+        agent_config["model"] = resolved_model
+        if permission_mode:
+            agent_config["permission_mode"] = permission_mode
+        if max_turns is not None:
+            agent_config["max_turns"] = max_turns
+        if mcp_servers is not None:
+            agent_config["mcp_servers"] = mcp_servers
+
+        blocked = set(agent_config.get("blocked_tools") or set())
+        if blocked_tools:
+            blocked.update(blocked_tools)
+            agent_config["blocked_tools"] = blocked
+
+        allowed = set(agent_config.get("allowed_tools") or set())
+        if allowed_tools:
+            allowed.update(allowed_tools)
+            agent_config["allowed_tools"] = sorted(allowed)
+
+        config = AgentConfig(
+            **agent_config,
+            task_profile=profile,
+        )
+
+        policy = PermissionPolicy(
+            mode=permission_mode or "allow",
+            dangerous_checks_enabled=deny_dangerous,
+            blocked_tools=blocked,
+            allowed_tools=allowed if allowed else None,
+        )
+
+        await self._emit("agent.selected", {
+            "agent_id": agent.id,
+            "role": agent.role,
+            "model": config.model,
+        })
+        await self._emit("runtime.started", {
+            "runtime": runtime_name,
+            "agent_id": agent.id,
+            "model": config.model,
+        })
+
+        if blocked or policy.is_active():
+            guard_text = policy.guard_text(blocked)
+            if guard_text:
+                config = self._with_guard_text(config, guard_text)
+
+            async def tool_guard(
+                tool_name: str, tool_input: dict[str, Any]
+            ) -> bool:
+                return await evaluate(tool_name, tool_input, agent, policy)
+
+            result = await runtime.run_with_hooks(
+                prompt,
+                tool_guard=tool_guard,
+                blocked_tools=blocked,
+                config=config,
+            )
+        else:
+            result = await runtime.run(prompt, config=config)
+
+        result.metadata["selected_agent"] = agent.id
+        await self._emit("runtime.completed", {
+            "runtime": runtime_name,
+            "agent_id": agent.id,
+            "is_error": result.is_error,
+        })
+        return runtime_name, config, result
+
+    async def _run_critic_pass(
+        self,
+        result: AgentResult,
+        *,
+        step: HandoffStep,
+        agent: AgentDefinition,
+        original_prompt: str,
+        changes: list[tuple[str, int]],
+        base_profile: TaskProfile | None,
+        blocked_tools: list[str] | None = None,
+        allowed_tools: list[str] | None = None,
+        permission_mode: str | None = None,
+        deny_dangerous: bool = False,
+        max_turns: int | None = None,
+        mcp_servers: dict[str, Any] | None = None,
+    ) -> AgentResult:
+        """Review one chain step's changes with the code-critic agent.
+
+        The step purpose is the spec (not the original prompt), preserving
+        per-agent attribution. BLOCK verdicts are surfaced loudly but never
+        auto-revert code.
+        """
+        try:
+            critic = self.registry.get("code-critic")
+        except KeyError:
+            logger.warning(
+                "Chain critic gate: 'code-critic' agent not in registry; skipping"
+            )
+            return result
+
+        change_lines = "\n".join(
+            f"- {path} ({lines} lines)" for path, lines in changes
+        )
+        critic_prompt = (
+            "Review the implementation that was just completed. Judge the code "
+            "in the repository against the step's purpose only — do not look "
+            "for commit messages or implementer rationale.\n\n"
+            f"Original task:\n{original_prompt}\n\n"
+            f"Step purpose:\n{step.purpose}\n\n"
+            f"Implementing agent: {agent.id} ({agent.role})\n\n"
+            f"Files changed in this step:\n{change_lines}"
+        )
+
+        profile = self._step_profile(
+            HandoffStep(agent_id=critic.id, purpose="code review"),
+            critic,
+            base_profile,
+        )
+        _runtime_name, _config, critic_result = await self._run_agent(
+            critic,
+            critic_prompt,
+            idx=0,
+            profile=profile,
+            blocked_tools=blocked_tools,
+            allowed_tools=allowed_tools,
+            permission_mode=permission_mode,
+            deny_dangerous=deny_dangerous,
+            max_turns=max_turns,
+            mcp_servers=mcp_servers,
+        )
+        if critic_result.is_error:
+            logger.warning(
+                "Chain critic gate: critic pass failed: %s", critic_result.text
+            )
+            return result
+
+        verdict = critic_mod.parse_verdict(critic_result.text) or "WARN"
+        findings = critic_mod.extract_findings(critic_result.text)
+        if verdict == "BLOCK":
+            summary = "\n\n---\n⚠️ CODE REVIEW BLOCK (code-critic)"
+        else:
+            summary = f"\n\n---\nCode review (code-critic): {verdict}"
+        if findings:
+            summary += "\n" + "\n".join(findings)
+        result.text += summary
+        result.metadata["critic_verdict"] = verdict
+        result.metadata["critic_agent"] = critic.id
+        await self._emit("chain.critic_gate", {
+            "verdict": verdict,
+            "step_agent": agent.id,
+            "files": [path for path, _ in changes],
+        })
+        logger.info(
+            "Chain critic gate: verdict=%s (%d finding lines)",
+            verdict,
+            len(findings),
+        )
+        return result
 
     def _step_profile(
         self,

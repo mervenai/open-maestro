@@ -295,3 +295,205 @@ class TestProjectManagerChainIntegration:
         assert result.metadata.get("chain") is True
         assert "## Researcher (research)" in result.text
         assert "## Engineer (engineer)" in result.text
+
+
+class GateRuntime(AgentRuntime):
+    """Runtime that distinguishes step runs from critic-pass runs by prompt."""
+
+    def __init__(self):
+        self.step_calls = 0
+        self.critic_calls: list[str] = []
+
+    @property
+    def runtime_name(self) -> str:
+        return "echo"
+
+    async def run(self, prompt: str, config: AgentConfig | None = None) -> AgentResult:
+        if "Review the implementation" in prompt:
+            self.critic_calls.append(prompt)
+            return AgentResult(
+                text="## Verdict: BLOCK\n\n## Findings\n- hardcoded secret in src/app.py:12"
+            )
+        self.step_calls += 1
+        return AgentResult(text="step output")
+
+    async def run_with_hooks(
+        self,
+        prompt: str,
+        tool_guard=None,
+        blocked_tools=None,
+        config: AgentConfig | None = None,
+    ) -> AgentResult:
+        return await self.run(prompt, config)
+
+    async def resume(
+        self, session_id: str, prompt: str, config: AgentConfig | None = None
+    ) -> AgentResult:
+        return await self.run(prompt, config)
+
+
+@pytest.fixture
+def gate_registry():
+    return AgentRegistry(
+        {
+            "researcher": AgentDefinition(
+                id="researcher",
+                name="Researcher",
+                role="research",
+                instructions="Investigates and explains.",
+            ),
+            "engineer": AgentDefinition(
+                id="engineer",
+                name="Engineer",
+                role="engineer",
+                instructions="Writes code and tests.",
+                tools=["Write", "Edit", "Bash"],
+            ),
+            "code-critic": AgentDefinition(
+                id="code-critic",
+                name="Code Critic",
+                role="critic",
+                instructions="Adversarial code review.",
+                tools=["Read", "Grep"],
+            ),
+        }
+    )
+
+
+async def _run_chain(gate_registry, steps, runtime, **executor_kwargs):
+    plan = HandoffPlan(steps=steps, original_prompt="build a parser")
+    executor = ChainExecutor(registry=gate_registry, **executor_kwargs)
+    patches = [
+        patch(
+            "open_maestro.runtime.factory.select_runtime_for_task",
+            return_value=("echo", "model-x"),
+        ),
+        patch(
+            "open_maestro.runtime.factory.create_runtime",
+            return_value=runtime,
+        ),
+        patch(
+            "open_maestro.orchestrator.chain.critic_mod.snapshot_head",
+            return_value="deadbeef",
+        ),
+    ]
+    with patches[0], patches[1], patches[2]:
+        return await executor.execute(plan, original_prompt="build a parser")
+
+
+class TestChainCriticGate:
+    async def test_mutating_step_triggers_critic(self, gate_registry):
+        runtime = GateRuntime()
+        with patch(
+            "open_maestro.orchestrator.chain.critic_mod.detect_source_changes",
+            side_effect=[[], [("src/app.py", 80)]],
+        ):
+            result = await _run_chain(
+                gate_registry,
+                [HandoffStep(agent_id="engineer", purpose="implement the parser")],
+                runtime,
+            )
+        assert runtime.step_calls == 1
+        assert len(runtime.critic_calls) == 1
+        assert "CODE REVIEW BLOCK" in result.text
+        assert "hardcoded secret" in result.text
+
+    async def test_critic_spec_uses_step_purpose(self, gate_registry):
+        runtime = GateRuntime()
+        with patch(
+            "open_maestro.orchestrator.chain.critic_mod.detect_source_changes",
+            side_effect=[[], [("src/app.py", 80), ("src/lexer.py", 30)]],
+        ):
+            await _run_chain(
+                gate_registry,
+                [HandoffStep(agent_id="engineer", purpose="implement the parser")],
+                runtime,
+            )
+        assert len(runtime.critic_calls) == 1
+        assert "implement the parser" in runtime.critic_calls[0]
+
+    async def test_doc_only_step_skips_critic(self, gate_registry):
+        runtime = GateRuntime()
+        with patch(
+            "open_maestro.orchestrator.chain.critic_mod.detect_source_changes",
+            side_effect=[[], [("docs/readme.md", 300)]],
+        ):
+            result = await _run_chain(
+                gate_registry,
+                [HandoffStep(agent_id="engineer", purpose="write docs")],
+                runtime,
+            )
+        assert runtime.step_calls == 1
+        assert runtime.critic_calls == []
+        assert "CODE REVIEW BLOCK" not in result.text
+
+    async def test_trivial_change_skips_critic(self, gate_registry):
+        runtime = GateRuntime()
+        with patch(
+            "open_maestro.orchestrator.chain.critic_mod.detect_source_changes",
+            side_effect=[[], [("src/app.py", 3)]],
+        ):
+            await _run_chain(
+                gate_registry,
+                [HandoffStep(agent_id="engineer", purpose="tweak")],
+                runtime,
+            )
+        assert runtime.critic_calls == []
+
+    async def test_read_only_step_skips_baseline_and_critic(self, gate_registry):
+        runtime = GateRuntime()
+        with patch(
+            "open_maestro.orchestrator.chain.critic_mod.snapshot_head"
+        ) as snapshot, patch(
+            "open_maestro.orchestrator.chain.critic_mod.detect_source_changes",
+            side_effect=[[], [("src/app.py", 80)]],
+        ):
+            await _run_chain(
+                gate_registry,
+                [HandoffStep(agent_id="researcher", purpose="investigate")],
+                runtime,
+            )
+        snapshot.assert_not_called()
+        assert runtime.critic_calls == []
+
+    async def test_gate_disabled_skips_everything(self, gate_registry):
+        runtime = GateRuntime()
+        with patch(
+            "open_maestro.orchestrator.chain.critic_mod.snapshot_head"
+        ) as snapshot, patch(
+            "open_maestro.orchestrator.chain.critic_mod.detect_source_changes",
+            side_effect=[[], [("src/app.py", 80)]],
+        ):
+            await _run_chain(
+                gate_registry,
+                [HandoffStep(agent_id="engineer", purpose="implement")],
+                runtime,
+                critic_gate=False,
+            )
+        snapshot.assert_not_called()
+        assert runtime.critic_calls == []
+
+    async def test_prior_step_changes_not_recounted(self, gate_registry):
+        # Step 1 changes a file; step 2 makes no new changes. Only the delta
+        # is offered to the critic, so step 2 must not trigger a review and
+        # step 1 triggers exactly one.
+        runtime = GateRuntime()
+        with patch(
+            "open_maestro.orchestrator.chain.critic_mod.detect_source_changes",
+            side_effect=[
+                [],  # step 1 baseline
+                [("src/app.py", 80)],  # step 1 post
+                [("src/app.py", 80)],  # step 2 baseline
+                [("src/app.py", 80)],  # step 2 post (no delta)
+            ],
+        ):
+            result = await _run_chain(
+                gate_registry,
+                [
+                    HandoffStep(agent_id="engineer", purpose="implement"),
+                    HandoffStep(agent_id="engineer", purpose="polish docs"),
+                ],
+                runtime,
+            )
+        assert len(runtime.critic_calls) == 1
+        assert "CODE REVIEW BLOCK" in result.text

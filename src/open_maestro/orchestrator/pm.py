@@ -241,6 +241,7 @@ class ProjectManager:
                 event_bus=self.event_bus,
                 base_config=runtime_config or AgentConfig(),
                 prefer_local=prefer_local,
+                critic_gate=self.critic_gate,
             )
             result = await executor.execute(
                 plan,

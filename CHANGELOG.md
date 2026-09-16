@@ -5,6 +5,20 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.3] - 2026-09-11
+
+### Added
+- **Per-step critic gate for chain execution.** Code-mutating chain steps now
+  get the same adversarial review as single-agent turns. Before each mutating
+  step the executor snapshots git HEAD plus a diff baseline; after the step it
+  reviews only the delta that step produced, using the step purpose as the
+  spec (preserving per-agent attribution). BLOCK verdicts are surfaced loudly
+  and never auto-revert. The significance filter (`should_trigger`) still
+  applies, so analysis/doc steps stay free, and the existing opt-out
+  (`--no-critic-gate` / `MAESTRO_CRITIC_GATE=off`) disables the chain gate
+  too. Refactored step execution into a shared `_run_agent()` used by both
+  the step loop and the critic pass. Ref: MSTRO-90.
+
 ## [1.15.2] - 2026-09-11
 
 ### Added
