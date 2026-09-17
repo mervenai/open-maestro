@@ -5,6 +5,24 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.1] - 2026-09-17
+
+### Fixed
+- **openai-sdk turns killed mid-stream by the 600s read timeout.** The OpenAI
+  client defaulted to a 600s per-operation read timeout, which fired while
+  streaming providers (z.ai GLM, Ollama) were still generating after a long
+  silent stretch — the whole turn died with `httpx.ReadTimeout` after ~10
+  minutes of work. When no `timeout_seconds` is configured, clients now use an
+  explicit `httpx.Timeout` with a 30-minute read window (connect still 10s).
+- **Transient stream failures are retried.** Read timeouts, connection drops,
+  and 5xx/429 responses during a streaming request are retried up to 3
+  attempts (the request is re-issued, since a dead stream cannot be resumed),
+  with backoff. Previously the first mid-stream hiccup ended the turn.
+- **Empty API error messages.** `httpx.ReadTimeout` stringifies to an empty
+  string, so turns died with a bare "OpenAI API error:" and no explanation.
+  The error now falls back to the exception type name when the message is
+  empty.
+
 ## [1.16.0] - 2026-09-17
 
 ### Added

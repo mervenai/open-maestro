@@ -31,6 +31,56 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Total attempts (initial + retries) for one streaming request. Mid-stream
+# failures (httpx.ReadTimeout, connection drops) cannot be resumed, so the
+# whole request is re-issued.
+_MAX_STREAM_ATTEMPTS = 3
+
+_STREAM_RETRY_ERRORS: tuple[type[BaseException], ...] | None = None
+
+
+def _stream_retry_errors() -> tuple[type[BaseException], ...]:
+    """Exception types that justify re-issuing a failed streaming request."""
+    global _STREAM_RETRY_ERRORS
+    if _STREAM_RETRY_ERRORS is None:
+        errors: list[type[BaseException]] = [TimeoutError]
+        try:
+            import httpx
+
+            errors.extend([httpx.TimeoutException, httpx.TransportError])
+        except ImportError:
+            pass
+        try:
+            import openai
+
+            errors.extend(
+                [
+                    openai.APIConnectionError,
+                    openai.RateLimitError,
+                    openai.InternalServerError,
+                ]
+            )
+        except ImportError:
+            pass
+        _STREAM_RETRY_ERRORS = tuple(errors)
+    return _STREAM_RETRY_ERRORS
+
+
+def _client_timeout(timeout_seconds: float | None) -> Any:
+    """Timeout policy for the OpenAI client.
+
+    A configured ``timeout_seconds`` is honored as-is. Otherwise use an
+    explicit ``httpx.Timeout`` whose read window (30 min) is much larger than
+    the OpenAI SDK default (600 s): streaming providers (z.ai, Ollama) can go
+    silent for many minutes while generating, and the default per-operation
+    read timeout firing mid-stream killed the whole turn.
+    """
+    if timeout_seconds:
+        return timeout_seconds
+    import httpx
+
+    return httpx.Timeout(600.0, connect=10.0, read=1800.0)
+
 
 def _import_openai() -> Any:
     try:
@@ -218,8 +268,7 @@ class OpenAISDKRuntime(AgentRuntime):
                 "localhost" in self._base_url or "127.0.0.1" in self._base_url
             ):
                 kwargs["api_key"] = "not-needed"
-            if self._timeout_seconds:
-                kwargs["timeout"] = self._timeout_seconds
+            kwargs["timeout"] = _client_timeout(self._timeout_seconds)
             self._client = openai.AsyncOpenAI(**kwargs)
         return self._client
 
@@ -250,8 +299,7 @@ class OpenAISDKRuntime(AgentRuntime):
                 "api_key": os.environ.get(endpoint.api_key_env, "maestro"),
                 "base_url": endpoint.base_url,
             }
-            if self._timeout_seconds:
-                kwargs["timeout"] = self._timeout_seconds
+            kwargs["timeout"] = _client_timeout(self._timeout_seconds)
             client = openai.AsyncOpenAI(**kwargs)
             self._endpoint_clients[endpoint.base_url] = client
         return client
@@ -447,94 +495,37 @@ class OpenAISDKRuntime(AgentRuntime):
                     self._heartbeat(turn_start, preview_state=preview_state)
                 )
                 try:
-                    stream = await client.chat.completions.create(
-                        model=resolved,
-                        messages=messages,
-                        stream=True,
-                        **kwargs,
+                    outcome: dict[str, Any] | None = None
+                    for attempt in range(1, _MAX_STREAM_ATTEMPTS + 1):
+                        try:
+                            outcome = await self._consume_stream(
+                                client,
+                                resolved,
+                                messages,
+                                kwargs,
+                                preview_state,
+                            )
+                            break
+                        except _stream_retry_errors() as exc:
+                            if attempt >= _MAX_STREAM_ATTEMPTS:
+                                raise
+                            logger.warning(
+                                "OpenAI stream attempt %d/%d failed (%s); retrying",
+                                attempt,
+                                _MAX_STREAM_ATTEMPTS,
+                                exc,
+                            )
+                            await asyncio.sleep(min(2 * attempt, 10))
+                    # The loop either sets outcome or raises.
+                    outcome = outcome or {}
+                    accumulated_content = outcome.get("content", "")
+                    tool_buffers = outcome.get("tool_buffers", {})
+                    emitted_tool_indices = outcome.get(
+                        "emitted_tool_indices", set()
                     )
-                    accumulated_content = ""
-                    tool_buffers: dict[int, dict[str, Any]] = {}
-                    emitted_tool_indices: set[int] = set()
-                    finish_reason: str | None = None
-
-                    def _update_preview(text: str) -> None:
-                        snippet = text.strip().replace("\n", " ")
-                        if len(snippet) > 70:
-                            snippet = snippet[:67].rstrip() + "..."
-                        preview_state["text"] = snippet
-
-                    async for chunk in stream:
-                        # Some endpoints emit usage on the final chunk.
-                        usage = getattr(chunk, "usage", None)
-                        if usage:
-                            prompt_tokens = (
-                                getattr(usage, "prompt_tokens", 0) or 0
-                            )
-                            completion_tokens = (
-                                getattr(usage, "completion_tokens", 0) or 0
-                            )
-                            total_output_tokens += completion_tokens
-                            last_input_tokens = prompt_tokens
-
-                        if not chunk.choices:
-                            continue
-                        choice = chunk.choices[0]
-                        delta = choice.delta
-
-                        if delta.content:
-                            accumulated_content += delta.content
-                            _update_preview(accumulated_content)
-
-                        if delta.tool_calls:
-                            for tc_delta in delta.tool_calls:
-                                idx = tc_delta.index
-                                if idx not in tool_buffers:
-                                    tool_buffers[idx] = {
-                                        "id": tc_delta.id or "",
-                                        "type": "function",
-                                        "function": {"name": "", "arguments": ""},
-                                        "name_emitted": False,
-                                    }
-                                func = tool_buffers[idx]["function"]
-                                if tc_delta.id:
-                                    tool_buffers[idx]["id"] = tc_delta.id
-                                if tc_delta.function:
-                                    if tc_delta.function.name:
-                                        func["name"] += tc_delta.function.name
-                                    if tc_delta.function.arguments:
-                                        func["arguments"] += (
-                                            tc_delta.function.arguments
-                                        )
-
-                                # Emit a tool.call event as soon as we know the
-                                # tool name, so the user sees interim flow
-                                # before the (possibly slow) arguments finish.
-                                if func["name"] and not tool_buffers[idx]["name_emitted"]:
-                                    await self._emit_tool_call(func["name"], {})
-                                    tool_buffers[idx]["name_emitted"] = True
-
-                                # Emit again once the arguments parse as
-                                # complete JSON, so the detail (path, pattern,
-                                # etc.) appears.
-                                if (
-                                    idx not in emitted_tool_indices
-                                    and func["name"]
-                                    and func["arguments"]
-                                ):
-                                    try:
-                                        tool_input = parse_tool_input(
-                                            func["arguments"]
-                                        )
-                                        await self._emit_tool_call(
-                                            func["name"], tool_input
-                                        )
-                                        emitted_tool_indices.add(idx)
-                                    except Exception:
-                                        pass
-
-                        if choice.finish_reason:
-                            finish_reason = choice.finish_reason
+                    finish_reason = outcome.get("finish_reason")
+                    total_output_tokens += outcome.get("completion_tokens", 0)
+                    last_input_tokens = outcome.get("prompt_tokens", 0)
                 finally:
                     heartbeat.cancel()
                     try:
@@ -658,11 +649,114 @@ class OpenAISDKRuntime(AgentRuntime):
 
         except Exception as exc:
             logger.exception("OpenAI API call failed")
+            detail = str(exc).strip() or type(exc).__name__
             return AgentResult(
-                text=f"OpenAI API error: {exc}",
+                text=f"OpenAI API error: {detail}",
                 is_error=True,
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
+
+    async def _consume_stream(
+        self,
+        client: Any,
+        resolved: str,
+        messages: list[dict[str, Any]],
+        kwargs: dict[str, Any],
+        preview_state: dict[str, str],
+    ) -> dict[str, Any]:
+        """Issue one streaming request and consume it to completion.
+
+        Called by the retry loop in ``_run_tool_loop``: a stream that dies
+        mid-flight cannot be resumed, so on failure the caller re-issues the
+        whole request. Does not mutate *messages* or *kwargs*.
+        """
+        stream = await client.chat.completions.create(
+            model=resolved,
+            messages=messages,
+            stream=True,
+            **kwargs,
+        )
+        accumulated_content = ""
+        tool_buffers: dict[int, dict[str, Any]] = {}
+        emitted_tool_indices: set[int] = set()
+        finish_reason: str | None = None
+        prompt_tokens = 0
+        completion_tokens = 0
+
+        def _update_preview(text: str) -> None:
+            snippet = text.strip().replace("\n", " ")
+            if len(snippet) > 70:
+                snippet = snippet[:67].rstrip() + "..."
+            preview_state["text"] = snippet
+
+        async for chunk in stream:
+            # Some endpoints emit usage on the final chunk.
+            usage = getattr(chunk, "usage", None)
+            if usage:
+                prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+                completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+
+            if not chunk.choices:
+                continue
+            choice = chunk.choices[0]
+            delta = choice.delta
+
+            if delta.content:
+                accumulated_content += delta.content
+                _update_preview(accumulated_content)
+
+            if delta.tool_calls:
+                for tc_delta in delta.tool_calls:
+                    idx = tc_delta.index
+                    if idx not in tool_buffers:
+                        tool_buffers[idx] = {
+                            "id": tc_delta.id or "",
+                            "type": "function",
+                            "function": {"name": "", "arguments": ""},
+                            "name_emitted": False,
+                        }
+                    func = tool_buffers[idx]["function"]
+                    if tc_delta.id:
+                        tool_buffers[idx]["id"] = tc_delta.id
+                    if tc_delta.function:
+                        if tc_delta.function.name:
+                            func["name"] += tc_delta.function.name
+                        if tc_delta.function.arguments:
+                            func["arguments"] += tc_delta.function.arguments
+
+                    # Emit a tool.call event as soon as we know the
+                    # tool name, so the user sees interim flow
+                    # before the (possibly slow) arguments finish.
+                    if func["name"] and not tool_buffers[idx]["name_emitted"]:
+                        await self._emit_tool_call(func["name"], {})
+                        tool_buffers[idx]["name_emitted"] = True
+
+                    # Emit again once the arguments parse as
+                    # complete JSON, so the detail (path, pattern,
+                    # etc.) appears.
+                    if (
+                        idx not in emitted_tool_indices
+                        and func["name"]
+                        and func["arguments"]
+                    ):
+                        try:
+                            tool_input = parse_tool_input(func["arguments"])
+                            await self._emit_tool_call(func["name"], tool_input)
+                            emitted_tool_indices.add(idx)
+                        except Exception:
+                            pass
+
+            if choice.finish_reason:
+                finish_reason = choice.finish_reason
+
+        return {
+            "content": accumulated_content,
+            "tool_buffers": tool_buffers,
+            "emitted_tool_indices": emitted_tool_indices,
+            "finish_reason": finish_reason,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+        }
 
     async def _emit_tool_call(
         self, tool_name: str, tool_input: dict[str, Any]
