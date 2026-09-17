@@ -5,6 +5,25 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.0] - 2026-09-17
+
+### Added
+- **Org-based multi-repo selection in the repo picker.** New "Select repos
+  from a GitHub org..." option: enter an org name or URL, maestro lists the
+  org's repos via `gh repo list`, and a checkbox TUI lets you pick the
+  candidates (press `a` to toggle all). Selected repos are cloned into a
+  folder of your choosing (default `<cwd>/<org-slug>/`, existing checkouts
+  are reused) and the analysis prompt is clarified to that folder with the
+  repo list, so impact analysis can identify which repos are actually
+  relevant. Esc cancels from every step.
+
+### Fixed
+- **Private GitHub repos can now be cloned through the picker.** All clone
+  paths (single-URL and org multi-select) route through a shared `_clone_repo`
+  helper that uses `gh repo clone` when the gh CLI is available, supplying
+  authentication that plain `git clone` cannot provide non-interactively
+  (the machine had no git credential helper configured).
+
 ## [1.15.6] - 2026-09-17
 
 ### Fixed

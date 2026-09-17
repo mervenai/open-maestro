@@ -9,7 +9,9 @@ from unittest.mock import AsyncMock
 
 from open_maestro.interactive import (
     _cwd_has_source_files,
+    _list_org_repos,
     _maybe_clarify_repo_path,
+    _normalize_org,
     _prompt_needs_code,
 )
 
@@ -166,3 +168,65 @@ class TestPlaybookGate:
             from_playbook=False,
         )
         assert path is None
+
+
+class TestNormalizeOrg:
+    def test_bare_name(self):
+        assert _normalize_org("M3-LLC-Development") == "M3-LLC-Development"
+
+    def test_https_url(self):
+        assert (
+            _normalize_org("https://github.com/M3-LLC-Development")
+            == "M3-LLC-Development"
+        )
+
+    def test_https_url_with_trailing_slash(self):
+        assert (
+            _normalize_org("https://github.com/M3-LLC-Development/")
+            == "M3-LLC-Development"
+        )
+
+    def test_org_plus_repo_url_takes_org_part(self):
+        assert (
+            _normalize_org("https://github.com/M3-LLC-Development/Core")
+            == "M3-LLC-Development"
+        )
+
+    def test_ssh_form(self):
+        assert (
+            _normalize_org("git@github.com:M3-LLC-Development") == "M3-LLC-Development"
+        )
+
+    def test_empty_and_garbage(self):
+        assert _normalize_org("") == ""
+        assert _normalize_org("   ") == ""
+        assert _normalize_org("https://github.com/") == ""
+
+
+class TestListOrgRepos:
+    def test_parses_and_sorts(self, monkeypatch):
+        import json as jsonlib
+        import subprocess
+
+        payload = jsonlib.dumps(
+            [
+                {"name": "Core", "description": None, "url": "https://github.com/o/Core"},
+                {"name": "audit-service", "description": "audits", "url": "u"},
+            ]
+        )
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda *a, **k: types.SimpleNamespace(stdout=payload),
+        )
+        repos = _list_org_repos("o")
+        assert [r["name"] for r in repos] == ["audit-service", "Core"]
+
+    def test_returns_none_on_failure(self, monkeypatch):
+        import subprocess
+
+        def _boom(*a, **k):
+            raise subprocess.CalledProcessError(1, a[0] if a else "gh")
+
+        monkeypatch.setattr(subprocess, "run", _boom)
+        assert _list_org_repos("o") is None

@@ -7,10 +7,12 @@ conversation history and a single session across turns.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -934,6 +936,11 @@ async def _maybe_clarify_repo_path(
     choices.append(
         questionary.Choice(title="Clone remote repo...", value="__clone_prompt__")
     )
+    choices.append(
+        questionary.Choice(
+            title="Select repos from a GitHub org...", value="__org__"
+        )
+    )
     choices.append(questionary.Choice(title="Other local path...", value="__other__"))
 
     question = questionary.select(
@@ -983,12 +990,7 @@ async def _maybe_clarify_repo_path(
         if not path.exists():
             print(f"Cloning {url} into {path}...")
             try:
-                subprocess.run(
-                    ["git", "clone", url, str(path)],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
+                _clone_repo(url, path)
             except subprocess.CalledProcessError as exc:
                 detail = (exc.stderr or exc.stdout or "").strip()
                 print(f"Failed to clone {url}: {detail or exc}")
@@ -1005,6 +1007,8 @@ async def _maybe_clarify_repo_path(
             f"{prompt}\n\n[Clarified repo location: analyze the codebase at {path}]",
             path,
         )
+    elif selected == "__org__":
+        return await _clone_org_repos(cwd, prompt)
     elif selected.startswith("__clone__:"):
         url = selected.split(":", 2)[1]
         question = questionary.text(
@@ -1021,12 +1025,7 @@ async def _maybe_clarify_repo_path(
         if not path.exists():
             print(f"Cloning {url} into {path}...")
             try:
-                subprocess.run(
-                    ["git", "clone", url, str(path)],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
+                _clone_repo(url, path)
             except subprocess.CalledProcessError as exc:
                 detail = (exc.stderr or exc.stdout or "").strip()
                 print(f"Failed to clone {url}: {detail or exc}")
@@ -1078,6 +1077,184 @@ def _default_clone_dir(url: str) -> str:
     parts = lowered.split("/")
     name = parts[-1] if parts else "repo"
     return re.sub(r"[^a-z0-9_-]+", "-", name).strip("-") or "repo"
+
+
+def _normalize_org(text: str) -> str:
+    """Normalize user input (org URL, SSH form, or bare name) to an org slug."""
+    org = text.strip().rstrip("/")
+    lowered = org.lower()
+    for prefix in ("https://", "http://", "git://", "ssh://git@", "git@github.com:"):
+        if lowered.startswith(prefix):
+            org = org[len(prefix) :]
+            break
+    parts = [p for p in org.split("/") if p]
+    # A URL still has its host as the first segment (github.com) — skip it.
+    if parts and "." in parts[0]:
+        parts = parts[1:]
+    org = parts[0] if parts else ""
+    return re.sub(r"[^A-Za-z0-9_.-]+", "", org)
+
+
+def _clone_repo(url: str, path: Path) -> None:
+    """Clone *url* into *path*.
+
+    Uses ``gh repo clone`` for github.com URLs when the gh CLI is available —
+    it supplies authentication for private repos, which plain ``git clone``
+    cannot do non-interactively. Falls back to ``git clone`` otherwise.
+    """
+    lowered = url.lower().rstrip("/")
+    if "github.com/" in lowered and shutil.which("gh"):
+        repo = lowered.split("github.com/", 1)[1]
+        if repo.endswith(".git"):
+            repo = repo[:-4]
+        subprocess.run(
+            ["gh", "repo", "clone", repo, str(path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    else:
+        subprocess.run(
+            ["git", "clone", url, str(path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+
+def _list_org_repos(org: str, limit: int = 200) -> list[dict] | None:
+    """List a GitHub org's repos via gh.
+
+    Returns a list of ``{"name", "description", "url"}`` dicts sorted by name,
+    or ``None`` if gh is unavailable, unauthenticated, or the org is
+    inaccessible.
+    """
+    try:
+        proc = subprocess.run(
+            [
+                "gh",
+                "repo",
+                "list",
+                org,
+                "--limit",
+                str(limit),
+                "--json",
+                "name,description,url",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        repos = json.loads(proc.stdout)
+    except Exception:
+        return None
+    if not isinstance(repos, list):
+        return None
+    return sorted(repos, key=lambda r: str(r.get("name", "")).lower())
+
+
+async def _clone_org_repos(cwd: Path, prompt: str) -> tuple[str, Path | None]:
+    """Org-based multi-repo flow: list an org's repos via gh, let the user
+    pick the candidates, clone them into a folder, and clarify the prompt to
+    point at that folder. Returns (clarified_prompt, folder) — on any
+    cancellation or failure returns (prompt, None).
+    """
+    import questionary
+
+    if not shutil.which("gh"):
+        print(
+            "This option requires the GitHub CLI (gh): "
+            "https://cli.github.com — install it and run `gh auth login`."
+        )
+        return prompt, None
+
+    question = questionary.text("GitHub organization (name or URL):")
+    _add_escape_binding(question)
+    try:
+        typed = await question.application.run_async()
+    except TUICancelled:
+        return prompt, None
+    org = _normalize_org(typed or "")
+    if not org:
+        return prompt, None
+
+    print(f"Listing repositories for {org}...")
+    repos = await asyncio.to_thread(_list_org_repos, org)
+    if not repos:
+        print(
+            f"No repositories found for '{org}' — the org may not exist or "
+            "gh is not authenticated for it."
+        )
+        return prompt, None
+
+    choices = [
+        questionary.Choice(
+            title=f"{r.get('name', '?')} — {(r.get('description') or '')[:70]}",
+            value=r,
+        )
+        for r in repos
+    ]
+    question = questionary.checkbox(
+        "Select repos to clone (Space to check, <a> for all, "
+        "Enter to confirm, Esc to cancel):",
+        choices=choices,
+    )
+    _add_escape_binding(question)
+    try:
+        selected = await question.application.run_async()
+    except TUICancelled:
+        return prompt, None
+    if not selected:
+        return prompt, None
+
+    default_dir = cwd / org.lower()
+    question = questionary.text(
+        f"Local folder to clone {len(selected)} repo(s) into:",
+        default=str(default_dir),
+    )
+    _add_escape_binding(question)
+    try:
+        typed = await question.application.run_async()
+    except TUICancelled:
+        return prompt, None
+    target = Path(typed.strip() if typed else str(default_dir)).expanduser().resolve()
+    target.mkdir(parents=True, exist_ok=True)
+
+    cloned: list[str] = []
+    failed: list[str] = []
+    for repo in selected:
+        name = str(repo.get("name") or "repo")
+        dest = target / name
+        if dest.exists():
+            print(f"  exists: {name}")
+            cloned.append(name)
+            continue
+        print(f"  cloning {name}...")
+        try:
+            await asyncio.to_thread(_clone_repo, str(repo.get("url") or ""), dest)
+            cloned.append(name)
+        except Exception as exc:
+            detail = ""
+            if isinstance(exc, subprocess.CalledProcessError):
+                detail = (exc.stderr or exc.stdout or "").strip()
+            print(f"  FAILED {name}: {detail or exc}")
+            failed.append(name)
+
+    if not cloned:
+        print("No repositories were cloned.")
+        return prompt, None
+    if failed:
+        print(f"Cloned {len(cloned)}/{len(selected)} repos; failed: {', '.join(failed)}")
+
+    names = ", ".join(sorted(cloned))
+    return (
+        f"{prompt}\n\n[Clarified repo location: the folder {target} contains "
+        f"these cloned repositories: {names}. Each subfolder is a separate "
+        "repository — review them and identify which are actually relevant "
+        "to the task.]",
+        target,
+    )
 
 
 def _resolve_suggested_prompt(
