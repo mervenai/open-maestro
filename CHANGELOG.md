@@ -5,6 +5,17 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.2] - 2026-09-17
+
+### Fixed
+- **Org URLs pasted into the single-repo clone prompt now redirect to the org
+  flow.** Pasting `https://github.com/<org>` into "Clone remote repo..." (or
+  having it extracted from prompt text) failed with gh's confusing
+  "Could not resolve to a Repository" error. Single-segment github.com URLs
+  are now detected as org pages and automatically switch to the org
+  multi-select flow with the org prefilled, so the user picks real
+  repositories from the list.
+
 ## [1.16.1] - 2026-09-17
 
 ### Fixed

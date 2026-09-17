@@ -976,6 +976,12 @@ async def _maybe_clarify_repo_path(
         url = url.strip() if url else ""
         if not url:
             return prompt, None
+        if _is_org_level_url(url):
+            print(
+                "That URL is a GitHub organization, not a repository — "
+                "switching to org repo selection."
+            )
+            return await _clone_org_repos(cwd, prompt, org=_normalize_org(url))
         question = questionary.text(
             f"Local path to clone {url} into:",
             default=str(cwd / _default_clone_dir(url)),
@@ -1011,6 +1017,12 @@ async def _maybe_clarify_repo_path(
         return await _clone_org_repos(cwd, prompt)
     elif selected.startswith("__clone__:"):
         url = selected.split(":", 2)[1]
+        if _is_org_level_url(url):
+            print(
+                "That URL is a GitHub organization, not a repository — "
+                "switching to org repo selection."
+            )
+            return await _clone_org_repos(cwd, prompt, org=_normalize_org(url))
         question = questionary.text(
             f"Local path to clone {url} into:",
             default=str(cwd / _default_clone_dir(url)),
@@ -1154,11 +1166,28 @@ def _list_org_repos(org: str, limit: int = 200) -> list[dict] | None:
     return sorted(repos, key=lambda r: str(r.get("name", "")).lower())
 
 
-async def _clone_org_repos(cwd: Path, prompt: str) -> tuple[str, Path | None]:
+def _is_org_level_url(url: str) -> bool:
+    """True for github.com URLs with a single path segment — an org or user
+    profile page, which is not cloneable and should route to the org flow."""
+    lowered = url.strip().lower().rstrip("/")
+    for prefix in ("https://", "http://"):
+        if lowered.startswith(prefix):
+            lowered = lowered[len(prefix) :]
+            break
+    if not lowered.startswith("github.com/"):
+        return False
+    rest = lowered[len("github.com/") :]
+    return bool(rest) and "/" not in rest
+
+
+async def _clone_org_repos(
+    cwd: Path, prompt: str, org: str | None = None
+) -> tuple[str, Path | None]:
     """Org-based multi-repo flow: list an org's repos via gh, let the user
     pick the candidates, clone them into a folder, and clarify the prompt to
     point at that folder. Returns (clarified_prompt, folder) — on any
-    cancellation or failure returns (prompt, None).
+    cancellation or failure returns (prompt, None). *org* prefills the
+    organization and skips the org question.
     """
     import questionary
 
@@ -1169,13 +1198,14 @@ async def _clone_org_repos(cwd: Path, prompt: str) -> tuple[str, Path | None]:
         )
         return prompt, None
 
-    question = questionary.text("GitHub organization (name or URL):")
-    _add_escape_binding(question)
-    try:
-        typed = await question.application.run_async()
-    except TUICancelled:
-        return prompt, None
-    org = _normalize_org(typed or "")
+    if not org:
+        question = questionary.text("GitHub organization (name or URL):")
+        _add_escape_binding(question)
+        try:
+            typed = await question.application.run_async()
+        except TUICancelled:
+            return prompt, None
+        org = _normalize_org(typed or "")
     if not org:
         return prompt, None
 

@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 
 from open_maestro.interactive import (
     _cwd_has_source_files,
+    _is_org_level_url,
     _list_org_repos,
     _maybe_clarify_repo_path,
     _normalize_org,
@@ -230,3 +231,24 @@ class TestListOrgRepos:
 
         monkeypatch.setattr(subprocess, "run", _boom)
         assert _list_org_repos("o") is None
+
+
+class TestIsOrgLevelUrl:
+    def test_org_url(self):
+        assert _is_org_level_url("https://github.com/M3-LLC-Development")
+
+    def test_org_url_trailing_slash(self):
+        assert _is_org_level_url("https://github.com/M3-LLC-Development/")
+
+    def test_repo_url_is_not_org(self):
+        assert not _is_org_level_url("https://github.com/M3-LLC-Development/Core")
+
+    def test_user_profile_url(self):
+        assert _is_org_level_url("https://github.com/octocat")
+
+    def test_non_github_url(self):
+        assert not _is_org_level_url("https://gitlab.com/someorg")
+
+    def test_garbage(self):
+        assert not _is_org_level_url("")
+        assert not _is_org_level_url("https://github.com/")
