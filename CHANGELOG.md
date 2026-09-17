@@ -5,6 +5,16 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.6] - 2026-09-17
+
+### Fixed
+- **Clone failures now surface git's own error.** The interactive repo picker's
+  clone path swallowed `git clone` stderr and reported only the bare exit code
+  ("returned non-zero exit status 128"), which hid the real cause. The
+  `CalledProcessError` handler now prints git's stderr (e.g. GitHub's
+  "repository not found") and adds a hint when the URL looks like an
+  organization page rather than a repo.
+
 ## [1.15.5] - 2026-09-17
 
 ### Fixed

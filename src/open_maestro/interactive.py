@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import shlex
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -982,14 +983,21 @@ async def _maybe_clarify_repo_path(
         if not path.exists():
             print(f"Cloning {url} into {path}...")
             try:
-                import subprocess
-
                 subprocess.run(
                     ["git", "clone", url, str(path)],
                     check=True,
                     capture_output=True,
                     text=True,
                 )
+            except subprocess.CalledProcessError as exc:
+                detail = (exc.stderr or exc.stdout or "").strip()
+                print(f"Failed to clone {url}: {detail or exc}")
+                if "not found" in detail.lower():
+                    print(
+                        "Hint: the URL may be an organization page or a "
+                        "private repo without access — use a full repo URL."
+                    )
+                return prompt, None
             except Exception as exc:
                 print(f"Failed to clone {url}: {exc}")
                 return prompt, None
@@ -1013,14 +1021,21 @@ async def _maybe_clarify_repo_path(
         if not path.exists():
             print(f"Cloning {url} into {path}...")
             try:
-                import subprocess
-
                 subprocess.run(
                     ["git", "clone", url, str(path)],
                     check=True,
                     capture_output=True,
                     text=True,
                 )
+            except subprocess.CalledProcessError as exc:
+                detail = (exc.stderr or exc.stdout or "").strip()
+                print(f"Failed to clone {url}: {detail or exc}")
+                if "not found" in detail.lower():
+                    print(
+                        "Hint: the URL may be an organization page or a "
+                        "private repo without access — use a full repo URL."
+                    )
+                return prompt, None
             except Exception as exc:
                 print(f"Failed to clone {url}: {exc}")
                 return prompt, None
