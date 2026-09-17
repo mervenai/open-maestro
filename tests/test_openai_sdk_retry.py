@@ -119,3 +119,21 @@ class TestStreamRetry:
         result = await rt.run("do something")
         assert result.text == "ok"
         assert completions.calls == 2
+
+
+class TestClientForModelGuard:
+    def test_endpointless_cloud_model_without_creds_raises_clear_error(self):
+        rt = OpenAISDKRuntime(model="gpt-4o-mini")
+        with pytest.raises(RuntimeError, match="no configured endpoint"):
+            rt._client_for_model("gpt-4o-mini")
+
+    def test_ollama_model_still_uses_local_client(self, monkeypatch):
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+        rt = OpenAISDKRuntime(model="qwen2.5-coder:32b")
+        monkeypatch.setattr(
+            "open_maestro.runtime.openai_sdk._ollama_api_base",
+            lambda: "http://localhost:11434/v1",
+        )
+        client = rt._client_for_model("qwen2.5-coder:32b")
+        assert client is not None

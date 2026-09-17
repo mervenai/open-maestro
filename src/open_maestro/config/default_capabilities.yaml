@@ -205,6 +205,10 @@ models:
     aliases: [smart, default]
     identifiers:
       openai-sdk: qwen-plus
+    endpoint:
+      runtime: openai-sdk
+      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      api_key_env: DASHSCOPE_API_KEY
     capabilities:
       tier: standard
       tool_use: true
@@ -224,6 +228,10 @@ models:
     aliases: [reasoning]
     identifiers:
       openai-sdk: qwen-max
+    endpoint:
+      runtime: openai-sdk
+      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      api_key_env: DASHSCOPE_API_KEY
     capabilities:
       tier: premium
       tool_use: true
@@ -243,6 +251,10 @@ models:
     aliases: [fast]
     identifiers:
       openai-sdk: qwen-coder-plus
+    endpoint:
+      runtime: openai-sdk
+      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      api_key_env: DASHSCOPE_API_KEY
     capabilities:
       tier: fast
       tool_use: true

@@ -108,3 +108,35 @@ def test_openai_sdk_runtime_available_with_only_zai_key(registry: CapabilityRegi
                 availability, "_openai_sdk_local_available", return_value=False
             ):
                 assert availability.is_runtime_available("openai-sdk") is False
+
+
+def test_alibaba_model_available_only_with_dashscope_key(registry) -> None:
+    model = registry.models["qwen-max"]
+    assert model.endpoint is not None
+    with mock.patch.object(availability, "_sdk_package_available", return_value=True):
+        with mock.patch.dict(
+            "os.environ", {"DASHSCOPE_API_KEY": "ds-test"}, clear=True
+        ):
+            assert availability.is_model_available("openai-sdk", model) is True
+        with mock.patch.dict("os.environ", {}, clear=True):
+            assert availability.is_model_available("openai-sdk", model) is False
+
+
+def test_endpointless_cloud_model_not_available_with_other_provider_key(
+    registry,
+) -> None:
+    """Regression: ZAI_API_KEY (for GLM) must not make qwen/gpt models look
+    selectable — without generic OpenAI credentials their requests would
+    fall back to the autodetected local endpoint and 404 there."""
+    for model_id in ("openai-gpt4o-mini", "openai-gpt4o"):
+        model = registry.models[model_id]
+        assert model.endpoint is None
+        with mock.patch.object(
+            availability, "_sdk_package_available", return_value=True
+        ):
+            with mock.patch.dict(
+                "os.environ", {"ZAI_API_KEY": "zai-test"}, clear=True
+            ):
+                assert (
+                    availability.is_model_available("openai-sdk", model) is False
+                )

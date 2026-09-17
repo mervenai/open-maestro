@@ -290,13 +290,24 @@ class TestPerModelEndpointClient:
 
     def test_model_without_endpoint_uses_default_client(self, monkeypatch):
         monkeypatch.setenv("ZAI_API_KEY", "zai-test")
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
         runtime = OpenAISDKRuntime()
 
         client = runtime._client_for_model("gpt-4o")
         assert client is runtime._ensure_client()
         assert runtime._endpoint_clients == {}
+
+    def test_model_without_endpoint_and_no_generic_creds_raises(self, monkeypatch):
+        # A cloud model without its own endpoint must not silently fall back
+        # to the autodetected local Ollama client (where its name 404s).
+        monkeypatch.setenv("ZAI_API_KEY", "zai-test")
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+        runtime = OpenAISDKRuntime()
+
+        with pytest.raises(RuntimeError, match="no configured endpoint"):
+            runtime._client_for_model("gpt-4o")
 
 
 class TestCostEstimation:

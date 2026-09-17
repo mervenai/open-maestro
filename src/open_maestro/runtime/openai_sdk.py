@@ -290,6 +290,31 @@ class OpenAISDKRuntime(AgentRuntime):
         )
         endpoint = entry.endpoint if entry is not None else None
         if endpoint is None or endpoint.runtime != self.runtime_name:
+            provider = entry.provider.lower() if entry is not None else ""
+
+            def _non_local(url: str | None) -> bool:
+                return bool(url) and (
+                    "localhost" not in url and "127.0.0.1" not in url
+                )
+
+            # Note: self._base_url may hold the Ollama endpoint autodetected
+            # in __init__; a loopback URL is not a generic credential.
+            has_generic_creds = bool(
+                self._api_key
+                or os.environ.get("OPENAI_API_KEY")
+                or _non_local(self._base_url)
+                or _non_local(os.environ.get("OPENAI_BASE_URL"))
+            )
+            if provider not in ("ollama", "local") and not has_generic_creds:
+                # Without generic credentials the default client autodetects
+                # the local Ollama endpoint, where this cloud model name does
+                # not exist — surfacing later as a cryptic 404 per request.
+                raise RuntimeError(
+                    f"Model '{resolved_model}' has no configured endpoint and no "
+                    "OPENAI_API_KEY/OPENAI_BASE_URL is set. Declare an endpoint "
+                    "for it in the capabilities registry, set generic OpenAI "
+                    "credentials, or pick a different model."
+                )
             return self._ensure_client()
 
         client = self._endpoint_clients.get(endpoint.base_url)

@@ -5,6 +5,26 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.4] - 2026-09-17
+
+### Fixed
+- **Cloud models without a configured endpoint were wrongly selectable when
+  an unrelated provider's key was set.** `_openai_sdk_cloud_available()`
+  treats any model-specific endpoint key (e.g. `ZAI_API_KEY` for GLM) as
+  "cloud available", so endpoint-less models like `qwen-max` were marked
+  available; their requests then fell back to the autodetected Ollama client
+  and died with `404 model 'qwen-max' not found` — retrying every turn.
+  Model-level availability now requires generic `OPENAI_API_KEY` /
+  non-local `OPENAI_BASE_URL` for endpoint-less cloud models.
+- **Clear error instead of cryptic per-request 404.** The openai-sdk runtime
+  now raises a configuration error up front when a non-local model has no
+  endpoint and no generic credentials, rather than silently routing the
+  request to Ollama.
+- **Alibaba qwen entries now declare their DashScope endpoint**
+  (`https://dashscope.aliyuncs.com/compatible-mode/v1`, key env
+  `DASHSCOPE_API_KEY`), so they become selectable when a DashScope key is
+  actually configured.
+
 ## [1.16.3] - 2026-09-17
 
 ### Changed
