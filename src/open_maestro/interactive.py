@@ -879,9 +879,11 @@ async def _maybe_clarify_repo_path(
         # codebase verification) and the current directory has none to
         # analyze (docs-only project folders). In that case fall through to
         # clarification so the user can point at the real codebase.
+        # No follow-up check here: a prompt queued from the playbook is a
+        # fresh canned task by construction, and long canned prompts contain
+        # parenthetical phrases ("what is included") that trip the follow-up
+        # question-prefix matcher.
         if not _prompt_needs_code(prompt) or _cwd_has_source_files(Path.cwd()):
-            return prompt, None
-        if _looks_like_follow_up(prompt, history, memories):
             return prompt, None
     elif _looks_like_follow_up(prompt, history, memories):
         return prompt, None

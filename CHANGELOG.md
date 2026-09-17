@@ -5,6 +5,19 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.5] - 2026-09-17
+
+### Fixed
+- **Playbook repo picker suppressed by the follow-up matcher.** The docs-only
+  playbook gate (v1.15.4) kept the follow-up check as a safety net, but
+  `_looks_like_follow_up` substring-matches question prefixes ("what is")
+  that appear verbatim inside canned prompts ("Scope IN/OUT (what is
+  explicitly included and excluded)"), classifying fresh playbook tasks as
+  questions about past work and never showing the picker. Playbook prompts
+  queued from `state.pending_prompts` are fresh tasks by construction, so
+  the follow-up check is removed from that branch (it still applies to
+  free-text input). Regression test uses the real canned prompt text.
+
 ## [1.15.4] - 2026-09-11
 
 ### Added

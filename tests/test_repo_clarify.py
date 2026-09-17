@@ -15,9 +15,14 @@ from open_maestro.interactive import (
 
 CODE_NEEDING_PROMPT = (
     "Read the PRD/RFP in the requirements/ folder and any linked documents. "
-    "Produce a concise synthesis that covers: business goal, scope IN/OUT, "
-    "open questions, risks, and reuse opportunities in existing codebase "
-    "or services."
+    "Produce a concise synthesis that covers:"
+    "- Business goal and user value proposition\n"
+    "- Scope IN/OUT (what is explicitly included and excluded)\n"
+    "- Superseded decisions\n"
+    "- Top 5-8 open questions that could block design or implementation\n"
+    "- Any additional open questions (brief, uncapped — do not drop them)\n"
+    "- Top 5-8 risks with proposed mitigations\n"
+    "- Reuse opportunities in existing codebase or services."
 )
 
 PLAIN_PROMPT = (
