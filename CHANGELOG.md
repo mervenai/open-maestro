@@ -5,6 +5,27 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.3] - 2026-09-17
+
+### Changed
+- **Spec-driven development hardening in the software-consulting playbook.**
+  Six prompt changes closing gaps found while comparing intake syntheses:
+  - `plan-001` now re-verifies the intake synthesis's load-bearing claims
+    (reuse assets, contract assumptions) against the actual repos before
+    building the execution plan, so wrong "verified" claims from intake get
+    flagged instead of propagated.
+  - `design-003` must verify coverage before finishing: every PRD FR, every
+    Section 4 measurable target, and every open question needs a story or an
+    explicit disposition — closes the omission hole where dropped
+    requirements (e.g. a missed business target) silently propagated.
+  - `build-002` traceability matrix now covers measurable targets and NFRs
+    in addition to FRs.
+  - `impl-001`/`impl-002`/`impl-003` must read the frozen spec artifacts
+    (`docs/blueprint-design-and-data-contract.md`, `docs/template-spec.md`)
+    before implementing, and must record contradictions in
+    `docs/spec-deviations.md` instead of silently deviating — adds the
+    spec-drift loop the implementation prompts lacked.
+
 ## [1.16.2] - 2026-09-17
 
 ### Fixed

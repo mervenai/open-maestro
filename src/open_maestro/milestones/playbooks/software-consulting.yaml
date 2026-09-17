@@ -54,7 +54,8 @@ milestone_prompts:
       tags: [discover, architecture]
       artifact_target: docs/execution-plan-{date}.md
       prompt: |
-        Verify the PRD's architectural assumptions against the actual codebase.
+        First, re-verify the intake synthesis's load-bearing claims (reuse assets, contract assumptions, reuse instructions) against the actual repos; flag every claim that fails re-verification before proceeding.
+        Then verify the PRD's architectural assumptions against the actual codebase.
         For each major assumption (data sources, auth, events, deployment topology):
         - Confirm or correct it with file:line citations
         - Note any contract mismatch or missing dependency
@@ -108,6 +109,7 @@ milestone_prompts:
       prompt: |
         Convert the {epic_name} requirements into Jira-ready user stories with BDD acceptance criteria.
         Each story should have: ID, title, description, acceptance criteria (Given/When/Then), priority, and linked FR.
+        Verify coverage before finishing: every PRD FR, every Section 4 measurable target, and every open question has a story or an explicit disposition (deferred / out of scope / resolved). List anything missing.
         Output as a CSV and a Markdown summary.
 
     - id: design-004
@@ -144,7 +146,7 @@ milestone_prompts:
       tags: [plan]
       artifact_target: docs/traceability-matrix.md
       prompt: |
-        Build a traceability matrix mapping each FR/requirement to:
+        Build a traceability matrix mapping each FR, measurable target, and NFR to:
         - Jira story
         - Implementation file(s)
         - Unit/E2E test file(s)
@@ -181,6 +183,8 @@ milestone_prompts:
       artifact_target: ""
       prompt: |
         Implement the controller endpoints and service methods for the {epic_name} epic according to the frozen data contract.
+        Read docs/blueprint-design-and-data-contract.md first and implement exactly what it specifies.
+        If the real code contradicts the contract (a field, route, or validation rule cannot work as specified), record the deviation in docs/spec-deviations.md and flag it - do not silently implement something different.
         Start with thin controllers, validation, and happy-path stubs; return 501 for unimplemented branches.
         Add unit tests as you go.
 
@@ -192,7 +196,9 @@ milestone_prompts:
       artifact_target: ""
       prompt: |
         Implement the frontend components and user flow for the {epic_name} epic.
-        Follow existing component conventions, reuse platform services, and wire to the frozen API contract.
+        Read docs/blueprint-design-and-data-contract.md and docs/template-spec.md first and implement exactly what they specify.
+        Follow existing component conventions and reuse platform services.
+        If the real code contradicts the specs, record the deviation in docs/spec-deviations.md and flag it - do not silently implement something different.
         Add unit/component tests as you go.
 
     - id: impl-003
@@ -203,6 +209,8 @@ milestone_prompts:
       artifact_target: ""
       prompt: |
         Wire cross-service integration for the {epic_name} epic: events, SignalR/notifications, background jobs, or whatever seam is defined in the contract.
+        Read docs/blueprint-design-and-data-contract.md first; it defines the integration seams and event payloads.
+        If the real services contradict the contract, record the deviation in docs/spec-deviations.md and flag it - do not silently implement something different.
         Ensure idempotency, error handling, and observability.
 
     - id: impl-004
