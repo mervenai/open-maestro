@@ -137,3 +137,60 @@ class TestClientForModelGuard:
         )
         client = rt._client_for_model("qwen2.5-coder:32b")
         assert client is not None
+
+
+class TestTurnBudgetNudge:
+    async def test_nudge_appended_near_cap(self):
+        """At ~75% of max_turns a system nudge must tell the model to wrap up."""
+        rt = OpenAISDKRuntime(model="fake-model", max_turns=4)
+        rt._client_for_model = lambda resolved: object()  # type: ignore[method-assign]
+        rt._resolve_model = lambda model, profile=None: "fake-model"  # type: ignore[method-assign]
+        rt._build_messages = lambda prompt, config: [{"role": "user", "content": prompt}]  # type: ignore[method-assign]
+        rt._select_tools = lambda config, extra_tools=None: ([], {})  # type: ignore[method-assign]
+
+        buffer = {
+            "id": "t1",
+            "type": "function",
+            "function": {"name": "noop", "arguments": "{}"},
+        }
+
+        async def _fake_consume(client, resolved, messages, kwargs, preview_state):
+            return {
+                "content": "",
+                "tool_buffers": {0: dict(buffer)},
+                "emitted_tool_indices": {0},
+                "finish_reason": "tool_calls",
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+            }
+
+        seen_messages: list = []
+
+        async def _spy_consume(client, resolved, messages, kwargs, preview_state):
+            seen_messages.append(messages)
+            return await _fake_consume(
+                client, resolved, messages, kwargs, preview_state
+            )
+
+        rt._consume_stream = _spy_consume  # type: ignore[method-assign]
+        rt._execute_tool = lambda *a, **k: _ok()  # type: ignore[method-assign]
+
+        async def _ok():
+            return "ok"
+
+        result = await rt.run("keep going")
+        assert result.is_error  # hits max turns by design
+        assert "maximum number of tool turns" in result.text
+        nudges = [
+            m
+            for m in seen_messages[-1]
+            if m["role"] == "system" and "Turn budget" in str(m.get("content", ""))
+        ]
+        assert len(nudges) == 1, "expected exactly one turn-budget nudge"
+
+    async def test_no_nudge_when_finishing_early(self):
+        completions = _FakeCompletions([[_chunk("done", finish_reason="stop")]])
+        rt = _runtime(completions)
+        rt._max_turns = 8
+        result = await rt.run("quick task")
+        assert result.text == "done"

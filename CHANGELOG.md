@@ -5,6 +5,17 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.6] - 2026-09-17
+
+### Added
+- **Turn-budget nudge in the openai-sdk tool loop.** The model cannot see
+  Maestro's turn counter, so on broad tasks (e.g. "evaluate this prototype and
+  update the analysis documents") it kept exploring right up to the turn cap
+  and died with "Reached the maximum number of tool turns without a final
+  response" — 32 turns spent, no artifact produced. At ~75% of the cap a
+  system message now tells the model to stop exploring and produce its final
+  response/artifact with what it has.
+
 ## [1.16.5] - 2026-09-17
 
 ### Fixed

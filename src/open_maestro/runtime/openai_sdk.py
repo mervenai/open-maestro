@@ -509,6 +509,22 @@ class OpenAISDKRuntime(AgentRuntime):
         try:
             while turns < self._max_turns:
                 turns += 1
+                nudge_turn = max(2, int(self._max_turns * 0.75))
+                if turns == nudge_turn:
+                    # The model cannot see our turn counter; without a nudge it
+                    # often keeps exploring right up to the cap and gets cut
+                    # off mid-task with no final artifact.
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                f"Turn budget: you have used about {turns} of "
+                                f"{self._max_turns} tool turns. Stop exploring "
+                                "now and produce your final response or write "
+                                "the requested artifact using what you have."
+                            ),
+                        }
+                    )
                 kwargs: dict[str, Any] = dict(self._extra)
                 if tool_schemas:
                     kwargs["tools"] = tool_schemas
