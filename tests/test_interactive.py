@@ -12,6 +12,7 @@ from open_maestro.interactive import (
     _handle_command,
     _looks_like_decision,
     _resolve_suggested_prompt,
+    _strip_plan_prefix,
 )
 
 
@@ -97,6 +98,36 @@ def test_handle_command_plan_and_dry() -> None:
 
     assert _cmd("/dry", state, registry) == "Next response will be a dry run."
     assert state.dry_run_next is True
+
+
+def test_strip_plan_prefix_one_line_form() -> None:
+    """'/plan <prompt>' on one line must arm the flag AND keep the prompt."""
+    state = InteractiveState()
+    remainder = _strip_plan_prefix(
+        "/plan inspect the files in /docs and update what is stale", state
+    )
+    assert remainder == "inspect the files in /docs and update what is stale"
+    assert state.show_plan_next is True
+
+    state = InteractiveState()
+    remainder = _strip_plan_prefix("/dry summarize the milestone status", state)
+    assert remainder == "summarize the milestone status"
+    assert state.dry_run_next is True
+
+
+def test_strip_plan_prefix_leaves_other_input_alone() -> None:
+    state = InteractiveState()
+    # Bare command: no remainder; _handle_command shows the acknowledgment.
+    assert _strip_plan_prefix("/plan", state) is None
+    assert state.show_plan_next is False
+
+    # Not the plan command at all.
+    assert _strip_plan_prefix("/planx something", state) is None
+    assert _strip_plan_prefix("just a normal prompt", state) is None
+
+    # Command-like paths in the prompt body must not match.
+    assert _strip_plan_prefix("write /docs/readme.md now", state) is None
+    assert state.show_plan_next is False
 
 
 def test_handle_command_reset() -> None:

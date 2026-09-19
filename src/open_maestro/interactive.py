@@ -259,6 +259,28 @@ def _assemble_prompt(prompt: str, history: list[dict[str, str]]) -> str:
     return "\n".join(parts)
 
 
+def _strip_plan_prefix(user_input: str, state: InteractiveState) -> str | None:
+    """Handle one-line "/plan <prompt>" and "/dry <prompt>" forms.
+
+    Arms the corresponding flag and returns the remainder to process as the
+    prompt this turn. Returns None when the input doesn't start with one of
+    those prefixes (including a bare "/plan" with no text, which stays a
+    next-turn flag).
+    """
+    text = user_input.strip()
+    for prefix, attr in (("/plan", "show_plan_next"), ("/dry", "dry_run_next")):
+        if text[: len(prefix)].lower() != prefix:
+            continue
+        if len(text) > len(prefix) and not text[len(prefix)].isspace():
+            continue  # e.g. "/planx" — not this command
+        remainder = text[len(prefix):].strip()
+        if not remainder:
+            return None  # bare "/plan": let _handle_command acknowledge it
+        setattr(state, attr, True)
+        return remainder
+    return None
+
+
 async def _handle_command(
     raw: str,
     state: InteractiveState,
@@ -268,7 +290,8 @@ async def _handle_command(
     """Parse a slash command and update state.
 
     Returns a message to print, or None if the input should be processed as a
-    normal prompt.
+    normal prompt. One-line forms "/plan <prompt>" and "/dry <prompt>" are
+    handled by the loop via _strip_plan_prefix before this is called.
     """
     raw = raw.strip()
     if not raw.startswith("/"):
@@ -1859,6 +1882,10 @@ async def run_interactive(args: Any) -> int:
             state.suggested_prompts = []
             if not user_input:
                 continue
+
+        plan_remainder = _strip_plan_prefix(user_input, state)
+        if plan_remainder is not None:
+            user_input = plan_remainder
 
         cmd_result = await _handle_command(user_input, state, registry, memory)
         if cmd_result == "__EXIT__":

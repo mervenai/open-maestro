@@ -5,6 +5,17 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.17.4] - 2026-09-17
+
+### Fixed
+- **`/plan <prompt>` on one line silently discarded the prompt.** The command
+  parser treated `plan` as the command, armed the show-plan flag, and dropped
+  the rest of the line — the user saw "Next response will show the execution
+  plan." and then nothing, because their prompt no longer existed. The
+  one-line forms `/plan <prompt>` and `/dry <prompt>` now arm the flag *and*
+  plan/dry-run the remainder in the same turn. A bare `/plan` or `/dry` keeps
+  its next-turn semantics.
+
 ## [1.17.3] - 2026-09-17
 
 ### Added
