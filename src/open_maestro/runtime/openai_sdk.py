@@ -82,6 +82,84 @@ def _client_timeout(timeout_seconds: float | None) -> Any:
     return httpx.Timeout(600.0, connect=10.0, read=1800.0)
 
 
+_OVERFLOW_MARKERS = (
+    "max length",
+    "maximum length",
+    "too long",
+    "context length",
+    "context window",
+    "reduce the length",
+    "prompt exceeds",
+    "exceeds the",
+)
+
+
+def _looks_like_context_overflow(exc: BaseException) -> bool:
+    """Heuristic: does this API error mean the prompt was too long?
+
+    Provider plan tiers can cap request length far below a model's published
+    context window (Z.ai's coding plan rejects with code 1261 "Prompt exceeds
+    max length"), so a 400 with a length-related message means compaction,
+    not a client bug.
+    """
+    text = str(exc).lower()
+    return any(marker in text for marker in _OVERFLOW_MARKERS)
+
+
+def _compact_for_overflow(
+    messages: list[dict[str, Any]],
+    keep_recent: int = 10,
+    max_chars: int = 4000,
+) -> list[dict[str, Any]]:
+    """Shrink a message list that overflowed the provider's prompt limit.
+
+    System messages and the most recent *keep_recent* messages are kept (with
+    any single oversized content head/tail-truncated). Older messages are
+    replaced with placeholders; assistant messages lose their ``tool_calls``
+    so no orphaned tool-call/tool-result pairing remains.
+    """
+    out: list[dict[str, Any]] = []
+    for i, m in enumerate(messages):
+        role = m.get("role")
+        if role == "system" or i >= len(messages) - keep_recent:
+            m = dict(m)
+            content = m.get("content")
+            if isinstance(content, str) and len(content) > max_chars:
+                half = max_chars // 2
+                m["content"] = (
+                    content[:half]
+                    + f"\n...[middle {len(content) - max_chars} chars "
+                    "omitted to fit context]...\n"
+                    + content[-half:]
+                )
+            out.append(m)
+            continue
+        if role == "tool":
+            # Paired assistant message was stripped of tool_calls above.
+            continue
+        placeholder = dict(m)
+        placeholder.pop("tool_calls", None)
+        placeholder["content"] = (
+            f"[Earlier {role} content omitted to fit context: "
+            f"{len(str(m.get('content', '')))} chars]"
+        )
+        out.append(placeholder)
+
+    # Boundary case: a tool result can fall inside the kept window while its
+    # assistant message (one slot older) was dropped. OpenAI-compatible APIs
+    # reject such orphaned tool messages, so drop them too.
+    live_call_ids = {
+        tc.get("id")
+        for m in out
+        for tc in (m.get("tool_calls") or [])
+    }
+    return [
+        m
+        for m in out
+        if m.get("role") != "tool" or m.get("tool_call_id") in live_call_ids
+    ]
+
+
 def _import_openai() -> Any:
     try:
         import openai
@@ -537,6 +615,7 @@ class OpenAISDKRuntime(AgentRuntime):
                 )
                 try:
                     outcome: dict[str, Any] | None = None
+                    compacted = False
                     for attempt in range(1, _MAX_STREAM_ATTEMPTS + 1):
                         try:
                             outcome = await self._consume_stream(
@@ -558,6 +637,21 @@ class OpenAISDKRuntime(AgentRuntime):
                                 detail,
                             )
                             await asyncio.sleep(min(2 * attempt, 10))
+                        except Exception as exc:
+                            if _looks_like_context_overflow(exc) and not compacted:
+                                compacted = True
+                                logger.warning(
+                                    "Prompt too long for %s; compacting "
+                                    "conversation and retrying once",
+                                    resolved,
+                                )
+                                messages[:] = _compact_for_overflow(messages)
+                                continue
+                            raise
+                    if outcome is None:
+                        raise RuntimeError(
+                            f"stream retries exhausted for model '{resolved}'"
+                        )
                     # The loop either sets outcome or raises.
                     outcome = outcome or {}
                     accumulated_content = outcome.get("content", "")

@@ -5,6 +5,21 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.7] - 2026-09-17
+
+### Fixed
+- **"Prompt exceeds max length" (Z.ai code 1261) killed the turn.** GLM-5.3-flash
+  publishes a 1M-token context, but plan tiers can cap the per-request prompt far
+  below that; a moderately sized request died with
+  `400 {'error': {'code': '1261', 'message': 'Prompt exceeds max length'}}`.
+  The openai-sdk runtime now detects length-related 400s, compacts the
+  conversation once (system messages kept, older messages replaced with
+  placeholders, oversized kept contents head/tail-truncated, orphaned tool
+  results dropped), and retries — instead of failing the turn.
+- **Stream-retry exhaustion no longer returns an empty result.** If every
+  stream attempt fails and the loop exits without an outcome, a clear
+  `RuntimeError` is raised rather than silently producing blank output.
+
 ## [1.16.6] - 2026-09-17
 
 ### Added

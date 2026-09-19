@@ -6,11 +6,14 @@ import types
 from typing import Any
 
 import httpx
+import openai
 import pytest
 
 from open_maestro.runtime.openai_sdk import (
     OpenAISDKRuntime,
     _client_timeout,
+    _compact_for_overflow,
+    _looks_like_context_overflow,
     _MAX_STREAM_ATTEMPTS,
 )
 
@@ -194,3 +197,116 @@ class TestTurnBudgetNudge:
         rt._max_turns = 8
         result = await rt.run("quick task")
         assert result.text == "done"
+
+
+def _bad_request(message: str) -> openai.BadRequestError:
+    return openai.BadRequestError(
+        f"Error code: 400 - {{'error': {{'message': '{message}'}}}}",
+        response=httpx.Response(
+            400, request=httpx.Request("POST", "http://x/v1/chat/completions")
+        ),
+        body={"error": {"message": message}},
+    )
+
+
+class TestContextOverflow:
+    def test_overflow_marker_detection(self):
+        assert _looks_like_context_overflow(
+            _bad_request("Prompt exceeds max length")
+        )
+        assert _looks_like_context_overflow(
+            Exception("This model's maximum context length is 131072 tokens")
+        )
+        assert not _looks_like_context_overflow(
+            _bad_request("model 'qwen-max' not found")
+        )
+
+    def test_compaction_placeholders_old_and_drops_orphans(self):
+        msgs = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "old question"},
+            {
+                "role": "assistant",
+                "content": "old answer",
+                "tool_calls": [{"id": "c1"}],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "result"},
+            {"role": "user", "content": "recent"},
+        ]
+        out = _compact_for_overflow(msgs, keep_recent=1)
+        assert out[0] == {"role": "system", "content": "sys"}
+        assert [m["role"] for m in out] == ["system", "user", "assistant", "user"]
+        assert "omitted" in out[1]["content"]
+        assert "omitted" in out[2]["content"]
+        assert "tool_calls" not in out[2]
+        assert out[3] == {"role": "user", "content": "recent"}
+
+    def test_compaction_boundary_orphan_tool_dropped(self):
+        """Tool result inside the keep window whose caller assistant fell
+        outside it must be dropped (OpenAI-compatible APIs reject orphans)."""
+        msgs = [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": "c1"}],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "r"},
+            {"role": "user", "content": "u"},
+        ]
+        out = _compact_for_overflow(msgs, keep_recent=2)
+        assert [m["role"] for m in out] == ["assistant", "user"]
+
+    def test_compaction_truncates_oversized_kept_content(self):
+        msgs = [{"role": "user", "content": "x" * 10_000}]
+        out = _compact_for_overflow(msgs, keep_recent=1, max_chars=4000)
+        assert len(out[0]["content"]) < 4500
+        assert "omitted" in out[0]["content"]
+
+    async def test_overflow_error_compacts_and_retries_once(self):
+        completions = _FakeCompletions([[_chunk("done", finish_reason="stop")]])
+        rt = _runtime(completions)
+        rt._build_messages = lambda prompt, config: [  # type: ignore[method-assign]
+            {"role": "system", "content": "sys"},
+            *[
+                {"role": "user", "content": f"old {i} " + "x" * 500}
+                for i in range(20)
+            ],
+            {"role": "user", "content": prompt},
+        ]
+        real_consume = rt._consume_stream
+        calls = {"n": 0}
+        sizes: list[int] = []
+
+        async def spy_consume(client, resolved, messages, kwargs, preview_state):
+            calls["n"] += 1
+            sizes.append(
+                sum(len(str(m.get("content", ""))) for m in messages)
+            )
+            if calls["n"] == 1:
+                raise _bad_request("Prompt exceeds max length")
+            return await real_consume(
+                client, resolved, messages, kwargs, preview_state
+            )
+
+        rt._consume_stream = spy_consume  # type: ignore[method-assign]
+        result = await rt.run("task")
+        assert not result.is_error
+        assert result.text == "done"
+        assert calls["n"] == 2
+        assert sizes[1] < sizes[0]
+
+    async def test_non_overflow_400_not_compacted(self):
+        completions = _FakeCompletions([[_chunk("unused")]])
+        rt = _runtime(completions)
+        real_consume = rt._consume_stream
+        calls = {"n": 0}
+
+        async def spy_consume(client, resolved, messages, kwargs, preview_state):
+            calls["n"] += 1
+            raise _bad_request("model 'qwen-max' not found")
+
+        rt._consume_stream = spy_consume  # type: ignore[method-assign]
+        result = await rt.run("task")
+        assert result.is_error
+        assert "qwen-max" in result.text
+        assert calls["n"] == 1
