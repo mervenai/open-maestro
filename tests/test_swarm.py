@@ -167,6 +167,59 @@ class TestSwarmPlannerHeuristic:
         )
         assert await planner.plan("summarize the milestone status") is None
 
+    async def test_folder_expansion_fans_out_over_markdown(
+        self, swarm_registry, tmp_path, monkeypatch
+    ):
+        """A named directory expands to one worker per markdown artifact,
+        so 'update whatever needs updating in docs/' swarms without an
+        explicit file list."""
+        docs = tmp_path / "docs"
+        (docs / "intake").mkdir(parents=True)
+        (docs / "synthesis.md").write_text("# synthesis\n")
+        (docs / "design-decisions.md").write_text("# decisions\n")
+        (docs / "intake" / "reuse.md").write_text("# reuse\n")
+        monkeypatch.chdir(tmp_path)
+
+        planner = SwarmPlanner(
+            runtime=FakeRuntime("not json"), registry=swarm_registry
+        )
+        plan = await planner.plan(
+            f"inspect the files in {docs} and update whatever needs updating"
+        )
+        assert plan is not None
+        assert sorted(w.target_file for w in plan.workers) == [
+            f"{docs}/design-decisions.md",
+            f"{docs}/intake/reuse.md",
+            f"{docs}/synthesis.md",
+        ]
+
+    async def test_folder_and_subfolder_dedup(
+        self, swarm_registry, tmp_path, monkeypatch
+    ):
+        """Naming both a folder and its subfolder must not duplicate workers."""
+        docs = tmp_path / "docs"
+        (docs / "intake").mkdir(parents=True)
+        (docs / "a.md").write_text("# a\n")
+        (docs / "intake" / "b.md").write_text("# b\n")
+        (docs / "intake" / "c.md").write_text("# c\n")
+        monkeypatch.chdir(tmp_path)
+
+        planner = SwarmPlanner(
+            runtime=FakeRuntime("not json"), registry=swarm_registry
+        )
+        plan = await planner.plan(
+            f"update the files in {docs} and {docs}/intake with the latest"
+        )
+        assert plan is not None
+        assert len(plan.workers) == 3
+        assert len({w.target_file for w in plan.workers}) == 3
+
+    async def test_nonexistent_folder_is_not_a_swarm(self, swarm_registry):
+        planner = SwarmPlanner(
+            runtime=FakeRuntime("not json"), registry=swarm_registry
+        )
+        assert await planner.plan("update the files in docs/missing-folder") is None
+
 
 class TestSwarmExecutor:
     def _plan(self, workers, **kwargs):

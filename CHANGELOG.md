@@ -5,6 +5,17 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.17.1] - 2026-09-17
+
+### Added
+- **Swarm heuristic: folder expansion.** Prompts that name a directory (e.g.
+  "inspect the files in docs/ and update whatever needs updating") now fan out
+  to one worker per markdown artifact found inside it, instead of requiring an
+  explicit file list. Explicit file paths and expanded folders combine and
+  deduplicate (naming a folder and its subfolder does not duplicate workers);
+  nonexistent directories are ignored. The existing ≥3-target and
+  no-shared-write-target invariants still apply.
+
 ## [1.17.0] - 2026-09-17
 
 ### Added

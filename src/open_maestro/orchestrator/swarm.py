@@ -58,6 +58,22 @@ MAX_SWARM_WORKERS = 6
 
 _FILE_PATH_RE = re.compile(r"[\w./-]+\.(?:md|py|ts|tsx|js|jsx|yaml|yml|json)")
 
+# Path-ish tokens that may name a directory (at least one path separator).
+# The is_dir() check in _extract_targets is the real gate; this only finds
+# candidates such as "docs/", "/docs/intake", or "./docs".
+_DIR_TOKEN_RE = re.compile(r"[./]?[\w-]+(?:/[\w.-]+)*/?")
+
+
+def _extract_dir_tokens(prompt: str) -> list[str]:
+    """Directory-looking tokens from the prompt, stripped of punctuation."""
+    tokens: list[str] = []
+    for raw in _DIR_TOKEN_RE.findall(prompt):
+        token = raw.strip().rstrip(".,;:!?)").lstrip("(")
+        if not token or token in tokens:
+            continue
+        tokens.append(token)
+    return tokens
+
 _SWARM_PLANNER_SYSTEM_PROMPT = """You are a multi-agent swarm planner.
 
 Given the user's task and the available specialist agents, decide whether the
@@ -230,12 +246,15 @@ class SwarmPlanner:
         prompt: str,
         first_agent: AgentDefinition | None = None,
     ) -> SwarmPlan | None:
-        """One worker per distinct file path when the prompt names 3+."""
-        seen: list[str] = []
-        for match in _FILE_PATH_RE.findall(prompt):
-            if match not in seen:
-                seen.append(match)
-        targets = seen[:MAX_SWARM_WORKERS]
+        """One worker per distinct target when the prompt names 3+.
+
+        Targets come from explicit file paths in the prompt and from
+        *folder expansion*: directories named in the prompt are scanned for
+        markdown artifacts (docs folders), so "update whatever needs updating
+        in docs/" fans out without the user listing every file.
+        """
+        targets = self._extract_targets(prompt)
+        targets = targets[:MAX_SWARM_WORKERS]
         if len(targets) < 3:
             return None
 
@@ -252,6 +271,23 @@ class SwarmPlanner:
                 )
             )
         return self._validate(workers, prompt=prompt)
+
+    def _extract_targets(self, prompt: str) -> list[str]:
+        """Distinct update targets: explicit file paths plus markdown files
+        found inside directories named in the prompt (folder expansion)."""
+        targets: list[str] = []
+        for match in _FILE_PATH_RE.findall(prompt):
+            if match not in targets:
+                targets.append(match)
+        for directory in _extract_dir_tokens(prompt):
+            path = Path(directory)
+            if not path.is_dir():
+                continue
+            for child in sorted(path.rglob("*.md")):
+                rel = child.as_posix()
+                if rel not in targets:
+                    targets.append(rel)
+        return targets
 
     def _agent_for_target(self, target: str) -> AgentDefinition | None:
         """Pick an agent for a heuristic worker: documentation for existing
