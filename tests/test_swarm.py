@@ -220,6 +220,31 @@ class TestSwarmPlannerHeuristic:
         )
         assert await planner.plan("update the files in docs/missing-folder") is None
 
+    async def test_leading_slash_means_relative_folder(
+        self, swarm_registry, tmp_path, monkeypatch
+    ):
+        """Users write '/docs' to mean the docs folder in the project, not the
+        filesystem root — the token must resolve relative to cwd."""
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        for name in ("a.md", "b.md", "c.md"):
+            (docs / name).write_text("# doc\n")
+        monkeypatch.chdir(tmp_path)
+
+        planner = SwarmPlanner(
+            runtime=FakeRuntime("not json"), registry=swarm_registry
+        )
+        plan = await planner.plan(
+            "inspect if any of the files in the /docs folder need to be "
+            "updated after the latest analysis, and update them"
+        )
+        assert plan is not None
+        assert sorted(w.target_file for w in plan.workers) == [
+            "docs/a.md",
+            "docs/b.md",
+            "docs/c.md",
+        ]
+
 
 class TestSwarmExecutor:
     def _plan(self, workers, **kwargs):

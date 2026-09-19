@@ -74,6 +74,27 @@ def _extract_dir_tokens(prompt: str) -> list[str]:
         tokens.append(token)
     return tokens
 
+
+def _resolve_dir(token: str) -> Path | None:
+    """Resolve a directory token to an existing directory.
+
+    Users naturally write "/docs" to mean "the docs folder here", so a
+    leading-slash (or "./") token that doesn't exist as an absolute path is
+    retried relative to the working directory.
+    """
+    path = Path(token)
+    if path.is_dir():
+        return path
+    if token.startswith("/"):
+        rel = Path(token.lstrip("/"))
+        if rel.is_dir():
+            return rel
+    elif token.startswith("./"):
+        rel = Path(token[2:])
+        if rel.is_dir():
+            return rel
+    return None
+
 _SWARM_PLANNER_SYSTEM_PROMPT = """You are a multi-agent swarm planner.
 
 Given the user's task and the available specialist agents, decide whether the
@@ -280,8 +301,8 @@ class SwarmPlanner:
             if match not in targets:
                 targets.append(match)
         for directory in _extract_dir_tokens(prompt):
-            path = Path(directory)
-            if not path.is_dir():
+            path = _resolve_dir(directory)
+            if path is None:
                 continue
             for child in sorted(path.rglob("*.md")):
                 rel = child.as_posix()

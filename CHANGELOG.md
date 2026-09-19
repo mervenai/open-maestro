@@ -5,6 +5,17 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.17.2] - 2026-09-17
+
+### Fixed
+- **Swarm folder expansion missed "/docs"-style paths.** Users naturally write
+  "/docs" to mean "the docs folder in this project"; the heuristic checked it as
+  an absolute filesystem path, didn't find it, and silently declined — leaving
+  the prompt to the LLM planner coin flip. Leading-slash and "./" tokens that
+  don't exist as absolute paths are now retried relative to the working
+  directory, so prompts like "inspect the files in /docs or /docs/intake and
+  update what needs updating" deterministically fan out.
+
 ## [1.17.1] - 2026-09-17
 
 ### Added
