@@ -5,6 +5,15 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.5] - 2026-09-17
+
+### Fixed
+- **Empty retry warnings.** The stream-retry log line rendered the raw
+  exception, and timeouts like `httpx.ReadTimeout` stringify to an empty
+  string — producing `WARNING: OpenAI stream attempt 1/3 failed (); retrying`.
+  It now falls back to the exception type name (e.g. `ReadTimeout`), matching
+  the error-message fix in v1.16.1.
+
 ## [1.16.4] - 2026-09-17
 
 ### Fixed

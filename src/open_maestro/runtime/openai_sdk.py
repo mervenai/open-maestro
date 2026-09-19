@@ -534,11 +534,12 @@ class OpenAISDKRuntime(AgentRuntime):
                         except _stream_retry_errors() as exc:
                             if attempt >= _MAX_STREAM_ATTEMPTS:
                                 raise
+                            detail = str(exc).strip() or type(exc).__name__
                             logger.warning(
                                 "OpenAI stream attempt %d/%d failed (%s); retrying",
                                 attempt,
                                 _MAX_STREAM_ATTEMPTS,
-                                exc,
+                                detail,
                             )
                             await asyncio.sleep(min(2 * attempt, 10))
                     # The loop either sets outcome or raises.
