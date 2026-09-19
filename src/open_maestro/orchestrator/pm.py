@@ -30,6 +30,7 @@ from open_maestro.events.bus import EventBus
 from open_maestro.milestones import format_prompt_context
 from open_maestro.orchestrator import critic as critic_mod
 from open_maestro.orchestrator.chain import ChainExecutor, ChainPlanner
+from open_maestro.orchestrator.swarm import SwarmExecutor, SwarmPlanner
 from open_maestro.runtime.base import AgentConfig, AgentResult, AgentRuntime
 from open_maestro.runtime.latency import record_result
 from open_maestro.security.policy import PermissionPolicy, evaluate
@@ -115,6 +116,7 @@ class ProjectManager:
         fork: bool = False,
         dry_run: bool = False,
         chain: bool = False,
+        swarm: bool = True,
         runtime_config: AgentConfig | None = None,
         prefer_local: bool = False,
     ) -> AgentResult:
@@ -214,50 +216,98 @@ class ProjectManager:
         ctx.enriched_prompt = self._build_prompt(ctx)
 
         # 7. Chain execution: decompose the task into multiple specialist steps.
+        #    Swarm mode is tried first inside chain mode: when the task names
+        #    3+ independent targets, workers run in parallel (each with its own
+        #    runtime/model selection); otherwise fall back to the sequential
+        #    chain planner.
         executed_as_chain = False
         if chain and not resume and not fork:
             executed_as_chain = True
-            planner = ChainPlanner(
-                runtime=self.runtime,
-                registry=self.registry,
-                model=resolved_model or "fast",
-            )
-            plan = await planner.plan(
-                prompt,
-                first_agent=ctx.selected_agent,
-                profile=profile,
-            )
-            if dry_run:
-                return AgentResult(
-                    text=ChainExecutor.format_plan(plan),
-                    metadata={
-                        "selected_agent": ctx.selected_agent.id,
-                        "chain": True,
-                        "dry_run": True,
-                    },
+            swarm_plan = None
+            if swarm:
+                swarm_planner = SwarmPlanner(
+                    runtime=self.runtime,
+                    registry=self.registry,
+                    model=resolved_model or "fast",
                 )
-            executor = ChainExecutor(
-                registry=self.registry,
-                event_bus=self.event_bus,
-                base_config=runtime_config or AgentConfig(),
-                prefer_local=prefer_local,
-                critic_gate=self.critic_gate,
-            )
-            result = await executor.execute(
-                plan,
-                original_prompt=prompt,
-                base_profile=profile,
-                memories=ctx.memories,
-                code_results=ctx.code_results,
-                allowed_tools=allowed_tools,
-                blocked_tools=blocked_tools,
-                permission_mode=permission_mode,
-                deny_dangerous=deny_dangerous,
-                max_turns=max_turns,
-                mcp_servers=mcp_servers,
-            )
-            # Placeholder config for session persistence; real models are in metadata.
-            config = AgentConfig(model=model or resolved_model)
+                swarm_plan = await swarm_planner.plan(
+                    prompt,
+                    first_agent=ctx.selected_agent,
+                    profile=profile,
+                )
+            if swarm_plan is not None:
+                if dry_run:
+                    return AgentResult(
+                        text=SwarmPlanner.format_plan(swarm_plan),
+                        metadata={
+                            "selected_agent": ctx.selected_agent.id,
+                            "swarm": True,
+                            "dry_run": True,
+                        },
+                    )
+                swarm_executor = SwarmExecutor(
+                    registry=self.registry,
+                    event_bus=self.event_bus,
+                    base_config=runtime_config or AgentConfig(),
+                    prefer_local=prefer_local,
+                    critic_gate=self.critic_gate,
+                )
+                result = await swarm_executor.execute(
+                    swarm_plan,
+                    original_prompt=prompt,
+                    base_profile=profile,
+                    memories=ctx.memories,
+                    code_results=ctx.code_results,
+                    allowed_tools=allowed_tools,
+                    blocked_tools=blocked_tools,
+                    permission_mode=permission_mode,
+                    deny_dangerous=deny_dangerous,
+                    max_turns=max_turns,
+                    mcp_servers=mcp_servers,
+                )
+                config = AgentConfig(model=model or resolved_model)
+            else:
+                planner = ChainPlanner(
+                    runtime=self.runtime,
+                    registry=self.registry,
+                    model=resolved_model or "fast",
+                )
+                plan = await planner.plan(
+                    prompt,
+                    first_agent=ctx.selected_agent,
+                    profile=profile,
+                )
+                if dry_run:
+                    return AgentResult(
+                        text=ChainExecutor.format_plan(plan),
+                        metadata={
+                            "selected_agent": ctx.selected_agent.id,
+                            "chain": True,
+                            "dry_run": True,
+                        },
+                    )
+                executor = ChainExecutor(
+                    registry=self.registry,
+                    event_bus=self.event_bus,
+                    base_config=runtime_config or AgentConfig(),
+                    prefer_local=prefer_local,
+                    critic_gate=self.critic_gate,
+                )
+                result = await executor.execute(
+                    plan,
+                    original_prompt=prompt,
+                    base_profile=profile,
+                    memories=ctx.memories,
+                    code_results=ctx.code_results,
+                    allowed_tools=allowed_tools,
+                    blocked_tools=blocked_tools,
+                    permission_mode=permission_mode,
+                    deny_dangerous=deny_dangerous,
+                    max_turns=max_turns,
+                    mcp_servers=mcp_servers,
+                )
+                # Placeholder config for session persistence; real models are in metadata.
+                config = AgentConfig(model=model or resolved_model)
 
         # 8. Dry run: return the plan without invoking the runtime.
         if dry_run and not executed_as_chain:

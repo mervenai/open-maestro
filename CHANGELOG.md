@@ -5,6 +5,33 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.17.0] - 2026-09-17
+
+### Added
+- **Swarm mode: parallel multi-agent fan-out with per-worker cross-model routing**
+  (Jira MSTRO-95). Inside chain mode, the new `SwarmPlanner` (`orchestrator/swarm.py`)
+  detects tasks with 3+ independent targets (files to update, repos to analyze,
+  angles to evaluate) and fans them out to parallel workers via `asyncio.gather`
+  instead of running them sequentially. Each worker independently goes through the
+  capability-aware runtime/model selection in `ChainExecutor._run_agent`, so workers
+  in the same swarm can run on different vendors/models concurrently — unlike
+  kimi-cli's same-model subagents or claude-mpm's Claude-only world.
+  - **Three-phase shape**: optional leader step (cheap model) condenses the
+    triggering evidence into a shared digest; parallel workers each get the digest
+    plus their own target; optional consistency pass verifies cross-references
+    among the produced artifacts (WARN-only).
+  - **Write-conflict safety**: if two workers would write the same file, the swarm
+    plan is rejected and the task falls back to the sequential chain.
+  - **Error isolation**: one worker's failure is reported in the grouped synthesis
+    without killing the other workers.
+  - **No per-worker critic gate** (parallel diffs can't be attributed); one
+    aggregate code-critic pass reviews the combined diff after the fan-out.
+  - **Concurrency cap** via `MAESTRO_SWARM_MAX_WORKERS` (default 4).
+  - **Triggers**: LLM planner first (with file-path heuristic fallback that catches
+    "update these N docs" shapes offline); requires ≥3 workers.
+  - New toggles: `/swarm` in interactive mode (default on) and `--swarm/--no-swarm`
+    CLI flag; master switch remains `/chain` / `--chain`.
+
 ## [1.16.7] - 2026-09-17
 
 ### Fixed

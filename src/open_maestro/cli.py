@@ -347,6 +347,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Decompose the task into a multi-agent chain (research → engineer → QA, etc.)",
     )
     parser.add_argument(
+        "--swarm",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Allow parallel swarm fan-out inside chain mode when the task has 3+ independent targets (default: on; --no-swarm disables)",
+    )
+    parser.add_argument(
         "--stream",
         action="store_true",
         help="Stream live events to stderr during execution",
@@ -833,6 +839,7 @@ async def main_async() -> int:
                 fork=fork,
                 dry_run=dry_run,
                 chain=args.chain,
+                swarm=args.swarm,
                 runtime_config=runtime_config,
             )
     else:
@@ -852,6 +859,7 @@ async def main_async() -> int:
             fork=fork,
             dry_run=dry_run,
             chain=args.chain,
+            swarm=args.swarm,
             runtime_config=runtime_config,
         )
     print(result.text)

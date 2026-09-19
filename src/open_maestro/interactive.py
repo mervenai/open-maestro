@@ -116,6 +116,7 @@ class InteractiveState:
     reasoning: bool = False
     fast: bool = False
     chain: bool = True
+    swarm: bool = True
     prefer_local: bool = False
     turn: int = 0
     # Prompts most recently shown by /next or /prompts, available for selection
@@ -159,6 +160,7 @@ def _banner(
         "  /fast             toggle fast/cheap preference\n"
         "  /local            prefer local models; ask before escalating to frontier\n"
         "  /chain            toggle multi-agent chain mode (default: on)\n"
+    "  /swarm            toggle parallel swarm mode inside chain mode (default: on)\n"
         "  /reset            clear conversation history\n"
         "  /help             show this message\n"
         "  /exit, /quit      leave interactive mode\n"
@@ -316,6 +318,10 @@ async def _handle_command(
     if cmd == "chain":
         state.chain = not state.chain
         return f"Multi-agent chain mode: {'on' if state.chain else 'off'}."
+
+    if cmd == "swarm":
+        state.swarm = not state.swarm
+        return f"Parallel swarm mode: {'on' if state.swarm else 'off'}."
 
     if cmd == "agent":
         if not args:
@@ -2019,6 +2025,7 @@ async def run_interactive(args: Any) -> int:
                         resume=effective_session_id is not None,
                         dry_run=dry_run,
                         chain=state.chain,
+                        swarm=state.swarm,
                         runtime_config=runtime_config,
                         prefer_local=state.prefer_local,
                     )
@@ -2037,6 +2044,7 @@ async def run_interactive(args: Any) -> int:
                 resume=effective_session_id is not None,
                 dry_run=dry_run,
                 chain=state.chain,
+                swarm=state.swarm,
                 runtime_config=runtime_config,
                 prefer_local=state.prefer_local,
             )
