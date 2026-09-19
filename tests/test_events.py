@@ -105,6 +105,40 @@ class TestInteractiveProgressHandler:
         assert "Still working" in captured.err
         assert "35s" in captured.err
 
+    async def test_swarm_started_event_prints_worker_count(self, capsys):
+        from open_maestro.events.progress import InteractiveProgressHandler
+
+        handler = InteractiveProgressHandler()
+        await handler(
+            "swarm.started",
+            {"workers": 4, "leader": True, "consistency": True},
+        )
+        captured = capsys.readouterr()
+        assert "Swarm: 4 parallel workers" in captured.err
+        assert "leader digest first" in captured.err
+        assert "consistency pass after" in captured.err
+
+    async def test_swarm_worker_events_print_per_worker_lines(self, capsys):
+        from open_maestro.events.progress import InteractiveProgressHandler
+
+        handler = InteractiveProgressHandler()
+        await handler(
+            "swarm.worker_started",
+            {"worker": 1, "total": 3, "agent_id": "documentation"},
+        )
+        await handler(
+            "swarm.worker_completed",
+            {"worker": 1, "total": 3, "agent_id": "documentation"},
+        )
+        await handler(
+            "swarm.worker_completed",
+            {"worker": 2, "total": 3, "agent_id": "engineer", "is_error": True},
+        )
+        captured = capsys.readouterr()
+        assert "Worker 1/3 'documentation' started" in captured.err
+        assert "Worker 1/3 'documentation' done" in captured.err
+        assert "Worker 2/3 'engineer' FAILED" in captured.err
+
 
 class TestProgressIndicator:
     async def test_spinner_prints_and_clears_line(self, capsys):

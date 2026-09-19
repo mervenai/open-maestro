@@ -80,6 +80,32 @@ class InteractiveProgressHandler:
             runtime = payload.get("runtime")
             return f"→ Delegating to '{agent_id}' via {runtime}"
 
+        if event_type == "swarm.started":
+            workers = payload.get("workers", 0)
+            details = []
+            if payload.get("leader", False):
+                details.append("leader digest first")
+            if payload.get("consistency", False):
+                details.append("consistency pass after")
+            message = f"→ Swarm: {workers} parallel workers"
+            if details:
+                message += f" ({'; '.join(details)})"
+            return message
+
+        if event_type == "swarm.worker_started":
+            worker = payload.get("worker", 0)
+            total = payload.get("total", 0)
+            agent_id = payload.get("agent_id")
+            return f"→ Worker {worker}/{total} '{agent_id}' started"
+
+        if event_type == "swarm.worker_completed":
+            worker = payload.get("worker", 0)
+            total = payload.get("total", 0)
+            agent_id = payload.get("agent_id")
+            if payload.get("is_error"):
+                return f"→ Worker {worker}/{total} '{agent_id}' FAILED"
+            return f"→ Worker {worker}/{total} '{agent_id}' done"
+
         if event_type == "tool.call":
             tool_name = payload.get("tool_name", "tool")
             tool_input = payload.get("tool_input") or {}

@@ -394,6 +394,11 @@ class SwarmExecutor(ChainExecutor):
         max_turns: int | None = None,
         mcp_servers: dict[str, Any] | None = None,
     ) -> AgentResult:
+        await self._emit("swarm.started", {
+            "workers": len(plan.workers),
+            "leader": plan.use_leader,
+            "consistency": plan.consistency_check,
+        })
         digest = await self._run_leader(plan, base_profile=base_profile)
 
         # Critic baseline before fan-out so the aggregate pass can attribute
