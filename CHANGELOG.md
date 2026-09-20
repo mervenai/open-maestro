@@ -5,6 +5,19 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.0] - 2026-09-20
+
+### Added
+- **`/status` (alias `/where`) interactive command: a deterministic "where did
+  we leave off" summary with no LLM call.** Previously the only way to answer
+  that question was a natural-language prompt routed through agent selection,
+  memory recall, and inference — observed costing ~290k tokens for a one-line
+  answer. The command now renders directly from disk: milestone progress with
+  current/next milestone and active blockers (from `milestones.yaml`), the
+  last 5 sessions with prompt summary, agent, and model (from the session
+  store), and the mission excerpt from `.open-maestro/resume-log.md` when a
+  context-pressure handoff exists. Tracked as MSTRO-97.
+
 ## [1.17.6] - 2026-09-20
 
 ### Fixed

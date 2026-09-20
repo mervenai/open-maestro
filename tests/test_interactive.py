@@ -6,6 +6,7 @@ import asyncio
 
 from open_maestro.agents.definition import AgentDefinition
 from open_maestro.agents.registry import AgentRegistry
+from open_maestro.session.store import SessionRecord, SessionStore
 from open_maestro.interactive import (
     InteractiveState,
     _assemble_prompt,
@@ -210,3 +211,61 @@ def test_resolve_suggested_prompt_non_number() -> None:
     resolved, title = _resolve_suggested_prompt("hello", prompts)
     assert resolved == "hello"
     assert title is None
+
+
+def _session_store_for(tmp_path, monkeypatch) -> SessionStore:
+    """Isolate SessionStore from the real home-dir sessions."""
+    store = SessionStore(base_dirs=[tmp_path / ".open-maestro" / "sessions"])
+    monkeypatch.setattr(
+        "open_maestro.interactive.SessionStore", lambda *a, **k: store
+    )
+    return store
+
+
+def test_status_command_renders_sessions_and_handoff(tmp_path, monkeypatch) -> None:
+    from datetime import datetime, timezone
+
+    from open_maestro.interactive import _handle_status_command
+
+    monkeypatch.chdir(tmp_path)
+    om = tmp_path / ".open-maestro"
+    (om / "sessions").mkdir(parents=True)
+
+    store = _session_store_for(tmp_path, monkeypatch)
+    store.save(
+        SessionRecord(
+            session_id="s1",
+            runtime_name="openai-sdk",
+            agent_id="engineer",
+            model="glm-5.3-flash",
+            prompt_summary="summarize the current milestone status",
+            created_at=datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 9, 20, 12, 30, tzinfo=timezone.utc),
+        )
+    )
+
+    (om / "resume-log.md").write_text(
+        "# Context-pressure resume log\n\n"
+        "## Mission\n"
+        "Verify the PRD.\n\n"
+        "## Assigned agent\n"
+        "- id: researcher\n"
+    )
+
+    out = _handle_status_command(tmp_path)
+    assert out.startswith("# Where you left off")
+    assert "No milestone plan found" in out
+    assert "summarize the current milestone status" in out
+    assert "[engineer/glm-5.3-flash]" in out
+    assert "Verify the PRD." in out
+
+
+def test_status_command_empty_project(tmp_path, monkeypatch) -> None:
+    from open_maestro.interactive import _handle_status_command
+
+    monkeypatch.chdir(tmp_path)
+    _session_store_for(tmp_path, monkeypatch)
+    out = _handle_status_command(tmp_path)
+    assert out.startswith("# Where you left off")
+    assert "No milestone plan found" in out
+    assert "No prior sessions recorded." in out

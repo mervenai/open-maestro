@@ -17,6 +17,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -146,6 +147,7 @@ def _banner(
         "  /plan             show the execution plan for the next prompt only\n"
         "  /dry              dry-run the next prompt only\n"
         "  /milestones       show project milestone progress\n"
+        "  /status, /where   where you left off: milestones, recent activity, handoff\n"
         "  /next             suggest the next milestone action\n"
         "  /previous         revisit a completed or in-progress milestone\n"
         "  /select           open a TUI to select and edit suggested prompts\n"
@@ -403,6 +405,9 @@ async def _handle_command(
 
     if cmd == "milestones":
         return _handle_milestones_command(Path.cwd())
+
+    if cmd in ("status", "where"):
+        return _handle_status_command(Path.cwd())
 
     if cmd == "next":
         prompts, epic_id, milestone_id = get_current_or_next_milestone_prompts(
@@ -1740,6 +1745,80 @@ def _handle_milestones_command(project_path: Path) -> str:
     store = MilestoneStore(project_path)
     plan = store.load()
     return _format_milestone_status(plan)
+
+
+def _handle_status_command(project_path: Path) -> str:
+    """Render a deterministic "where did we leave off" summary.
+
+    Reads the milestone plan, session store, and any resume-log handoff
+    straight from disk — no LLM call on this code path.
+    """
+    lines: list[str] = ["# Where you left off", ""]
+
+    store = MilestoneStore(project_path)
+    if store.exists():
+        plan = store.load()
+        lines.append(f"Progress: {plan.summary.overall_completion}% complete")
+        if plan.summary.current_milestone_ids:
+            lines.append("Current: " + ", ".join(plan.summary.current_milestone_ids))
+        if plan.summary.next_milestone_ids:
+            lines.append("Next: " + ", ".join(plan.summary.next_milestone_ids))
+        for blocker in plan.summary.active_blockers:
+            scope = (
+                f"{blocker.epic_id}/{blocker.milestone_id}"
+                if blocker.milestone_id
+                else blocker.epic_id
+            )
+            lines.append(f"Blocker [{scope}]: {blocker.description}")
+        lines.append("")
+    else:
+        lines.append("No milestone plan found (milestones.yaml missing).")
+        lines.append("")
+
+    sessions = SessionStore().list_recent(limit=5)
+    if sessions:
+        lines.append("## Recent activity")
+        for rec in sessions:
+            when = rec.updated_at.strftime("%m-%d %H:%M")
+            summary = (rec.prompt_summary or rec.session_id).replace("\n", " ")
+            if len(summary) > 90:
+                summary = summary[:90] + "..."
+            via = rec.agent_id or "unknown"
+            if rec.model:
+                via += f"/{rec.model}"
+            lines.append(f"- {when}  {summary}  [{via}]")
+        lines.append("")
+    else:
+        lines.append("No prior sessions recorded.")
+        lines.append("")
+
+    resume_path = project_path / ".open-maestro" / "resume-log.md"
+    if resume_path.exists():
+        when = datetime.fromtimestamp(resume_path.stat().st_mtime)
+        lines.append(f"## Handoff ({when.strftime('%Y-%m-%d %H:%M')})")
+        try:
+            text = resume_path.read_text(encoding="utf-8")
+        except OSError:
+            text = ""
+        mission: list[str] = []
+        in_mission = False
+        for ln in text.splitlines():
+            if ln.startswith("## "):
+                if in_mission:
+                    break
+                in_mission = ln.strip() == "## Mission"
+                continue
+            if in_mission and ln.strip():
+                mission.append(ln.strip())
+        if mission:
+            excerpt = " ".join(mission)
+            if len(excerpt) > 200:
+                excerpt = excerpt[:200] + "..."
+            lines.append(f"Task: {excerpt}")
+        lines.append(f"Full log: {resume_path}")
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
 
 
 async def run_interactive(args: Any) -> int:
