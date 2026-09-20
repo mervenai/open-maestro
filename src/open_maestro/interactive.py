@@ -1812,12 +1812,17 @@ async def run_interactive(args: Any) -> int:
 
     mcp_config = load_mcp_config(args.mcp_config)
 
+    # Chain mode defaults to ON in interactive (the /chain toggle and swarm
+    # mode live inside it); argparse uses None as "not specified" because
+    # store_true's default False would silently disable it here.
+    chain_default = getattr(args, "chain", None)
     state = InteractiveState(
         agent_id=args.agent,
         model=args.model,
         reasoning=args.reasoning,
         fast=args.fast,
-        chain=getattr(args, "chain", True),
+        chain=True if chain_default is None else chain_default,
+        swarm=getattr(args, "swarm", True),
         prefer_local=args.prefer_local or getattr(args, "ask_escalate", False),
     )
 

@@ -343,8 +343,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--chain",
-        action="store_true",
-        help="Decompose the task into a multi-agent chain (research → engineer → QA, etc.)",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Decompose the task into a multi-agent chain (research → engineer → QA, etc.). "
+        "Interactive mode defaults to on; --no-chain disables it at startup.",
     )
     parser.add_argument(
         "--swarm",

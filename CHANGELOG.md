@@ -5,6 +5,19 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.17.5] - 2026-09-17
+
+### Fixed
+- **Chain mode was silently OFF in every interactive session, making the swarm
+  unreachable.** The help text said "default: on", but interactive state was
+  built with `getattr(args, "chain", True)` — and argparse's `store_true`
+  default of `False` is a real attribute, so the `getattr` fallback never
+  fired. With chain off, `pm.handle` never entered the decomposition block
+  and `/plan` always showed the single-agent plan. `--chain` is now
+  `--chain/--no-chain` with a tri-state default: interactive starts with
+  chain on (unless `--no-chain`), one-shot behavior is unchanged (off unless
+  `--chain`).
+
 ## [1.17.4] - 2026-09-17
 
 ### Fixed
