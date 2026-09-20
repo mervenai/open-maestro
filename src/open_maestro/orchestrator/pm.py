@@ -453,19 +453,35 @@ class ProjectManager:
             )
 
             if threshold == "critical":
+                # Never discard the user's answer: the resume log is a
+                # handoff artifact, not the response. Write it to disk and
+                # surface a short warning alongside the real result.
                 resume_log = self.context_monitor.build_resume_log(
-                    ctx, original_prompt=prompt
+                    ctx,
+                    original_prompt=prompt,
+                    result_text=result.text,
                 )
-                return AgentResult(
-                    text=resume_log,
-                    session_id=result.session_id,
-                    is_error=False,
-                    metadata={
-                        "selected_agent": ctx.selected_agent.id,
-                        "context_threshold": "critical",
-                        "context_snapshot": vars(self.context_monitor.snapshot),
-                    },
+                log_path = Path.cwd() / ".open-maestro" / "resume-log.md"
+                try:
+                    log_path.parent.mkdir(parents=True, exist_ok=True)
+                    log_path.write_text(resume_log, encoding="utf-8")
+                except OSError as exc:
+                    logger.warning("Failed to write resume log: %s", exc)
+                    log_path = None
+                result.text += (
+                    f"\n\n---\n⚠️ Context budget critical: "
+                    f"{self.context_monitor.snapshot.tokens_used} tokens used "
+                    f"this session (budget "
+                    f"{self.context_monitor.budget.max_context_tokens}). "
+                    "Consider /reset or a fresh session for the next task."
                 )
+                if log_path is not None:
+                    result.text += f" Resume log written to {log_path}."
+                result.metadata["context_threshold"] = "critical"
+                result.metadata["context_snapshot"] = vars(
+                    self.context_monitor.snapshot
+                )
+                return result
 
         return result
 

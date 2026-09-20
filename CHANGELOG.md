@@ -5,6 +5,19 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.17.6] - 2026-09-20
+
+### Fixed
+- **A critical context threshold discarded the user's answer.** When the
+  cumulative session token count crossed the budget's critical threshold
+  (default 90% of 200k), `pm.handle` replaced the turn's result text with the
+  context-pressure resume log — a scaffold with literal "(Populate this
+  section...)" instructions — so a simple question like "where did we leave
+  off?" returned a meaningless template instead of the answer. The answer is
+  now kept; the resume log (with the answer embedded under key findings) is
+  written to `.open-maestro/resume-log.md`, and a short critical-budget
+  warning is appended to the response.
+
 ## [1.17.5] - 2026-09-17
 
 ### Fixed

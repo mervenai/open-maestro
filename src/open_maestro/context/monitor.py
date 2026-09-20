@@ -66,8 +66,13 @@ class ContextMonitor:
         ctx: OrchestrationContext,
         *,
         original_prompt: str,
+        result_text: str | None = None,
     ) -> str:
-        """Build a concise resume log summarizing progress so far."""
+        """Build a concise resume log summarizing progress so far.
+
+        When *result_text* is provided it populates the key-findings section;
+        otherwise the scaffold's placeholder instructions remain (the log is
+        then meant to be completed by the model on a resumed run)."""
         agent = ctx.selected_agent
         lines: list[str] = [
             "# Context-pressure resume log",
@@ -108,15 +113,29 @@ class ContextMonitor:
                 lines.append(f"- {path}")
             lines.append("")
 
-        lines.extend(
-            [
-                "## Key findings / decisions",
-                "- (Populate this section with concrete decisions made during the run.)",
-                "",
-                "## Next steps",
-                "- (Populate this section with the immediate next action.)",
-            ]
-        )
+        if result_text and result_text.strip():
+            excerpt = result_text.strip()
+            if len(excerpt) > 1200:
+                excerpt = excerpt[:1200] + " ...[truncated]"
+            lines.extend(
+                [
+                    "## Key findings / decisions",
+                    excerpt,
+                    "",
+                    "## Next steps",
+                    "- (Populate this section with the immediate next action.)",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "## Key findings / decisions",
+                    "- (Populate this section with concrete decisions made during the run.)",
+                    "",
+                    "## Next steps",
+                    "- (Populate this section with the immediate next action.)",
+                ]
+            )
         return "\n".join(lines)
 
 

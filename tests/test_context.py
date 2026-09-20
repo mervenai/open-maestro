@@ -81,6 +81,75 @@ class TestResumeLog:
         assert "src/parser.py" in log
         assert "900" in log
 
+    def test_resume_log_embeds_result_text_when_provided(self):
+        monitor = ContextMonitor(ContextBudget(max_context_tokens=1000))
+        agent = AgentDefinition(id="engineer", name="Engineer", role="engineer")
+        ctx = OrchestrationContext(original_prompt="refactor parser")
+        ctx.selected_agent = agent
+
+        log = monitor.build_resume_log(
+            ctx,
+            original_prompt="refactor parser",
+            result_text="the parser is now fully refactored",
+        )
+        assert "the parser is now fully refactored" in log
+        assert "Populate this section with concrete decisions" not in log
+
+
+class TestCriticalThresholdKeepsAnswer:
+    @pytest.mark.asyncio
+    async def test_critical_appends_warning_and_writes_log(
+        self, tmp_path, monkeypatch
+    ):
+        """A critical threshold must not replace the user's answer with the
+        resume-log template; the log goes to .open-maestro/resume-log.md."""
+        monkeypatch.chdir(tmp_path)
+
+        class _LongRuntime(AgentRuntime):
+            @property
+            def runtime_name(self):
+                return "fake"
+
+            async def run(self, prompt, config=None):
+                return AgentResult(text="the actual answer", tokens_used=950)
+
+            async def run_with_hooks(
+                self, prompt, tool_guard=None, blocked_tools=None, config=None
+            ):
+                return await self.run(prompt, config)
+
+            async def resume(self, session_id, prompt, config=None):
+                return await self.run(prompt, config)
+
+        registry = AgentRegistry(
+            {
+                "researcher": AgentDefinition(
+                    id="researcher", name="Researcher", role="research"
+                )
+            }
+        )
+        pm = ProjectManager(
+            runtime=_LongRuntime(),
+            registry=registry,
+            session_store=SessionStore(base_dirs=[tmp_path / "sessions"]),
+            context_budget=ContextBudget(max_context_tokens=1000),
+        )
+        result = await pm.handle(
+            "where did we leave off", agent_id="researcher"
+        )
+        assert result.is_error is False
+        # The answer survives...
+        assert "the actual answer" in result.text
+        # ...with a critical-budget warning appended...
+        assert "Context budget critical" in result.text
+        assert result.metadata.get("context_threshold") == "critical"
+        # ...and the resume log is on disk, populated with the answer.
+        log_path = tmp_path / ".open-maestro" / "resume-log.md"
+        assert log_path.exists()
+        log_text = log_path.read_text()
+        assert "where did we leave off" in log_text
+        assert "the actual answer" in log_text
+
 
 class TestProjectManagerContextSeeding:
     @pytest.mark.asyncio
