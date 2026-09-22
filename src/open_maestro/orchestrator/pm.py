@@ -30,6 +30,11 @@ from open_maestro.events.bus import EventBus
 from open_maestro.milestones import format_prompt_context
 from open_maestro.orchestrator import critic as critic_mod
 from open_maestro.orchestrator.chain import ChainExecutor, ChainPlanner
+from open_maestro.orchestrator.load import (
+    LoadLevel,
+    apply_source_load,
+    estimate_source_load,
+)
 from open_maestro.orchestrator.swarm import SwarmExecutor, SwarmPlanner
 from open_maestro.runtime.base import AgentConfig, AgentResult, AgentRuntime
 from open_maestro.runtime.latency import record_result
@@ -66,6 +71,7 @@ class OrchestrationContext:
     code_results: list[dict[str, Any]] = field(default_factory=list)
     selected_agent: AgentDefinition | None = None
     enriched_prompt: str = ""
+    source_load: Any | None = None
 
 
 class ProjectManager:
@@ -157,6 +163,26 @@ class ProjectManager:
                 )
             except Exception as exc:
                 logger.warning("Code search failed: %s", exc)
+
+        # 2.5 Re-measure source load now that the memory count is known and
+        #     raise the profile requirements accordingly. apply_source_load
+        #     is idempotent (it only ever raises), so this is safe when the
+        #     interactive layer already applied an artifact/repo estimate.
+        load = estimate_source_load(
+            prompt, Path.cwd(), memories=len(ctx.memories)
+        )
+        profile = apply_source_load(profile, load)
+        ctx.source_load = load
+        if load.level != LoadLevel.LOW:
+            await self.event_bus.emit(
+                "source.load",
+                {
+                    "level": load.level.value,
+                    "artifacts": load.artifacts,
+                    "repos": load.repos,
+                    "memories": load.memories,
+                },
+            )
 
         # 3. Select agent
         if agent_id:
@@ -659,6 +685,19 @@ class ProjectManager:
                 f"  context_tokens:     {profile.context_tokens_estimate}",
                 f"  latency_preference: {profile.latency_preference.value}",
                 f"  cost_preference:    {profile.cost_preference.value}",
+            ]
+        )
+        load = ctx.source_load
+        if load is not None and load.level != LoadLevel.LOW:
+            lines.extend(
+                [
+                    f"  source_load:        {load.level.value} "
+                    f"({load.artifacts} artifacts, {load.repos} repos, "
+                    f"{load.memories} memories)",
+                ]
+            )
+        lines.extend(
+            [
                 "",
                 "Enriched prompt:",
                 ctx.enriched_prompt,

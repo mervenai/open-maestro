@@ -67,6 +67,15 @@ class InteractiveProgressHandler:
                 return f"→ Recalled {count} relevant memory/ies"
             return None
 
+        if event_type == "source.load":
+            level = payload.get("level", "low")
+            return (
+                f"→ Source load: {level} "
+                f"({payload.get('artifacts', 0)} artifacts, "
+                f"{payload.get('repos', 0)} repos, "
+                f"{payload.get('memories', 0)} memories)"
+            )
+
         if event_type == "search.completed":
             count = payload.get("count", 0)
             return f"→ Searched codebase ({count} result/s)"

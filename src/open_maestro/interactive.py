@@ -55,6 +55,7 @@ from open_maestro.milestones import (
     handle_track_command,
 )
 from open_maestro.monitor.live import Monitor
+from open_maestro.orchestrator.load import apply_source_load, estimate_source_load
 from open_maestro.orchestrator.pm import ProjectManager
 from open_maestro.orchestrator.router import LLMTaskRouter
 from open_maestro.runtime.base import AgentConfig
@@ -2027,6 +2028,16 @@ async def run_interactive(args: Any) -> int:
 
         profile = _build_task_profile(user_input, state, args)
         prompt = _assemble_prompt(user_input, state.history)
+
+        # Measure source load (artifacts/repos touched) and raise the
+        # profile's requirements before runtime selection, so heavy turns
+        # are excluded from cheap light-reasoning models by the hard bars.
+        load = estimate_source_load(user_input, Path.cwd())
+        profile = apply_source_load(
+            profile,
+            load,
+            reasoning_overridden=bool(state.reasoning or args.reasoning),
+        )
 
         # Per-turn runtime selection: pick the cheapest backend that can handle
         # this specific task profile, unless the user pinned a runtime/model.

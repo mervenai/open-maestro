@@ -5,6 +5,28 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.0] - 2026-09-20
+
+### Added
+- **Source-load routing: model/runtime selection now weighs the number of
+  artifacts and sources a task touches, not just prompt keywords.** A task
+  like "check the artifacts for consistency" carries no deep-reasoning
+  keyword, so its profile stayed LIGHT and GLM-5.3-Flash won on cost — then
+  died mid-stream 11 minutes in because the task actually spanned 5
+  milestone artifacts, 5 repos, and 33 recalled memories. The new
+  `orchestrator/load.py` measures artifact paths (prompt references ∪
+  current-milestone artifacts from `milestones.yaml`), git repos under the
+  project, and recalled memory count, and raises the task profile
+  accordingly: MEDIUM (≥3 artifacts or ≥2 repos) bumps the context estimate
+  to 64k; HIGH (≥6 artifacts, ≥3 artifacts + ≥2 repos, or ≥25 memories)
+  bumps it to 128k and requires DEEP reasoning — the hard bar that excludes
+  light-reasoning cheap models. Applied at both decision points: per-turn
+  runtime selection in interactive mode, and inside `pm.handle` after
+  memory recall (so one-shot runs and chain/swarm workers inherit it).
+  A `source.load` event and a `/plan` profile line make the decision
+  visible. Thresholds are user-editable via `routing.load_thresholds:` in
+  `~/.open-maestro/capabilities.yaml`.
+
 ## [1.18.2] - 2026-09-20
 
 ### Fixed
