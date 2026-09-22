@@ -5,6 +5,18 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.2] - 2026-09-20
+
+### Fixed
+- **The interactive "Thinking" spinner scrolled instead of redrawing in
+  place.** `ProgressIndicator` padded every frame to a hardcoded 80 columns
+  with spaces. On any terminal narrower than 80 columns each frame wrapped
+  onto a second line, `\r` could no longer reach the frame's start, and
+  every subsequent frame pushed a new line into the scrollback. Rendering
+  now erases the line with ANSI `\x1b[2K` (no padding), caps the message at
+  the actual terminal width, and truncates with an ellipsis otherwise.
+  Verified under a 60-column PTY: 10 frames rendered, zero newlines.
+
 ## [1.18.1] - 2026-09-20
 
 ### Fixed

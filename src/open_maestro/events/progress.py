@@ -160,7 +160,7 @@ class ProgressIndicator:
     """
 
     _FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-    _LINE_WIDTH = 80
+    _MIN_WIDTH = 20
 
     def __init__(
         self,
@@ -213,9 +213,24 @@ class ProgressIndicator:
                 pass
 
     def _render(self, frame: str) -> None:
+        # Erase the line instead of padding with spaces: padding to a
+        # hardcoded width wraps on narrower terminals, and once a frame
+        # wraps, \r can no longer reach its start — every following frame
+        # then scrolls instead of redrawing in place.
         line = f"{frame} {self._message}"
-        padding = max(0, self._LINE_WIDTH - len(line))
-        print(f"\r{line}{' ' * padding}", end="", file=self._file, flush=True)
+        max_len = max(self._terminal_width() - 1, self._MIN_WIDTH)
+        if len(line) > max_len:
+            line = line[: max_len - 1] + "…"
+        print(f"\r\x1b[2K{line}", end="", file=self._file, flush=True)
 
     def _clear_line(self) -> None:
-        print("\r" + " " * self._LINE_WIDTH + "\r", end="", file=self._file, flush=True)
+        print("\r\x1b[2K", end="", file=self._file, flush=True)
+
+    @staticmethod
+    def _terminal_width() -> int:
+        import shutil
+
+        try:
+            return shutil.get_terminal_size().columns
+        except OSError:
+            return 80
