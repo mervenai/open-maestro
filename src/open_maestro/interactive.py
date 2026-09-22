@@ -76,8 +76,13 @@ _HISTORY_FILE = Path.home() / ".open-maestro" / "interactive_history"
 
 
 def _setup_readline() -> None:
-    """Enable line editing, arrow-key navigation, and persistent history."""
-    if readline is None:
+    """Enable line editing and history for the non-TTY input fallback.
+
+    In TTY mode input goes through prompt_toolkit (which keeps its own
+    persistent history), so GNU readline must stay untouched — writing its
+    empty in-memory history at exit would truncate that file.
+    """
+    if readline is None or sys.stdin.isatty():
         return
     try:
         if _HISTORY_FILE.exists():
@@ -91,8 +96,12 @@ def _setup_readline() -> None:
 
 
 def _save_readline_history() -> None:
-    """Persist interactive command history for the next session."""
-    if readline is None:
+    """Persist interactive command history for the next session.
+
+    Only used by the non-TTY fallback; the TTY path saves via
+    prompt_toolkit's FileHistory on every accepted prompt.
+    """
+    if readline is None or sys.stdin.isatty():
         return
     try:
         _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -141,7 +150,8 @@ def _banner(
         "Open Maestro interactive mode\n"
         + session_line
         + publish_section
-        + "Type a task and press Enter (Ctrl+J or Alt+Enter for a new line). Commands:\n"
+        + "Type a task and press Enter (Ctrl+J or Option+Enter for a new line, Ctrl+C to cancel).\n"
+        + "Arrows move within a multi-line draft and recall history at its edges. Commands:\n"
         "  /agent <id>       pin an agent for the next turn(s)\n"
         "  /model <model>    override the model for the next turn(s)\n"
         "  /plan             show the execution plan for the next prompt only\n"
@@ -1618,15 +1628,23 @@ def _read_input_with_paste(prompt: str = "> ") -> str:
 
 
 def _read_input_tui(prompt: str = "> ") -> str:
-    """Read multi-line input with Ctrl+J / Alt+Enter to insert newlines.
+    """Read multi-line input via prompt_toolkit.
 
-    Enter submits the prompt. Ctrl+J (or Alt+Enter) inserts a newline so
-    users can compose multi-line prompts interactively. This is the closest
-    portable equivalent to kimi-cli's Shift+Return: prompt_toolkit 3.0.x
-    does not expose a reliable Shift+Enter key, but Ctrl+J works across
-    most terminals. Escape cancels the current input.
+    Enter submits. Ctrl+J or Option/Alt+Enter inserts a newline — the
+    portable equivalent of kimi-cli's Shift+Return. Up/Down move the
+    cursor within a multi-line draft and fall back to history navigation
+    at the first/last line. Ctrl+C (or Ctrl+D) cancels the current input.
+    History persists across sessions via
+    ``~/.open-maestro/interactive_history``.
+
+    There is deliberately no lone-Escape binding: with an Escape-prefixed
+    sequence registered (Esc+Enter for Option+Enter), a lone Escape must
+    wait out the sequence-timeout, and a binding firing after that timeout
+    both delays cancel and swallows the next typed character. Ctrl+C
+    cancels immediately and reliably instead.
     """
     from prompt_toolkit import PromptSession
+    from prompt_toolkit.history import FileHistory
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.keys import Keys
 
@@ -1636,21 +1654,37 @@ def _read_input_tui(prompt: str = "> ") -> str:
     def submit(event):
         event.current_buffer.validate_and_handle()
 
-    # Ctrl+J and Alt+Enter insert a newline. Alt+Enter is represented as
-    # Escape followed by Enter in most terminal emulators.
+    # Ctrl+J and Alt/Option+Enter insert a newline. Alt+Enter is
+    # represented as Escape followed by Enter in most terminal emulators
+    # (iTerm2, VS Code, Ghostty). A stray Option press swallows one
+    # character while prompt_toolkit waits out the sequence timeout —
+    # inherent to any Escape-prefixed binding.
     @bindings.add(Keys.ControlJ)
     @bindings.add(Keys.Escape, Keys.Enter)
     def insert_newline(event):
         event.current_buffer.insert_text("\n")
 
-    @bindings.add(Keys.Escape)
-    def cancel(event):
-        event.app.exit(exception=KeyboardInterrupt, style="class:aborting")
+    @bindings.add(Keys.Up)
+    def cursor_or_history_up(event):
+        buf = event.current_buffer
+        if buf.document.cursor_position_row == 0:
+            buf.history_backward()
+        else:
+            buf.cursor_up()
+
+    @bindings.add(Keys.Down)
+    def cursor_or_history_down(event):
+        buf = event.current_buffer
+        if buf.document.cursor_position_row == buf.document.line_count - 1:
+            buf.history_forward()
+        else:
+            buf.cursor_down()
 
     session = PromptSession(
         f"{prompt}",
         key_bindings=bindings,
-        multiline=False,
+        multiline=True,
+        history=FileHistory(str(_HISTORY_FILE)),
         enable_suspend=True,
     )
     try:

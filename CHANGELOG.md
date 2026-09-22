@@ -5,6 +5,29 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.1] - 2026-09-20
+
+### Fixed
+- **Interactive prompt now supports real multi-line editing, par with
+  claude-cli/kimi-cli.** The TUI input was a single-line buffer with an
+  unreliable Alt+Enter binding: Option+Enter did not insert newlines and
+  arrow keys could not traverse multi-line drafts or recall history across
+  sessions. The input is now a multi-line prompt_toolkit buffer:
+  - **Enter submits; Ctrl+J or Option/Alt+Enter inserts a newline**
+    (Option+Enter works in iTerm2, VS Code, and Ghostty, which send
+    Esc+Enter; Terminal.app needs "Use Option as Meta key" enabled).
+  - **Up/Down move the cursor within a multi-line draft** and fall back to
+    history navigation at the first/last line.
+  - **History persists across sessions** via prompt_toolkit FileHistory on
+    `~/.open-maestro/interactive_history` — previously the TUI path used an
+    in-memory history, so arrows only saw the current session.
+  - **Ctrl+C cancels the current input.** The old lone-Escape cancel was
+    removed: with an Escape-prefixed sequence registered it fired only
+    after a multi-second timeout and swallowed the next typed character.
+  - GNU readline history save is now skipped in TTY mode so it can no
+    longer truncate the prompt_toolkit history file at exit.
+  Verified end-to-end with PTY keystroke tests against the installed CLI.
+
 ## [1.18.0] - 2026-09-20
 
 ### Added
