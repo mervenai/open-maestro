@@ -20,6 +20,7 @@ from open_maestro.config.models import ModelResolver
 from open_maestro.events.bus import EventBus
 from open_maestro.mcp.client import MCPClient
 from open_maestro.runtime.base import AgentResult, AgentRuntime
+from open_maestro.runtime.quota import classify_quota_error
 from open_maestro.runtime.tools import ToolRegistry, parse_tool_input
 
 if TYPE_CHECKING:
@@ -786,10 +787,18 @@ class OpenAISDKRuntime(AgentRuntime):
         except Exception as exc:
             logger.exception("OpenAI API call failed")
             detail = str(exc).strip() or type(exc).__name__
+            metadata: dict[str, Any] = {}
+            quota_reason = classify_quota_error(exc)
+            if quota_reason is not None:
+                # Tag the result so the orchestrator can mark the model
+                # exhausted and fall back instead of dead-ending the turn.
+                metadata["quota_exhausted"] = quota_reason
+                metadata["quota_exhausted_model"] = resolved
             return AgentResult(
                 text=f"OpenAI API error: {detail}",
                 is_error=True,
                 duration_ms=int((time.monotonic() - start) * 1000),
+                metadata=metadata,
             )
 
     async def _consume_stream(

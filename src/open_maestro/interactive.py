@@ -58,6 +58,7 @@ from open_maestro.monitor.live import Monitor
 from open_maestro.orchestrator.load import apply_source_load, estimate_source_load
 from open_maestro.orchestrator.pm import ProjectManager
 from open_maestro.orchestrator.router import LLMTaskRouter
+from open_maestro.runtime import quota as quota_mod
 from open_maestro.runtime.base import AgentConfig
 from open_maestro.runtime.factory import create_runtime, select_runtime_for_task
 from open_maestro.search.vector_client import VectorSearchClient
@@ -2056,6 +2057,8 @@ async def run_interactive(args: Any) -> int:
                     # tiers keep deep-reasoning work.
                     min_cost_level=CostLevel.LOW,
                     prefer_local=prefer_local,
+                    # Skip models whose quota died earlier this session.
+                    exclude=quota_mod.exhausted(),
                 )
             except RuntimeError as exc:
                 if state.prefer_local:
@@ -2066,6 +2069,7 @@ async def run_interactive(args: Any) -> int:
                             latency_tolerance=args.latency_tolerance,
                             max_cost_level=CostLevel(args.max_cost_level) if args.max_cost_level else None,
                             prefer_local=False,
+                            exclude=quota_mod.exhausted(),
                         )
                     except RuntimeError:
                         print(f"Error: {exc}", file=sys.stderr)

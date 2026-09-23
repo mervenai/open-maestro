@@ -76,6 +76,21 @@ class InteractiveProgressHandler:
                 f"{payload.get('memories', 0)} memories)"
             )
 
+        if event_type == "model.quota_exhausted":
+            model = payload.get("model", "unknown")
+            reason = payload.get("reason", "quota exhausted")
+            fallback = payload.get("fallback")
+            runtime = payload.get("runtime")
+            if fallback:
+                return (
+                    f"⚠ '{model}' quota exhausted ({reason}) — "
+                    f"falling back to '{fallback}' via {runtime}"
+                )
+            return (
+                f"⚠ '{model}' quota exhausted ({reason}) — "
+                "no alternative model available"
+            )
+
         if event_type == "search.completed":
             count = payload.get("count", 0)
             return f"→ Searched codebase ({count} result/s)"

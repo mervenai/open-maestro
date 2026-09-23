@@ -638,12 +638,23 @@ class CapabilityRegistry:
         runtime: str,
         profile: TaskProfile,
         required_alias: str | None = None,
+        exclude: set[str] | None = None,
     ) -> ModelCapability | None:
-        """Pick the best model for *runtime* matching *profile*."""
+        """Pick the best model for *runtime* matching *profile*.
+
+        *exclude* holds model ids or runtime identifiers (e.g. quota-exhausted
+        models) that must not be returned.
+        """
         candidates = self.list_models(runtime=runtime)
         if required_alias:
             candidates = [
                 m for m in candidates if required_alias.lower() in m.aliases
+            ]
+        if exclude:
+            candidates = [
+                m
+                for m in candidates
+                if m.id not in exclude and m.identifier_for(runtime) not in exclude
             ]
         return self._score_and_pick(candidates, profile)
 

@@ -104,9 +104,16 @@ class ModelResolver:
         backend: str,
         profile: TaskProfile,
         required_alias: str | None = None,
+        exclude: set[str] | None = None,
     ) -> str | None:
-        """Pick the best concrete model identifier for *backend* and *profile*."""
-        model = self._registry.match(backend, profile, required_alias=required_alias)
+        """Pick the best concrete model identifier for *backend* and *profile*.
+
+        *exclude* holds model ids or identifiers that must not be selected
+        (e.g. quota-exhausted models).
+        """
+        model = self._registry.match(
+            backend, profile, required_alias=required_alias, exclude=exclude
+        )
         if model is not None:
             return model.identifier_for(backend)
 

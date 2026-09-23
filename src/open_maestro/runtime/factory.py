@@ -161,6 +161,7 @@ def select_runtime_for_task(
     max_cost_level: CostLevel | None = None,
     min_cost_level: CostLevel | None = CostLevel.MEDIUM,
     prefer_local: bool = False,
+    exclude: set[str] | None = None,
 ) -> tuple[str, str | None]:
     """Pick the cheapest capable model that is not much slower than the fastest.
 
@@ -184,6 +185,8 @@ def select_runtime_for_task(
         min_cost_level: Minimum cost level to consider (default MEDIUM). Set to
             LOW to allow cheap/local models, HIGH to restrict to frontier models.
         prefer_local: If True, only consider local/self-hosted models.
+        exclude: Model ids or runtime identifiers to skip (e.g. models whose
+            quota is exhausted this session).
     """
     candidates = _build_candidates(
         profile,
@@ -192,6 +195,7 @@ def select_runtime_for_task(
         max_cost_level=max_cost_level,
         min_cost_level=min_cost_level,
         prefer_local=prefer_local,
+        exclude=exclude,
     )
 
     # When local preference is on and no model satisfies the full profile,
@@ -217,6 +221,7 @@ def select_runtime_for_task(
             max_cost_level=max_cost_level,
             min_cost_level=min_cost_level,
             prefer_local=prefer_local,
+            exclude=exclude,
         )
 
     if not candidates:
@@ -259,6 +264,7 @@ def _build_candidates(
     max_cost_level: CostLevel | None,
     min_cost_level: CostLevel | None,
     prefer_local: bool,
+    exclude: set[str] | None = None,
 ) -> list[tuple[float, int, int, float, bool, str, str]]:
     """Build the candidate list for select_runtime_for_task."""
     from open_maestro.config.capabilities import (
@@ -336,6 +342,16 @@ def _build_candidates(
 
             model_id = model_entry.identifier_for(name)
             if model_id is None:
+                continue
+
+            if exclude and (
+                model_entry.id in exclude or model_id in exclude
+            ):
+                logger.debug(
+                    "Skipping %s / %s: excluded (e.g. quota exhausted)",
+                    name,
+                    model_entry.id,
+                )
                 continue
 
             if not is_model_available(name, model_entry):

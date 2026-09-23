@@ -22,7 +22,13 @@ from open_maestro.agents.registry import (
     _agent_is_read_only,
     _task_requires_writing,
 )
-from open_maestro.config.capabilities import TaskProfile, TaskProfiler
+from open_maestro.config.capabilities import (
+    CapabilityRegistry,
+    CostLevel,
+    TaskProfile,
+    TaskProfiler,
+    _score_model,
+)
 from open_maestro.config.models import ModelResolver
 from open_maestro.context.budget import ContextBudget
 from open_maestro.context.monitor import ContextMonitor, ContextSnapshot
@@ -36,7 +42,10 @@ from open_maestro.orchestrator.load import (
     estimate_source_load,
 )
 from open_maestro.orchestrator.swarm import SwarmExecutor, SwarmPlanner
+from open_maestro.runtime import quota as quota_mod
+from open_maestro.runtime.availability import is_model_available
 from open_maestro.runtime.base import AgentConfig, AgentResult, AgentRuntime
+from open_maestro.runtime.factory import create_runtime, select_runtime_for_task
 from open_maestro.runtime.latency import record_result
 from open_maestro.security.policy import PermissionPolicy, evaluate
 from open_maestro.session.store import SessionRecord, SessionStore
@@ -72,6 +81,10 @@ class OrchestrationContext:
     selected_agent: AgentDefinition | None = None
     enriched_prompt: str = ""
     source_load: Any | None = None
+    executed_as_chain: bool = False
+
+
+_MAX_QUOTA_FALLBACKS = 3
 
 
 class ProjectManager:
@@ -220,16 +233,222 @@ class ProjectManager:
         if ctx.selected_agent.required_capabilities is not None:
             profile = ctx.selected_agent.required_capabilities.merge_into_profile(profile)
 
+        # 5-9. Execute once, then degrade gracefully: when a model's quota is
+        #     exhausted mid-task, remember it on the session circuit breaker
+        #     and re-run with the next capable model instead of dead-ending
+        #     the turn.
+        exec_kwargs: dict[str, Any] = dict(
+            allowed_tools=allowed_tools,
+            blocked_tools=blocked_tools,
+            permission_mode=permission_mode,
+            deny_dangerous=deny_dangerous,
+            max_turns=max_turns,
+            mcp_servers=mcp_servers,
+            session_id=session_id,
+            resume=resume,
+            fork=fork,
+            dry_run=dry_run,
+            chain=chain,
+            swarm=swarm,
+            runtime_config=runtime_config,
+            prefer_local=prefer_local,
+        )
+        result, config, resolved_model = await self._execute_once(
+            ctx, profile, prompt=prompt, model=model, resolved_model=None,
+            **exec_kwargs,
+        )
+
+        attempts = 0
+        while (
+            result.is_error
+            and result.metadata.get("quota_exhausted")
+            and attempts < _MAX_QUOTA_FALLBACKS
+        ):
+            reason = str(result.metadata["quota_exhausted"])
+            failed_model = (
+                result.metadata.get("quota_exhausted_model") or resolved_model
+            )
+            quota_mod.mark_exhausted(failed_model)
+            exclude = quota_mod.exhausted()
+            new_runtime, new_model = self._select_fallback(
+                profile, exclude, prefer_local, failed_model
+            )
+            await self.event_bus.emit(
+                "model.quota_exhausted",
+                {
+                    "model": failed_model,
+                    "runtime": self.runtime.runtime_name,
+                    "reason": reason,
+                    "fallback": new_model,
+                },
+            )
+            if not new_runtime or not new_model:
+                break
+            if new_runtime != self.runtime.runtime_name:
+                self.runtime = create_runtime(new_runtime, config=runtime_config)
+            logger.info(
+                "Quota exhausted on %s (%s); falling back to %s via %s",
+                failed_model,
+                reason,
+                new_model,
+                new_runtime,
+            )
+            # The pinned/selected model just died: null the pin and force the
+            # fallback choice for the retry.
+            model = None
+            resolved_model = new_model
+            attempts += 1
+            result, config, resolved_model = await self._execute_once(
+                ctx,
+                profile,
+                prompt=prompt,
+                model=model,
+                resolved_model=resolved_model,
+                **exec_kwargs,
+            )
+
+        if result.is_error and result.metadata.get("quota_exhausted"):
+            # The loop exited with the task still failing on quota: either no
+            # alternative model could take it or the fallback budget ran out.
+            failed_model = (
+                result.metadata.get("quota_exhausted_model") or resolved_model
+            )
+            result.text = (
+                f"⚠ Model '{failed_model}' quota exhausted "
+                f"({result.metadata['quota_exhausted']}); "
+                "no alternative model available. Top up the balance or "
+                "use /model to pick one explicitly."
+                f"\n\n{result.text}"
+            )
+
+        # 10. Credit the vendor and model used for this turn.
+        if not dry_run and not result.is_error and not ctx.executed_as_chain:
+            result.text += (
+                f"\n\n---\n"
+                f"Vendor: {_vendor_label(self.runtime.runtime_name)}\n"
+                f"Model: {config.model or 'unspecified'}\n"
+                f"Runtime: {self.runtime.runtime_name}"
+            )
+
+        # 10. Monitor context pressure and persist session state.
+        threshold: str | None = None
+        if not dry_run:
+            threshold = self.context_monitor.update(result)
+            if threshold == "warning":
+                logger.warning(
+                    "Context usage passed warning threshold: %s tokens",
+                    self.context_monitor.snapshot.tokens_used,
+                )
+            elif threshold == "critical":
+                logger.warning(
+                    "Context usage passed critical threshold: %s tokens",
+                    self.context_monitor.snapshot.tokens_used,
+                )
+
+            if threshold:
+                await self.event_bus.emit(
+                    "context.threshold",
+                    {
+                        "threshold": threshold,
+                        "tokens_used": self.context_monitor.snapshot.tokens_used,
+                        "max_context_tokens": self.context_budget.max_context_tokens,
+                    },
+                )
+
+            await self._persist_session(
+                prompt=prompt,
+                session_id=session_id,
+                resume=resume,
+                fork=fork,
+                agent=ctx.selected_agent,
+                config=config,
+                result=result,
+            )
+            await self.event_bus.emit(
+                "session.saved",
+                {
+                    "session_id": result.session_id or session_id,
+                    "agent_id": ctx.selected_agent.id,
+                },
+            )
+
+            if threshold == "critical":
+                # Never discard the user's answer: the resume log is a
+                # handoff artifact, not the response. Write it to disk and
+                # surface a short warning alongside the real result.
+                resume_log = self.context_monitor.build_resume_log(
+                    ctx,
+                    original_prompt=prompt,
+                    result_text=result.text,
+                )
+                log_path = Path.cwd() / ".open-maestro" / "resume-log.md"
+                try:
+                    log_path.parent.mkdir(parents=True, exist_ok=True)
+                    log_path.write_text(resume_log, encoding="utf-8")
+                except OSError as exc:
+                    logger.warning("Failed to write resume log: %s", exc)
+                    log_path = None
+                result.text += (
+                    f"\n\n---\n⚠️ Context budget critical: "
+                    f"{self.context_monitor.snapshot.tokens_used} tokens used "
+                    f"this session (budget "
+                    f"{self.context_budget.max_context_tokens}). "
+                    "Consider /reset or a fresh session for the next task."
+                )
+                if log_path is not None:
+                    result.text += f" Resume log written to {log_path}."
+                result.metadata["context_threshold"] = "critical"
+                result.metadata["context_snapshot"] = vars(
+                    self.context_monitor.snapshot
+                )
+                return result
+
+        return result
+
+    async def _execute_once(
+        self,
+        ctx: OrchestrationContext,
+        profile: TaskProfile,
+        *,
+        prompt: str,
+        model: str | None,
+        resolved_model: str | None,
+        allowed_tools: list[str] | None,
+        blocked_tools: list[str] | None,
+        permission_mode: str | None,
+        deny_dangerous: bool,
+        max_turns: int | None,
+        mcp_servers: dict[str, Any] | None,
+        session_id: str | None,
+        resume: bool,
+        fork: bool,
+        dry_run: bool,
+        chain: bool,
+        swarm: bool,
+        runtime_config: AgentConfig | None,
+        prefer_local: bool,
+    ) -> tuple[AgentResult, AgentConfig, str | None]:
+        """Resolve the model and execute the task exactly once.
+
+        Covers model resolution, prompt assembly, chain/swarm/single
+        execution, and the critic gate.  Quota exhaustion is reported through
+        ``result.metadata["quota_exhausted"]``; the retry loop in ``handle``
+        marks the model on the session circuit and calls this again with the
+        fallback model.
+        """
         # 5. Resolve the concrete model for this runtime and profile.
         #    The task profile (including explicit CLI flags) overrides the
         #    agent's default model alias unless the user supplied an explicit
-        #    --model value.
+        #    --model value.  Models already marked quota-exhausted this
+        #    session are excluded from automatic selection.
         resolver = ModelResolver()
         if model is not None:
             resolved_model = model
-        else:
+        elif resolved_model is None:
             resolved_model = resolver.select_for_task(
-                self.runtime.runtime_name, profile
+                self.runtime.runtime_name,
+                profile,
+                exclude=quota_mod.exhausted(),
             )
             if resolved_model is None:
                 resolved_model = resolver.resolve(
@@ -246,9 +465,9 @@ class ProjectManager:
         #    3+ independent targets, workers run in parallel (each with its own
         #    runtime/model selection); otherwise fall back to the sequential
         #    chain planner.
-        executed_as_chain = False
+        ctx.executed_as_chain = False
         if chain and not resume and not fork:
-            executed_as_chain = True
+            ctx.executed_as_chain = True
             swarm_plan = None
             if swarm:
                 swarm_planner = SwarmPlanner(
@@ -263,13 +482,17 @@ class ProjectManager:
                 )
             if swarm_plan is not None:
                 if dry_run:
-                    return AgentResult(
-                        text=SwarmPlanner.format_plan(swarm_plan),
-                        metadata={
-                            "selected_agent": ctx.selected_agent.id,
-                            "swarm": True,
-                            "dry_run": True,
-                        },
+                    return (
+                        AgentResult(
+                            text=SwarmPlanner.format_plan(swarm_plan),
+                            metadata={
+                                "selected_agent": ctx.selected_agent.id,
+                                "swarm": True,
+                                "dry_run": True,
+                            },
+                        ),
+                        AgentConfig(model=model or resolved_model),
+                        resolved_model,
                     )
                 swarm_executor = SwarmExecutor(
                     registry=self.registry,
@@ -304,13 +527,17 @@ class ProjectManager:
                     profile=profile,
                 )
                 if dry_run:
-                    return AgentResult(
-                        text=ChainExecutor.format_plan(plan),
-                        metadata={
-                            "selected_agent": ctx.selected_agent.id,
-                            "chain": True,
-                            "dry_run": True,
-                        },
+                    return (
+                        AgentResult(
+                            text=ChainExecutor.format_plan(plan),
+                            metadata={
+                                "selected_agent": ctx.selected_agent.id,
+                                "chain": True,
+                                "dry_run": True,
+                            },
+                        ),
+                        AgentConfig(model=model or resolved_model),
+                        resolved_model,
                     )
                 executor = ChainExecutor(
                     registry=self.registry,
@@ -336,18 +563,22 @@ class ProjectManager:
                 config = AgentConfig(model=model or resolved_model)
 
         # 8. Dry run: return the plan without invoking the runtime.
-        if dry_run and not executed_as_chain:
+        if dry_run and not ctx.executed_as_chain:
             plan = self._format_plan(
                 ctx, profile, resolved_model, self.runtime.runtime_name
             )
-            return AgentResult(
-                text=plan,
-                metadata={
-                    "selected_agent": ctx.selected_agent.id,
-                    "resolved_model": resolved_model,
-                    "runtime": self.runtime.runtime_name,
-                    "dry_run": True,
-                },
+            return (
+                AgentResult(
+                    text=plan,
+                    metadata={
+                        "selected_agent": ctx.selected_agent.id,
+                        "resolved_model": resolved_model,
+                        "runtime": self.runtime.runtime_name,
+                        "dry_run": True,
+                    },
+                ),
+                AgentConfig(model=model or resolved_model),
+                resolved_model,
             )
 
         # 8.5 Snapshot git HEAD so the critic gate can attribute source changes
@@ -360,7 +591,7 @@ class ProjectManager:
         # 9. Handoff: if the task requires writing but the selected agent is
         #    read-only, run the read-only agent first for analysis, then delegate
         #    the writing step to a mutating agent.
-        if not executed_as_chain:
+        if not ctx.executed_as_chain:
             needs_handoff = (
                 not dry_run
                 and _task_requires_writing(prompt)
@@ -406,7 +637,7 @@ class ProjectManager:
         if (
             self.critic_gate
             and not dry_run
-            and not executed_as_chain
+            and not ctx.executed_as_chain
             and not result.is_error
             and _agent_can_mutate(ctx.selected_agent)
             and ctx.selected_agent.id != "code-critic"
@@ -427,89 +658,88 @@ class ProjectManager:
                     mcp_servers=mcp_servers,
                 )
 
-        # 10. Credit the vendor and model used for this turn.
-        if not dry_run and not result.is_error and not executed_as_chain:
-            result.text += (
-                f"\n\n---\n"
-                f"Vendor: {_vendor_label(self.runtime.runtime_name)}\n"
-                f"Model: {config.model or 'unspecified'}\n"
-                f"Runtime: {self.runtime.runtime_name}"
+        return result, config, resolved_model
+
+    def _select_fallback(
+        self,
+        profile: TaskProfile,
+        exclude: set[str],
+        prefer_local: bool,
+        failed_model: str | None,
+    ) -> tuple[str | None, str | None]:
+        """Pick the next runtime/model after a quota failure.
+
+        An explicit ``routing.fallback_order`` in the user capabilities file
+        wins when it contains the failed model; otherwise the capability-aware
+        selector picks the cheapest capable model with the exhausted ones
+        excluded.  Returns (None, None) when nothing else can take the task.
+        """
+        order = quota_mod.load_fallback_order()
+        if order and failed_model:
+            picked = self._pick_from_fallback_order(
+                order, profile, exclude, failed_model
             )
-
-        # 10. Monitor context pressure and persist session state.
-        threshold: str | None = None
-        if not dry_run:
-            threshold = self.context_monitor.update(result)
-            if threshold == "warning":
-                logger.warning(
-                    "Context usage passed warning threshold: %s tokens",
-                    self.context_monitor.snapshot.tokens_used,
-                )
-            elif threshold == "critical":
-                logger.warning(
-                    "Context usage passed critical threshold: %s tokens",
-                    self.context_monitor.snapshot.tokens_used,
-                )
-
-            if threshold:
-                await self.event_bus.emit(
-                    "context.threshold",
-                    {
-                        "threshold": threshold,
-                        "tokens_used": self.context_monitor.snapshot.tokens_used,
-                        "max_context_tokens": self.context_monitor.budget.max_context_tokens,
-                    },
-                )
-
-            await self._persist_session(
-                prompt=prompt,
-                session_id=session_id,
-                resume=resume,
-                fork=fork,
-                agent=ctx.selected_agent,
-                config=config,
-                result=result,
+            if picked is not None:
+                return picked
+        try:
+            return select_runtime_for_task(
+                profile,
+                exclude=exclude,
+                min_cost_level=CostLevel.LOW,
+                prefer_local=prefer_local,
             )
-            await self.event_bus.emit(
-                "session.saved",
-                {
-                    "session_id": result.session_id or session_id,
-                    "agent_id": ctx.selected_agent.id,
-                },
+        except RuntimeError:
+            logger.warning(
+                "No fallback model available for profile %s", profile
             )
+            return None, None
 
-            if threshold == "critical":
-                # Never discard the user's answer: the resume log is a
-                # handoff artifact, not the response. Write it to disk and
-                # surface a short warning alongside the real result.
-                resume_log = self.context_monitor.build_resume_log(
-                    ctx,
-                    original_prompt=prompt,
-                    result_text=result.text,
-                )
-                log_path = Path.cwd() / ".open-maestro" / "resume-log.md"
-                try:
-                    log_path.parent.mkdir(parents=True, exist_ok=True)
-                    log_path.write_text(resume_log, encoding="utf-8")
-                except OSError as exc:
-                    logger.warning("Failed to write resume log: %s", exc)
-                    log_path = None
-                result.text += (
-                    f"\n\n---\n⚠️ Context budget critical: "
-                    f"{self.context_monitor.snapshot.tokens_used} tokens used "
-                    f"this session (budget "
-                    f"{self.context_monitor.budget.max_context_tokens}). "
-                    "Consider /reset or a fresh session for the next task."
-                )
-                if log_path is not None:
-                    result.text += f" Resume log written to {log_path}."
-                result.metadata["context_threshold"] = "critical"
-                result.metadata["context_snapshot"] = vars(
-                    self.context_monitor.snapshot
-                )
-                return result
+    def _pick_from_fallback_order(
+        self,
+        order: list[str],
+        profile: TaskProfile,
+        exclude: set[str],
+        failed_model: str,
+    ) -> tuple[str, str] | None:
+        """Walk the user-configured fallback chain past the failed model."""
+        try:
+            start = order.index(failed_model)
+        except ValueError:
+            start = -1
+        registry = CapabilityRegistry.load()
+        for entry in order[start + 1 :]:
+            if entry in exclude:
+                continue
+            picked = self._resolve_order_entry(registry, entry, profile, exclude)
+            if picked is not None:
+                return picked
+        return None
 
-        return result
+    @staticmethod
+    def _resolve_order_entry(
+        registry: CapabilityRegistry,
+        entry: str,
+        profile: TaskProfile,
+        exclude: set[str],
+    ) -> tuple[str, str] | None:
+        """Resolve one fallback-chain entry to an available, capable model."""
+        model = registry.models.get(entry)
+        if model is None:
+            # Not a canonical id: maybe a runtime identifier like "kimi-k3".
+            for candidate in registry.list_models():
+                if entry in candidate.identifiers.values():
+                    model = candidate
+                    break
+        if model is None or model.id in exclude:
+            return None
+        if _score_model(model, profile) is None:
+            return None
+        for runtime_name, identifier in model.identifiers.items():
+            if identifier in exclude:
+                continue
+            if is_model_available(runtime_name, model):
+                return runtime_name, identifier
+        return None
 
     def _seed_context_from_session(self, session_id: str) -> None:
         """Load previous token usage so the budget is cumulative across resumes."""

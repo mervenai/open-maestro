@@ -5,6 +5,32 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.0] - 2026-09-20
+
+### Added
+- **Graceful degradation when a model's quota is exhausted.** When a
+  provider error means "this credential/model is out of service" (HTTP
+  401/403/402, or a balance/quota/credit message in the error body), the
+  openai-sdk runtime tags the result with `quota_exhausted` metadata instead
+  of dead-ending the turn. `pm.handle` then marks the model on a
+  session-scoped circuit breaker, emits a `model.quota_exhausted` event
+  (rendered in interactive mode as
+  `⚠ '<model>' quota exhausted (<reason>) — falling back to '<fallback>'`),
+  and re-runs the task with the next capable model — up to 3 fallbacks per
+  turn. Selection layers (`CapabilityRegistry.match`,
+  `ModelResolver.select_for_task`, `select_runtime_for_task`) accept an
+  `exclude` set, and interactive per-turn selection also skips
+  circuit-marked models, so subsequent turns don't pick the dead model
+  again. Transient errors (stream read failures) and plain rate limits keep
+  their existing retry behavior; context-overflow errors are unaffected.
+- **Optional deterministic fallback chain.** Users who want a fixed
+  secondary model can set `routing.fallback_order:` (a list of model ids or
+  runtime identifiers) in `~/.open-maestro/capabilities.yaml`. When the
+  failed model appears in the chain, the next available, capable entry is
+  used; otherwise fallback stays fully automatic (cheapest capable model
+  with exhausted ones excluded). If nothing can take the task, the result
+  carries a warning explaining the exhausted quota and suggesting `/model`.
+
 ## [1.19.0] - 2026-09-20
 
 ### Added
