@@ -14,6 +14,7 @@ from open_maestro.interactive import (
     _looks_like_decision,
     _resolve_suggested_prompt,
     _strip_plan_prefix,
+    _turn_includes_history,
 )
 
 
@@ -269,3 +270,44 @@ def test_status_command_empty_project(tmp_path, monkeypatch) -> None:
     assert out.startswith("# Where you left off")
     assert "No milestone plan found" in out
     assert "No prior sessions recorded." in out
+
+
+def test_turn_includes_history_no_session() -> None:
+    state = InteractiveState()
+    assert _turn_includes_history(state, "kimi-cli") is True
+
+
+def test_turn_includes_history_runtime_mismatch() -> None:
+    state = InteractiveState()
+    state.session_id = "abc-123"
+    state.session_runtime = "kimi-cli"
+    assert _turn_includes_history(state, "claude-cli") is True
+
+
+def test_turn_includes_history_resume_broken_kimi(monkeypatch) -> None:
+    from open_maestro.runtime import kimi_cli
+
+    monkeypatch.setattr(kimi_cli, "_RESUME_BROKEN", True)
+    state = InteractiveState()
+    state.session_id = "abc-123"
+    state.session_runtime = "kimi-cli"
+    assert _turn_includes_history(state, "kimi-cli") is True
+
+
+def test_turn_includes_history_healthy_same_runtime_session(monkeypatch) -> None:
+    from open_maestro.runtime import kimi_cli
+
+    monkeypatch.setattr(kimi_cli, "_RESUME_BROKEN", False)
+    state = InteractiveState()
+    state.session_id = "abc-123"
+    state.session_runtime = "kimi-cli"
+    assert _turn_includes_history(state, "kimi-cli") is False
+
+
+def test_turn_includes_history_non_kimi_same_runtime() -> None:
+    # Non-kimi runtimes with a healthy same-runtime session resume natively
+    # too, so the transcript must not be duplicated either.
+    state = InteractiveState()
+    state.session_id = "abc-123"
+    state.session_runtime = "claude-cli"
+    assert _turn_includes_history(state, "claude-cli") is False

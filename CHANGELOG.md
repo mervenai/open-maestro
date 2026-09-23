@@ -5,6 +5,28 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.2] - 2026-09-22
+
+### Fixed
+- **Interactive turns no longer duplicate the conversation on native session
+  resume.** When a turn resumes a backend session (e.g. `kimi -r <id>`), the
+  model already holds the full conversation natively, but Maestro was also
+  injecting the entire "Conversation so far" transcript as the new message —
+  doubling a long session and degrading the model's anchoring on the most
+  recent turns (symptom: a follow-up turn re-scanning files for context that
+  was in its own prior output). Turns that natively resume a healthy
+  same-runtime session now send a current-task-only prompt; the transcript
+  remains the continuity mechanism for fresh sessions and when kimi resume is
+  known-broken.
+- **`state.session_runtime` records the actual post-fallback runtime.** It
+  previously stored the turn's pre-fallback runtime, so after a quota-fallback
+  swap (e.g. glm → kimi) the next turn's resume check compared against the
+  wrong runtime and could resume a session the selected runtime never owned.
+- **Debug visibility for prompt assembly.** Interactive turns log the
+  assembled prompt size, injected history turns, and resume flag at debug
+  level, so future continuity issues can be diagnosed from a debug log
+  instead of guesswork.
+
 ## [1.20.1] - 2026-09-22
 
 ### Fixed

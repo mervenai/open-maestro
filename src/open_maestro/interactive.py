@@ -273,6 +273,25 @@ def _assemble_prompt(prompt: str, history: list[dict[str, str]]) -> str:
     return "\n".join(parts)
 
 
+def _turn_includes_history(state: "InteractiveState", turn_runtime: str) -> bool:
+    """False when the turn will natively resume a backend session.
+
+    A resumed session (e.g. ``kimi -r <id> -p ...``) already carries the full
+    conversation, so re-injecting the transcript would duplicate the entire
+    history and models lose anchoring on recent turns.  The transcript is the
+    continuity mechanism for fresh sessions only — including when resume is
+    known-broken (kimi prompt-mode sessions can be ephemeral) or the session
+    belongs to a different runtime.
+    """
+    if not state.session_id or state.session_runtime != turn_runtime:
+        return True
+    if turn_runtime == "kimi-cli":
+        from open_maestro.runtime import kimi_cli
+
+        return kimi_cli.resume_broken()
+    return False
+
+
 def _strip_plan_prefix(user_input: str, state: InteractiveState) -> str | None:
     """Handle one-line "/plan <prompt>" and "/dry <prompt>" forms.
 
@@ -2028,7 +2047,6 @@ async def run_interactive(args: Any) -> int:
         user_input = clarified_prompt
 
         profile = _build_task_profile(user_input, state, args)
-        prompt = _assemble_prompt(user_input, state.history)
 
         # Measure source load (artifacts/repos touched) and raise the
         # profile's requirements before runtime selection, so heavy turns
@@ -2112,6 +2130,25 @@ async def run_interactive(args: Any) -> int:
             if turn_model is None:
                 turn_model = selected_model
 
+        # Continuity strategy for this turn: a native session resume carries
+        # the conversation in the backend, so the prompt is current-task-only;
+        # a fresh session needs the transcript injected for continuity.
+        # (`_turn_includes_history` is False exactly when a healthy same-
+        # runtime session exists and will be resumed.)
+        include_history = _turn_includes_history(state, turn_runtime)
+        can_resume = not include_history
+        effective_session_id = state.session_id if can_resume else None
+
+        prompt = _assemble_prompt(
+            user_input, state.history if include_history else []
+        )
+        logger.debug(
+            "Assembled prompt: %s bytes, history turns=%d, resume=%s",
+            len(prompt.encode()),
+            len(state.history) if include_history else 0,
+            bool(effective_session_id),
+        )
+
         runtime_config = AgentConfig(
             extra={
                 "api_key": args.api_key,
@@ -2161,10 +2198,6 @@ async def run_interactive(args: Any) -> int:
         indicator.set_message("Thinking")
         if not args.monitor:
             indicator.start()
-
-        # Only resume a session if the selected runtime is the one that created it.
-        can_resume = state.session_runtime == turn_runtime
-        effective_session_id = state.session_id if can_resume else None
 
         async def _execute_turn() -> Any:
             if args.monitor:
@@ -2238,7 +2271,10 @@ async def run_interactive(args: Any) -> int:
                 ):
                     sid = maybe_uuid
             state.session_id = sid
-            state.session_runtime = turn_runtime
+            # Record the runtime that actually owns the returned session — the
+            # orchestrator may have fallen back to a different runtime than the
+            # one selected for the turn, and resume eligibility depends on this.
+            state.session_runtime = pm.runtime.runtime_name
             print(f"[session: {state.session_id}]")
 
         # Record that a suggested playbook prompt was executed and advance the

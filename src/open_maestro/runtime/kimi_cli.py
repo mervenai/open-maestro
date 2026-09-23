@@ -59,6 +59,11 @@ def _normalize_kimi_session_id(session_id: str) -> str:
 _RESUME_BROKEN: bool = False
 
 
+def resume_broken() -> bool:
+    """True after a resume failure disabled session resumption."""
+    return _RESUME_BROKEN
+
+
 class _TerminalAttrs:
     """Save and restore Unix terminal attributes around a subprocess.
 
