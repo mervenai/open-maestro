@@ -19,6 +19,7 @@ from open_maestro.milestones import (
     MilestonePlan,
     MilestoneStatus,
 )
+from open_maestro.milestones.auto_populate import _build_work_epic, _parse_epics
 from open_maestro.milestones.commands import (
     format_prompt_context,
     handle_blocker_command,
@@ -691,3 +692,72 @@ class TestSupabaseDashboardPublisher:
         publisher = SupabaseDashboardPublisher()
         response = publisher.publish(self._plan(tmp_path))
         assert response["public_url"].startswith("https://cdn.example.com/d/")
+
+
+class TestParseEpics:
+    """Tests for the epic breakdown parser in auto_populate."""
+
+    def test_e_headings(self, tmp_path):
+        doc = tmp_path / "epics.md"
+        doc.write_text(
+            "# Feature Epics\n\n"
+            "### E1 — Audit Capture\n\n### E2 — Detection Engine\n",
+            encoding="utf-8",
+        )
+        assert _parse_epics(doc) == [
+            ("e", "1", "Audit Capture"),
+            ("e", "2", "Detection Engine"),
+        ]
+
+    def test_ce_headings(self, tmp_path):
+        doc = tmp_path / "epics.md"
+        doc.write_text(
+            "# Feature Epics\n\n"
+            "## CE-1 — Data Foundation\n\n## CE-2 — Detection & Alerting\n",
+            encoding="utf-8",
+        )
+        assert _parse_epics(doc) == [
+            ("ce", "1", "Data Foundation"),
+            ("ce", "2", "Detection & Alerting"),
+        ]
+
+    def test_ce_heading_without_dash_after_prefix(self, tmp_path):
+        doc = tmp_path / "epics.md"
+        doc.write_text("### CE1 — Data Foundation\n", encoding="utf-8")
+        assert _parse_epics(doc) == [("ce", "1", "Data Foundation")]
+
+    def test_ce_table_rows(self, tmp_path):
+        doc = tmp_path / "epics.md"
+        doc.write_text(
+            "| Epic | Name |\n"
+            "|---|---|\n"
+            "| CE-1 | Data Foundation |\n"
+            "| CE-2 | Review Experience |\n",
+            encoding="utf-8",
+        )
+        assert _parse_epics(doc) == [
+            ("ce", "1", "Data Foundation"),
+            ("ce", "2", "Review Experience"),
+        ]
+
+    def test_mixed_prefixes_deduplicate_independently(self, tmp_path):
+        doc = tmp_path / "epics.md"
+        doc.write_text(
+            "### E1 — Legacy One\n\n### CE-1 — Consolidated One\n",
+            encoding="utf-8",
+        )
+        assert _parse_epics(doc) == [
+            ("e", "1", "Legacy One"),
+            ("ce", "1", "Consolidated One"),
+        ]
+
+    def test_lowercase_prefix_accepted(self, tmp_path):
+        doc = tmp_path / "epics.md"
+        doc.write_text("### ce-1 — Data Foundation\n", encoding="utf-8")
+        assert _parse_epics(doc) == [("ce", "1", "Data Foundation")]
+
+    def test_work_epic_id_uses_prefix(self):
+        epic = _build_work_epic(2, "ce", "1", "Data Foundation")
+        assert epic.id == "ce1-data-foundation"
+        epic = _build_work_epic(2, "e", "3", "Detection Engine")
+        assert epic.id == "e3-detection-engine"

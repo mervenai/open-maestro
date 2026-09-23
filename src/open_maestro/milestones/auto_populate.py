@@ -207,51 +207,62 @@ def maybe_create_epics_doc(
     return target
 
 
-def _parse_epics(doc_path: Path) -> list[tuple[str, str]]:
-    """Parse epic number/name pairs from an epic breakdown markdown file.
+def _parse_epics(doc_path: Path) -> list[tuple[str, str, str]]:
+    """Parse epic prefix/number/name triples from an epic breakdown markdown file.
 
     Supports two common formats, in document order:
-      - Table rows: ``| E1 | Epic Name | ... |``
-      - Headings:   ``### E1 — Epic Name``
+      - Table rows: ``| E1 | Epic Name | ... |`` or ``| CE-1 | Epic Name | ... |``
+      - Headings:   ``### E1 — Epic Name``  or  ``### CE-1 — Epic Name``
+
+    Returns ``(prefix, number, name)`` where prefix is the lowercase epic
+    prefix (``"e"`` or ``"ce"``), so callers can build epic ids like
+    ``e1-audit-capture`` or ``ce1-data-foundation``.
     """
     text = doc_path.read_text(encoding="utf-8")
-    found: list[tuple[int, str, str]] = []
+    found: list[tuple[int, str, str, str]] = []
 
     heading_pattern = re.compile(
-        r"^###\s*(?:\*\*)?E(\d+)(?:\*\*)?\s*[—–\-]\s*(.+?)\s*$"
+        r"^#{2,6}\s*(?:\*\*)?(CE|E)-?(\d+)(?:\*\*)?\s*[—–\-]\s*(.+?)\s*$",
+        re.IGNORECASE,
     )
     table_pattern = re.compile(
-        r"\|\s*(?:\*\*)?E(\d+)(?:\*\*)?\s*\|\s*(?:\*\*)?([^|]+?)(?:\*\*)?\s*\|"
+        r"\|\s*(?:\*\*)?(CE|E)-?(\d+)(?:\*\*)?\s*\|\s*(?:\*\*)?([^|]+?)(?:\*\*)?\s*\|",
+        re.IGNORECASE,
     )
 
     for line_no, raw_line in enumerate(text.splitlines(), start=1):
         stripped = raw_line.strip()
         match = heading_pattern.match(stripped)
         if match:
-            found.append((line_no, match.group(1), match.group(2).strip()))
+            found.append(
+                (line_no, match.group(1), match.group(2), match.group(3).strip())
+            )
             continue
         if stripped.startswith("|"):
             match = table_pattern.search(stripped)
             if match:
-                found.append((line_no, match.group(1), match.group(2).strip()))
+                found.append(
+                    (line_no, match.group(1), match.group(2), match.group(3).strip())
+                )
 
-    # Deduplicate by epic number while preserving first-seen document order.
+    # Deduplicate by epic prefix+number while preserving first-seen document order.
     seen: set[str] = set()
-    result: list[tuple[str, str]] = []
-    for _, number, name in sorted(found, key=lambda item: item[0]):
-        if number in seen:
+    result: list[tuple[str, str, str]] = []
+    for _, prefix, number, name in sorted(found, key=lambda item: item[0]):
+        key = f"{prefix.upper()}{number}"
+        if key in seen:
             continue
         if not name or name.lower() == "epic":
             continue
-        seen.add(number)
-        result.append((number, name))
+        seen.add(key)
+        result.append((prefix.lower(), number, name))
     return result
 
 
-def _build_work_epic(order: int, number: str, name: str) -> Epic:
+def _build_work_epic(order: int, prefix: str, number: str, name: str) -> Epic:
     """Create a work epic with the standard 8 lifecycle milestones."""
     slug = _slugify(name)
-    epic_id = f"e{number}-{slug}" if slug else f"e{number}"
+    epic_id = f"{prefix}{number}-{slug}" if slug else f"{prefix}{number}"
     milestones = [
         Milestone(
             id=milestone_id,
@@ -299,11 +310,11 @@ def maybe_populate_work_epics(
         return False, []
 
     new_epics: list[Epic] = [process_epic]
-    for idx, (number, name) in enumerate(parsed, start=2):
-        new_epics.append(_build_work_epic(idx, number, name))
+    for idx, (prefix, number, name) in enumerate(parsed, start=2):
+        new_epics.append(_build_work_epic(idx, prefix, number, name))
 
     plan.epics = new_epics
-    return True, [name for _, name in parsed]
+    return True, [name for _, _, name in parsed]
 
 
 def maybe_export_dashboard(

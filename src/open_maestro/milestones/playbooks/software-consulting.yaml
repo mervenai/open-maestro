@@ -3,7 +3,7 @@
 # Override per project at: .open-maestro/playbook.yaml
 
 playbook_id: software-consulting
-version: "1.2.0"
+version: "1.3.0"
 source_project: M3BudgetUpload
 milestone_prompts:
   intake-discovery:
@@ -45,6 +45,22 @@ milestone_prompts:
         Based on the PRD, synthesis, and reuse assessment, create a risk register.
         For each risk include: description, likelihood, impact, owner, and mitigation.
         Flag any risks that should block the design phase until resolved.
+
+    - id: intake-004
+      title: Create the epic breakdown
+      order: 4
+      agent_hint: product-owner
+      tags: [discover, planning]
+      artifact_target: docs/intake/epics.md
+      prompt: |
+        Based on the PRD, synthesis, reuse assessment, and risk register, create the epic breakdown.
+        Consolidate the scope into 3-6 outcome-aligned epics (numbered CE-1, CE-2, ...). Each epic must:
+        - Own a user-visible outcome end-to-end, not a component slice (avoid one-epic-per-layer splits)
+        - Span the full stack it touches, with a repo/service coverage table
+        - Carry open gates and unresolved decisions as internal options or conditions, not as epic splits
+        - List dependencies on other epics explicitly
+        Do not re-baseline scope or success metrics inside the epics; reference the risk register IDs instead.
+        Write one '### CE-1 - <Name>' heading per epic (sequential numbering: CE-1, CE-2, ...) followed by goal, scope, service coverage, and gates.
 
   execution-planning:
     - id: plan-001

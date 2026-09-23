@@ -5,6 +5,26 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.3] - 2026-09-23
+
+### Added
+- **intake-004: outcome-aligned epic breakdown prompt.** The software-consulting
+  playbook now has an explicit Intake & Discovery prompt
+  (`artifact_target: docs/intake/epics.md`) that instructs the agent to
+  consolidate PRD scope bullets into 3-6 outcome-aligned epics (CE-1, CE-2,
+  ...) rather than the old mechanical one-bullet-one-epic derivation, which
+  produced component-sliced epics (E1-E8) with no outcome ownership and heavy
+  cross-epic dependencies. The auto-generated fallback remains only for when
+  the doc is missing. Playbook version bumped to 1.3.0.
+
+### Fixed
+- **Epic parser accepts consolidated `CE-n` numbering.** `_parse_epics` now
+  recognizes `CE-1`/`CE1` prefixes (with or without dash, any case) in both
+  headings and table rows, accepts h2-h6 headings, and builds work epic ids
+  from the lowercase prefix (`ce1-data-foundation`), so revised
+  consolidated-epic docs scaffold correctly. E-prefixed behavior unchanged.
+  (MSTRO-98)
+
 ## [1.20.2] - 2026-09-22
 
 ### Fixed
