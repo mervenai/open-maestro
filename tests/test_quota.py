@@ -368,3 +368,103 @@ class TestFallbackOrderConfig:
 
         assert picked == ("openai-sdk", "auto-model")
         assert seen.get("exclude") == {"glm-5-3-flash"}
+
+
+class TestChainSwarmQuotaPropagation:
+    """Quota tags must survive aggregation so pm.handle can fall back."""
+
+    def _agent(self) -> AgentDefinition:
+        return AgentDefinition(id="engineer", name="Engineer", role="engineer")
+
+    def _registry(self) -> AgentRegistry:
+        return AgentRegistry({"engineer": self._agent()})
+
+    def test_chain_synthesize_propagates_quota(self):
+        from open_maestro.orchestrator.chain import (
+            ChainExecutor,
+            HandoffPlan,
+            HandoffStep,
+            StepResult,
+        )
+
+        executor = ChainExecutor(registry=self._registry(), critic_gate=False)
+        step = HandoffStep(agent_id="engineer", purpose="do it")
+        plan = HandoffPlan(steps=[step], original_prompt="task")
+        combined = executor._synthesize(
+            plan,
+            [
+                StepResult(
+                    step=step,
+                    agent=self._agent(),
+                    runtime_name="openai-sdk",
+                    model="glm-5.3-flash",
+                    result=_quota_error_result(),
+                )
+            ],
+        )
+
+        assert combined.is_error is True
+        assert combined.metadata["quota_exhausted"] == "balance or quota exhausted"
+        assert combined.metadata["quota_exhausted_model"] == "glm-5.3-flash"
+
+    def test_swarm_synthesize_propagates_quota(self):
+        from open_maestro.orchestrator.chain import HandoffStep, StepResult
+        from open_maestro.orchestrator.swarm import (
+            SwarmExecutor,
+            SwarmPlan,
+            SwarmWorker,
+        )
+
+        executor = SwarmExecutor(registry=self._registry(), critic_gate=False)
+        worker = SwarmWorker(agent_id="engineer", purpose="do it")
+        plan = SwarmPlan(workers=[worker], original_prompt="task")
+        combined = executor._synthesize(
+            plan,
+            [
+                StepResult(
+                    step=HandoffStep(agent_id="engineer", purpose="do it"),
+                    agent=self._agent(),
+                    runtime_name="openai-sdk",
+                    model="glm-5.3-flash",
+                    result=_quota_error_result(),
+                )
+            ],
+        )
+
+        assert combined.is_error is True
+        assert combined.metadata["quota_exhausted"] == "balance or quota exhausted"
+        assert combined.metadata["quota_exhausted_model"] == "glm-5.3-flash"
+
+    async def test_run_agent_marks_circuit_and_excludes_on_next_selection(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        from open_maestro.orchestrator.chain import ChainExecutor
+        from open_maestro.runtime import factory as factory_mod
+
+        executor = ChainExecutor(registry=self._registry(), critic_gate=False)
+
+        seen_excludes: list[set[str]] = []
+
+        def _select(profile, **kwargs):
+            seen_excludes.append(set(kwargs.get("exclude") or set()))
+            return ("openai-sdk", "kimi-k3")
+
+        monkeypatch.setattr(factory_mod, "select_runtime_for_task", _select)
+        runtime = _ScriptedRuntime(
+            [_quota_error_result(), AgentResult(text="ok")]
+        )
+        monkeypatch.setattr(
+            factory_mod, "create_runtime", lambda name, config=None: runtime
+        )
+
+        await executor._run_agent(
+            self._agent(), "prompt", idx=1, profile=TaskProfile()
+        )
+        assert quota_mod.is_exhausted("glm-5.3-flash")
+
+        await executor._run_agent(
+            self._agent(), "prompt", idx=2, profile=TaskProfile()
+        )
+        # The second selection excluded the model that just died.
+        assert seen_excludes[1] == {"glm-5.3-flash"}
+        assert runtime.calls == 2

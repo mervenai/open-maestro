@@ -802,6 +802,31 @@ class SwarmExecutor(ChainExecutor):
             if sr.result.duration_ms is not None:
                 total_duration_ms += sr.result.duration_ms
 
+        metadata: dict[str, Any] = {
+            "swarm": True,
+            "workers": [
+                {
+                    "agent_id": sr.step.agent_id,
+                    "runtime": sr.runtime_name,
+                    "model": sr.model,
+                    "is_error": sr.result.is_error,
+                }
+                for sr in step_results
+            ],
+        }
+        # Propagate quota exhaustion from a failing worker so pm.handle can
+        # fall back to another model instead of dead-ending the turn.
+        if is_error:
+            for sr in step_results:
+                if sr.result.metadata.get("quota_exhausted"):
+                    metadata["quota_exhausted"] = sr.result.metadata[
+                        "quota_exhausted"
+                    ]
+                    metadata["quota_exhausted_model"] = sr.result.metadata.get(
+                        "quota_exhausted_model"
+                    )
+                    break
+
         return AgentResult(
             text="\n".join(lines),
             session_id=final_result.session_id,
@@ -811,16 +836,5 @@ class SwarmExecutor(ChainExecutor):
             output_tokens=total_output_tokens or None,
             duration_ms=total_duration_ms or None,
             is_error=is_error,
-            metadata={
-                "swarm": True,
-                "workers": [
-                    {
-                        "agent_id": sr.step.agent_id,
-                        "runtime": sr.runtime_name,
-                        "model": sr.model,
-                        "is_error": sr.result.is_error,
-                    }
-                    for sr in step_results
-                ],
-            },
+            metadata=metadata,
         )

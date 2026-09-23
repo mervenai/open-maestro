@@ -5,6 +5,27 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.1] - 2026-09-22
+
+### Fixed
+- **Quota fallback now works inside chain and swarm runs.** A quota failure
+  in a chain step or swarm worker previously dead-ended the turn: the
+  aggregated result rebuilt its metadata from scratch, dropping the
+  `quota_exhausted` tag before `pm.handle` could react. Both `_synthesize`
+  implementations now propagate the tag from a failing step/worker, so the
+  pm-level retry loop (re-select the cheapest capable model with exhausted
+  ones excluded, up to 3 fallbacks) engages for multi-agent runs too.
+- **Chain/swarm workers remember quota failures mid-run.** `_run_agent`
+  marks the session circuit as soon as a step fails on quota and excludes
+  circuit-marked models from per-worker selection, so parallel workers that
+  have not picked a model yet avoid the dead one instead of failing in
+  sequence.
+- **Deterministic `--allowedTools` for claude-cli.** The tool list was
+  filtered through a `set`, so the CLI argument's tool order changed with
+  hash randomization on every process. The filter now preserves the
+  caller's order (and `test_allowed_tools_and_blocked_tools` is stable
+  instead of failing ~3 runs in 4).
+
 ## [1.20.0] - 2026-09-20
 
 ### Added

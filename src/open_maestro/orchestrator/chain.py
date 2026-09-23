@@ -23,6 +23,7 @@ from open_maestro.config.capabilities import (
     TaskProfiler,
 )
 from open_maestro.orchestrator import critic as critic_mod
+from open_maestro.runtime import quota as quota_mod
 from open_maestro.runtime.base import AgentConfig, AgentResult
 
 if TYPE_CHECKING:
@@ -468,7 +469,8 @@ class ChainExecutor:
         )
         from open_maestro.security.policy import PermissionPolicy, evaluate
 
-        # Pick the cheapest capable runtime/model for this run.
+        # Pick the cheapest capable runtime/model for this run, skipping any
+        # model whose quota died earlier in this session.
         try:
             runtime_name, model_id = select_runtime_for_task(
                 profile,
@@ -476,6 +478,7 @@ class ChainExecutor:
                 # so cheap capable models take routine steps.
                 min_cost_level=CostLevel.LOW,
                 prefer_local=self.prefer_local,
+                exclude=quota_mod.exhausted(),
             )
         except Exception as exc:
             logger.warning("Chain step %s runtime selection failed: %s", idx, exc)
@@ -566,6 +569,13 @@ class ChainExecutor:
             result = await runtime.run(prompt, config=config)
 
         result.metadata["selected_agent"] = agent.id
+        # A quota failure here must be remembered for the rest of the
+        # session: parallel workers that have not selected a model yet (and
+        # the pm-level fallback loop) read this circuit.
+        if result.metadata.get("quota_exhausted"):
+            quota_mod.mark_exhausted(
+                result.metadata.get("quota_exhausted_model")
+            )
         await self._emit("runtime.completed", {
             "runtime": runtime_name,
             "agent_id": agent.id,
@@ -784,6 +794,31 @@ class ChainExecutor:
             if sr.result.duration_ms is not None:
                 total_duration_ms += sr.result.duration_ms
 
+        metadata: dict[str, Any] = {
+            "chain": True,
+            "steps": [
+                {
+                    "agent_id": sr.step.agent_id,
+                    "runtime": sr.runtime_name,
+                    "model": sr.model,
+                    "is_error": sr.result.is_error,
+                }
+                for sr in step_results
+            ],
+        }
+        # Propagate quota exhaustion from a failing step so pm.handle can
+        # fall back to another model instead of dead-ending the turn.
+        if is_error:
+            for sr in step_results:
+                if sr.result.metadata.get("quota_exhausted"):
+                    metadata["quota_exhausted"] = sr.result.metadata[
+                        "quota_exhausted"
+                    ]
+                    metadata["quota_exhausted_model"] = sr.result.metadata.get(
+                        "quota_exhausted_model"
+                    )
+                    break
+
         return AgentResult(
             text="\n".join(lines),
             session_id=final_result.session_id,
@@ -793,16 +828,5 @@ class ChainExecutor:
             output_tokens=total_output_tokens or None,
             duration_ms=total_duration_ms or None,
             is_error=is_error,
-            metadata={
-                "chain": True,
-                "steps": [
-                    {
-                        "agent_id": sr.step.agent_id,
-                        "runtime": sr.runtime_name,
-                        "model": sr.model,
-                        "is_error": sr.result.is_error,
-                    }
-                    for sr in step_results
-                ],
-            },
+            metadata=metadata,
         )

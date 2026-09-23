@@ -12,7 +12,7 @@ import tempfile
 import time
 from collections.abc import Callable, Coroutine
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from open_maestro.config.capabilities import TaskProfile
 from open_maestro.config.models import ModelResolver
@@ -69,14 +69,18 @@ def _normalize_claude_session_id(session_id: str | None) -> str | None:
     return session_id
 
 
-def _filter_claude_tool_names(tool_names: set[str] | None) -> set[str]:
-    """Return only the tool names that the Claude CLI recognizes."""
+def _filter_claude_tool_names(tool_names: Iterable[str] | None) -> list[str]:
+    """Return only the tool names that the Claude CLI recognizes.
+
+    Input order is preserved — callers join the result into a CLI argument,
+    so a set would randomize it on every process.
+    """
     if not tool_names:
-        return set()
-    valid = set()
+        return []
+    valid: list[str] = []
     for name in tool_names:
         if name in _KNOWN_CLAUDE_TOOLS:
-            valid.add(name)
+            valid.append(name)
         else:
             logger.debug(
                 "Skipping blocked tool %r for claude-cli; will rely on system prompt guard",
@@ -179,8 +183,11 @@ class ClaudeCLIRuntime(AgentRuntime):
 
         if config is not None:
             if config.allowed_tools:
+                # Preserve the caller's tool order (dict.fromkeys dedupes
+                # deterministically); a plain set() would randomize the CLI
+                # argument on every process.
                 args.extend(
-                    ["--allowedTools", ",".join(_filter_claude_tool_names(set(config.allowed_tools)))]
+                    ["--allowedTools", ",".join(_filter_claude_tool_names(dict.fromkeys(config.allowed_tools)))]
                 )
 
             if config.blocked_tools:
