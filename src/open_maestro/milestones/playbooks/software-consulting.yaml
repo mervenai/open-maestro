@@ -3,7 +3,7 @@
 # Override per project at: .open-maestro/playbook.yaml
 
 playbook_id: software-consulting
-version: "1.3.0"
+version: "1.4.0"
 source_project: M3BudgetUpload
 milestone_prompts:
   intake-discovery:
@@ -84,6 +84,7 @@ milestone_prompts:
       agent_hint: researcher
       tags: [decide, architecture]
       artifact_target: docs/design-decisions.md
+      default_track_only: true
       prompt: |
         From the execution plan, extract the 3-6 architectural decisions that must be frozen before design begins.
         Use an ADR-style format: context, decision, consequences, rejected alternatives.
@@ -96,6 +97,7 @@ milestone_prompts:
       agent_hint: researcher
       tags: [specify, backend]
       artifact_target: docs/blueprint-design-and-data-contract.md
+      default_track_only: true
       prompt: |
         Draft a frozen data and API contract for the {epic_name} epic.
         Include:
@@ -111,6 +113,7 @@ milestone_prompts:
       agent_hint: researcher
       tags: [specify, frontend]
       artifact_target: docs/template-spec.md
+      default_track_only: true
       prompt: |
         Create a UX/template specification for the user-facing part of the {epic_name} epic.
         Cover: screen/layout structure, user flow, validation messages, empty/error states, and any file/template formats (e.g., Excel columns).
@@ -122,6 +125,7 @@ milestone_prompts:
       agent_hint: documentation
       tags: [specify, planning]
       artifact_target: docs/jira-stories.csv
+      default_track_only: true
       prompt: |
         Convert the {epic_name} requirements into Jira-ready user stories with BDD acceptance criteria.
         Each story should have: ID, title, description, acceptance criteria (Given/When/Then), priority, and linked FR.
@@ -134,6 +138,7 @@ milestone_prompts:
       agent_hint: researcher
       tags: [decide]
       artifact_target: docs/design-signoff.md
+      default_track_only: true
       prompt: |
         Review the data contract, UX spec, and Jira stories for {epic_name}.
         Identify inconsistencies, unresolved open questions, and risks.

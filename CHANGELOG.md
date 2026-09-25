@@ -5,6 +5,28 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.4] - 2026-09-25
+
+### Added
+- **`default_track_only` playbook prompt flag.** Prompts whose artifacts are
+  project-wide can now be tagged `default_track_only: true` in a playbook;
+  `get_prompts_for_milestone` omits them whenever a concrete non-default
+  `epic_id` is requested. Since `/next`, `/previous`, `/prompts`, and
+  interactive prompt selection all flow through that one function, flagged
+  prompts no longer appear under work-epic tracks anywhere. `epic_id=None`
+  (no track context) keeps every prompt.
+
+### Fixed
+- **Work-epic runs no longer clobber project-wide design artifacts.** The
+  five prompts with fixed project-level artifact targets are now tagged in
+  the software-consulting playbook (v1.4.0): plan-002 (`design-decisions.md`),
+  design-001 (`blueprint-design-and-data-contract.md`), design-002
+  (`template-spec.md`), design-003 (`jira-stories.csv`), and design-004
+  (`design-signoff.md`). Previously, running e.g. design-blueprint under a
+  work epic would overwrite the default track's ratified output with
+  epic-scoped content. Per-epic design needs continue to be satisfied by
+  reference (notes pointing at default-track artifacts). (MSTRO-99)
+
 ## [1.20.3] - 2026-09-23
 
 ### Added

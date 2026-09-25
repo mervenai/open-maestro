@@ -33,6 +33,7 @@ class PromptTemplate:
     tags: list[str] = None  # type: ignore[assignment]
     artifact_target: str = ""
     example_from: str = ""
+    default_track_only: bool = False
 
     def __post_init__(self) -> None:
         if self.tags is None:
@@ -146,6 +147,7 @@ def load_playbook(
                     tags=item.get("tags", []),
                     artifact_target=item.get("artifact_target", ""),
                     example_from=item.get("example_from", ""),
+                    default_track_only=item.get("default_track_only", False),
                 )
             )
         decks[milestone_id] = MilestonePromptDeck(
@@ -176,11 +178,18 @@ def get_prompts_for_milestone(
     """Return rendered prompts for a milestone/epic.
 
     Returns a list of (template, rendered_prompt) tuples.
+
+    Prompts flagged ``default_track_only`` are omitted when a concrete
+    non-default ``epic_id`` is requested — their artifacts are project-wide,
+    and running them under a work epic would overwrite the default-track
+    output. ``epic_id=None`` (no track context) keeps every prompt.
     """
     playbook = load_playbook(project_path, plan=plan)
     context = _default_context(plan, epic_id=epic_id)
     result: list[tuple[PromptTemplate, str]] = []
     for template in playbook.prompts_for(milestone_id):
+        if template.default_track_only and epic_id not in (None, "default"):
+            continue
         ctx = _resolve_artifact_target(template, context)
         rendered = template.render(ctx)
         result.append((template, rendered))

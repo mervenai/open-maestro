@@ -89,6 +89,38 @@ def test_get_prompts_for_milestone(tmp_project: Path) -> None:
     assert "{date}" not in rendered
 
 
+def test_default_track_only_prompts_hidden_for_work_epics(tmp_project: Path) -> None:
+    """Project-wide prompts are not offered under a work epic track."""
+    pairs = get_prompts_for_milestone(
+        tmp_project, "design-blueprint", plan=None, epic_id="ce1-data-foundation"
+    )
+    assert pairs == []
+
+    # execution-planning keeps its per-epic prompt but hides plan-002.
+    pairs = get_prompts_for_milestone(
+        tmp_project, "execution-planning", plan=None, epic_id="ce1-data-foundation"
+    )
+    ids = [template.id for template, _ in pairs]
+    assert "plan-001" in ids
+    assert "plan-002" not in ids
+
+
+def test_default_track_only_prompts_kept_for_default_track(tmp_project: Path) -> None:
+    """The default track still sees every prompt, including flagged ones."""
+    pairs = get_prompts_for_milestone(
+        tmp_project, "design-blueprint", plan=None, epic_id="default"
+    )
+    ids = [template.id for template, _ in pairs]
+    assert ids == ["design-001", "design-002", "design-003", "design-004"]
+
+
+def test_default_track_only_prompts_kept_without_epic(tmp_project: Path) -> None:
+    """No epic context means no filtering."""
+    pairs = get_prompts_for_milestone(tmp_project, "design-blueprint", plan=None)
+    ids = [template.id for template, _ in pairs]
+    assert "design-001" in ids
+
+
 def test_format_prompt_list_caps_and_shows_preview() -> None:
     """format_prompt_list respects max_prompts and includes a preview."""
     pairs = [
