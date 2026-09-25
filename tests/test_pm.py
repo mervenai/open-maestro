@@ -727,3 +727,41 @@ class TestCriticGate:
 
         assert "critic_verdict" not in result.metadata
         assert len(runtime.calls) == 1
+
+
+class TestSoleAgentDirective:
+    """Guardrail: single-agent runs must not role-play a read-only worker."""
+
+    def test_directive_appended(self):
+        from open_maestro.orchestrator.pm import (
+            _SOLE_AGENT_DIRECTIVE,
+            _with_sole_agent_directive,
+        )
+
+        out = _with_sole_agent_directive("Draft the data contract.")
+        assert out.startswith("Draft the data contract.")
+        assert _SOLE_AGENT_DIRECTIVE in out
+        assert "no\nlead agent" in out or "no lead agent" in out
+
+    def test_directive_idempotent(self):
+        from open_maestro.orchestrator.pm import _with_sole_agent_directive
+
+        once = _with_sole_agent_directive("Do the thing.")
+        assert _with_sole_agent_directive(once) == once
+
+    def test_single_agent_run_sends_directive(self):
+        """The pm single-agent path passes the prompt with the directive."""
+        import asyncio
+
+        from open_maestro.orchestrator.pm import _SOLE_AGENT_DIRECTIVE, ProjectManager
+
+        agent = AgentDefinition(
+            id="engineer", name="Engineer", role="engineer", instructions="Build things."
+        )
+        registry = AgentRegistry({"engineer": agent})
+        runtime = FakeRuntime()
+        pm = ProjectManager(runtime=runtime, registry=registry)
+        result = asyncio.run(pm.handle("summarize the repo", agent_id="engineer"))
+        assert not result.is_error
+        assert runtime.last_prompt is not None
+        assert _SOLE_AGENT_DIRECTIVE in runtime.last_prompt

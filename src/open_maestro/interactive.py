@@ -292,6 +292,48 @@ def _turn_includes_history(state: "InteractiveState", turn_runtime: str) -> bool
     return False
 
 
+# Result phrasings that indicate the agent finished without writing and
+# expected someone else to persist its output ("read-only worker" role-play).
+_NO_WRITE_HANDOFF_PATTERN = re.compile(
+    r"(?i)("
+    r"hand(?:ing)? off to (?:the )?lead"
+    r"|read[- ]only (?:worker|task|run|mode|step)"
+    r"|no artifact written"
+    r"|no files? (?:were )?(?:written|modified|created)"
+    r"|nothing was written"
+    r")"
+)
+
+_ARTIFACT_TARGET_RE = re.compile(r"^Write the output to (.+?)\.\s*$", re.MULTILINE)
+
+
+def _warn_if_artifact_missing(prompt: str, result_text: str, cwd: Path) -> str | None:
+    """Return a warning string when a turn looks like a no-write handoff.
+
+    Playbook prompts end with "Write the output to <path>." — if the result
+    reads like a read-only worker handing off to a lead, and the target file
+    does not exist, the artifact was silently lost. The warning tells the user
+    exactly what to ask for next. Returns None when there is nothing to warn
+    about (no target, target written, or result looks like a normal
+    completion).
+    """
+    match = _ARTIFACT_TARGET_RE.search(prompt)
+    if not match:
+        return None
+    target = match.group(1).strip()
+    if not target or "{" in target:
+        return None
+    if (cwd / target).exists():
+        return None
+    if not _NO_WRITE_HANDOFF_PATTERN.search(result_text or ""):
+        return None
+    return (
+        f"WARNING: the result reads like a no-write handoff, but "
+        f"'{target}' was not created. The analysis is in this session's "
+        f"context — reply with: write {target} with the content you drafted"
+    )
+
+
 def _strip_plan_prefix(user_input: str, state: InteractiveState) -> str | None:
     """Handle one-line "/plan <prompt>" and "/dry <prompt>" forms.
 
@@ -2259,6 +2301,10 @@ async def run_interactive(args: Any) -> int:
 
         print(f"\n─── Turn {state.turn} ───\n")
         print(f"{result.text}\n")
+
+        artifact_warning = _warn_if_artifact_missing(prompt, result.text, Path.cwd())
+        if artifact_warning:
+            print(artifact_warning + "\n")
 
         if not dry_run and result.session_id:
             sid = result.session_id

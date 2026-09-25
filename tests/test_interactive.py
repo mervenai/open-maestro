@@ -15,6 +15,7 @@ from open_maestro.interactive import (
     _resolve_suggested_prompt,
     _strip_plan_prefix,
     _turn_includes_history,
+    _warn_if_artifact_missing,
 )
 
 
@@ -311,3 +312,40 @@ def test_turn_includes_history_non_kimi_same_runtime() -> None:
     state.session_id = "abc-123"
     state.session_runtime = "claude-cli"
     assert _turn_includes_history(state, "claude-cli") is False
+
+
+class TestArtifactMissingWarning:
+    """Guardrail: flag turns whose result is a no-write handoff."""
+
+    def test_flags_handoff_when_file_missing(self, tmp_path):
+        prompt = "Draft the contract.\nWrite the output to docs/contract.md."
+        result = (
+            "No artifact written (read-only worker). "
+            "Handing off to the lead agent to merge into docs/contract.md."
+        )
+        warning = _warn_if_artifact_missing(prompt, result, tmp_path)
+        assert warning is not None
+        assert "docs/contract.md" in warning
+
+    def test_silent_when_file_exists(self, tmp_path):
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        (docs / "contract.md").write_text("content", encoding="utf-8")
+        prompt = "Draft the contract.\nWrite the output to docs/contract.md."
+        result = "No artifact written (read-only worker). Handing off to the lead."
+        assert _warn_if_artifact_missing(prompt, result, tmp_path) is None
+
+    def test_silent_on_normal_completion(self, tmp_path):
+        prompt = "Draft the contract.\nWrite the output to docs/contract.md."
+        result = "Contract drafted and written."
+        assert _warn_if_artifact_missing(prompt, result, tmp_path) is None
+
+    def test_silent_without_artifact_target(self, tmp_path):
+        prompt = "Just answer this question."
+        result = "Handing off to the lead agent."
+        assert _warn_if_artifact_missing(prompt, result, tmp_path) is None
+
+    def test_silent_when_target_unresolved(self, tmp_path):
+        prompt = "Draft it.\nWrite the output to docs/contract-{epic_id}.md."
+        result = "No artifact written (read-only worker)."
+        assert _warn_if_artifact_missing(prompt, result, tmp_path) is None

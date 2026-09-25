@@ -71,6 +71,30 @@ def _vendor_label(runtime_name: str) -> str:
     return _RUNTIME_VENDOR_LABELS.get(runtime_name, runtime_name)
 
 
+_SOLE_AGENT_DIRECTIVE = """\
+---
+Sole-agent directive: you are the only agent executing this task. There is no
+lead agent and no merge step in this run. Do not role-play a read-only worker
+and do not hand off writes to another agent — complete the task yourself,
+including writing every artifact the task asks for. If you produce content that
+belongs in a file, write the file in this turn.
+"""
+
+
+def _with_sole_agent_directive(prompt: str) -> str:
+    """Append the sole-agent directive for single-agent (non-chain/swarm) runs.
+
+    Prior swarm worker outputs ("read-only task, as assigned … handing off to
+    the lead agent") can prime a model to replay that role on a single-agent
+    turn, where no lead exists and the artifact never gets written. The
+    directive asserts the opposite framing. Chain/swarm runs are excluded —
+    their workers genuinely are read-only with a lead merge.
+    """
+    if _SOLE_AGENT_DIRECTIVE in prompt:
+        return prompt
+    return prompt.rstrip("\n") + "\n\n" + _SOLE_AGENT_DIRECTIVE
+
+
 @dataclass
 class OrchestrationContext:
     """Context assembled for a delegated task."""
@@ -618,7 +642,7 @@ class ProjectManager:
                     ctx,
                     profile,
                     resolved_model,
-                    prompt=ctx.enriched_prompt,
+                    prompt=_with_sole_agent_directive(ctx.enriched_prompt),
                     agent=ctx.selected_agent,
                     allowed_tools=allowed_tools,
                     blocked_tools=blocked_tools,

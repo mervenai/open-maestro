@@ -5,6 +5,22 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.6] - 2026-09-25
+
+### Fixed
+- **Single-agent turns are guarded against read-only-worker role-play.** On a
+  single-agent design turn, the model recalled prior swarm worker outputs
+  ("read-only task, as assigned … handing off to the lead agent") and
+  replayed that role: it analyzed, wrote nothing, and handed off to a lead
+  that does not exist in a non-swarm run — the artifact was silently lost.
+  Two guardrails now apply: (1) single-agent runs (interactive and CLI) get a
+  sole-agent directive appended at the pm layer — "you are the only agent,
+  there is no lead, write every artifact yourself" — while chain/swarm runs
+  are unchanged; (2) interactive turns whose result matches a no-write
+  handoff pattern but whose prompt's `artifact_target` file was never
+  created print a warning naming the file and the recovery reply, instead of
+  silently accepting the turn. (MSTRO-101)
+
 ## [1.20.5] - 2026-09-25
 
 ### Changed
