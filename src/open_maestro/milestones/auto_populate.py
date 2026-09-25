@@ -259,23 +259,53 @@ def _parse_epics(doc_path: Path) -> list[tuple[str, str, str]]:
     return result
 
 
+# Project-wide phases that run once on the default track. Work-epic copies are
+# scaffolded as SKIPPED (satisfied by reference) and can be reactivated per
+# epic with `/track <epic-id>/<milestone-id> in_progress` when the epic has
+# genuine epic-level work (e.g. an epic-specific external dependency gate).
+_SKIP_BY_DEFAULT = {"intake-discovery", "execution-planning"}
+
+_SKIP_NOTES = {
+    "intake-discovery": (
+        "Satisfied by reference to the default track's Intake & Discovery. "
+        "Reactivate for an epic-specific pass with: "
+        "/track {epic_id}/intake-discovery in_progress"
+    ),
+    "execution-planning": (
+        "Satisfied by reference to the default track's Execution Planning. "
+        "Reactivate for an epic-specific pass with: "
+        "/track {epic_id}/execution-planning in_progress"
+    ),
+}
+
+
 def _build_work_epic(order: int, prefix: str, number: str, name: str) -> Epic:
-    """Create a work epic with the standard 8 lifecycle milestones."""
+    """Create a work epic with the standard 8 lifecycle milestones.
+
+    Intake & Discovery and Execution Planning are scaffolded as SKIPPED —
+    they are project-wide phases executed on the default track; the work-epic
+    copies exist only so an epic with real epic-level work can reactivate
+    them (the milestone slot doubles as the parking spot for epic-specific
+    gates such as an external dependency).
+    """
     slug = _slugify(name)
     epic_id = f"{prefix}{number}-{slug}" if slug else f"{prefix}{number}"
-    milestones = [
-        Milestone(
-            id=milestone_id,
-            name=milestone_name,
-            order=milestone_order,
-            weight=weight,
-            client_visible=True,
-            status=MilestoneStatus.NOT_STARTED,
+    milestones: list[Milestone] = []
+    for milestone_order, ((milestone_id, milestone_name), weight) in enumerate(
+        _STANDARD_MILESTONES, start=1
+    ):
+        skipped = milestone_id in _SKIP_BY_DEFAULT
+        milestones.append(
+            Milestone(
+                id=milestone_id,
+                name=milestone_name,
+                order=milestone_order,
+                weight=weight,
+                client_visible=True,
+                status=MilestoneStatus.SKIPPED if skipped else MilestoneStatus.NOT_STARTED,
+                notes=_SKIP_NOTES[milestone_id].format(epic_id=epic_id) if skipped else "",
+            )
         )
-        for milestone_order, ((milestone_id, milestone_name), weight) in enumerate(
-            _STANDARD_MILESTONES, start=1
-        )
-    ]
     return Epic(
         id=epic_id,
         name=name,

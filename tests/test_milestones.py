@@ -761,3 +761,31 @@ class TestParseEpics:
         assert epic.id == "ce1-data-foundation"
         epic = _build_work_epic(2, "e", "3", "Detection Engine")
         assert epic.id == "e3-detection-engine"
+
+    def test_work_epic_scaffolds_project_wide_phases_as_skipped(self):
+        epic = _build_work_epic(2, "ce", "1", "Data Foundation")
+        by_id = {m.id: m for m in epic.milestones}
+        assert by_id["intake-discovery"].status == MilestoneStatus.SKIPPED
+        assert by_id["execution-planning"].status == MilestoneStatus.SKIPPED
+        assert "/track ce1-data-foundation/execution-planning in_progress" in (
+            by_id["execution-planning"].notes
+        )
+        for milestone_id, milestone in by_id.items():
+            if milestone_id not in ("intake-discovery", "execution-planning"):
+                assert milestone.status == MilestoneStatus.NOT_STARTED, milestone_id
+
+    def test_work_epic_completion_ignores_skipped_phases(self):
+        # Skipped phases must not dilute the epic's completion percentage.
+        epic = _build_work_epic(2, "ce", "1", "Data Foundation")
+        assert epic.completion() == 0
+        by_id = {m.id: m for m in epic.milestones}
+        by_id["design-blueprint"].status = MilestoneStatus.COMPLETED
+        assert epic.completion() == 100 // 6  # 1 of 6 active milestones
+
+    def test_work_epic_skipped_phase_reactivates(self):
+        # The /track reactivation path: flipping a skipped phase to
+        # in_progress works and the epic rolls it into completion again.
+        epic = _build_work_epic(2, "ce", "1", "Data Foundation")
+        planning = next(m for m in epic.milestones if m.id == "execution-planning")
+        planning.status = MilestoneStatus.IN_PROGRESS
+        assert epic.completion() == 50 // 7  # 1 in-progress of 7 active

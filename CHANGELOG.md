@@ -5,6 +5,23 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.5] - 2026-09-25
+
+### Changed
+- **Work epics scaffold with Intake & Discovery and Execution Planning
+  skipped.** These are project-wide phases executed once on the default
+  track, but every work epic used to get full copies that showed up as
+  phantom in-progress milestones in `/previous`, diluted completion math, and
+  had to be closed by hand on every project. New work epics scaffold both
+  phases as `SKIPPED` with a note carrying the reactivation command
+  (`/track <epic-id>/<milestone-id> in_progress`); `SKIPPED` is already
+  excluded from `Epic.completion()` and from `/next`/`/previous` candidates.
+  The slot remains in the schema so an epic with genuine epic-level work
+  (e.g. the R-01 external-dependency pattern) can reactivate it as the
+  parking spot for epic-specific gates. Default track and single-track
+  projects are unaffected. Convention documented in
+  `docs/milestone-guided-experience-design.md` §3.2. (MSTRO-100)
+
 ## [1.20.4] - 2026-09-25
 
 ### Added

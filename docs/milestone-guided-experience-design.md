@@ -64,6 +64,35 @@ Within milestones 3–6, Maestro should support named **tracks**. For M3BudgetUp
 
 Tracks have their own status and blockers but roll up into the parent milestone.
 
+#### Default track vs. work epics
+
+Maestro distinguishes two kinds of tracks:
+
+- **Default track** (`epic_id: default`) — the project-wide process track. It
+  runs the full lifecycle once: Intake & Discovery, Execution Planning, and
+  the project-wide parts of Design Blueprint (data/API contract, ADRs, Jira
+  story set), plus Demo & Delivery and Retrospective at project level.
+- **Work epics** — feature tracks (e.g. `ce1-data-foundation`) created from
+  the intake epic breakdown. They run the lifecycle for their scope.
+
+Because Intake & Discovery and Execution Planning are project-wide, work
+epics are scaffolded with those two phases **SKIPPED** (satisfied by
+reference to the default track). `SKIPPED` phases stay in the schema but are
+excluded from completion math and never surface in `/next` or `/previous`.
+Each carries a note with the reactivation command:
+
+```
+/track <epic-id>/execution-planning in_progress
+```
+
+Reactivate a skipped phase only when the epic has genuine epic-level work —
+the milestone slot doubles as the parking spot for epic-specific gates (e.g.
+an external dependency such as a payload contract owed by another team).
+Design-blueprint prompts that produce project-wide artifacts (ADRs, contract,
+Jira stories, sign-off) are tagged `default_track_only` in the playbook and
+are likewise not offered under work-epic tracks; per-epic design needs are
+recorded as notes referencing the default-track artifacts.
+
 ### 3.3 Artifact-to-Milestone Mapping
 
 Maestro can auto-detect milestone state by scanning for artifact patterns:
