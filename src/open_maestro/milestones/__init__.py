@@ -29,6 +29,11 @@ from open_maestro.milestones.detector import (
     MilestoneDetector,
     summarize_suggestions,
 )
+from open_maestro.milestones.dossier import (
+    discover_dossier_files,
+    extract_open_items,
+    format_dossier_context,
+)
 from open_maestro.milestones.merven_sync import MervenSyncError, sync_from_merven
 from open_maestro.milestones.playbook import get_prompts_for_milestone
 from open_maestro.milestones.prompt_history import (
@@ -67,6 +72,9 @@ __all__ = [
     "MilestoneDetector",
     "DetectionSuggestion",
     "summarize_suggestions",
+    "discover_dossier_files",
+    "extract_open_items",
+    "format_dossier_context",
     "sync_from_merven",
     "MervenSyncError",
     "handle_next_command",

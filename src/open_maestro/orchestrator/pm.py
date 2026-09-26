@@ -33,7 +33,7 @@ from open_maestro.config.models import ModelResolver
 from open_maestro.context.budget import ContextBudget
 from open_maestro.context.monitor import ContextMonitor, ContextSnapshot
 from open_maestro.events.bus import EventBus
-from open_maestro.milestones import format_prompt_context
+from open_maestro.milestones import format_dossier_context, format_prompt_context
 from open_maestro.orchestrator import critic as critic_mod
 from open_maestro.orchestrator.chain import ChainExecutor, ChainPlanner
 from open_maestro.orchestrator.load import (
@@ -681,6 +681,26 @@ class ProjectManager:
                     max_turns=max_turns,
                     mcp_servers=mcp_servers,
                 )
+            # 9.6 Artifact-critic gate: turns that produced a substantial design
+            #     artifact (docs/*.md) get an adversarial citation-checking pass.
+            if critic_mod.artifact_gate_enabled():
+                artifacts = critic_mod.detect_artifact_changes(
+                    Path.cwd(), before_ref
+                )
+                if artifacts:
+                    result = await self._run_artifact_critic_pass(
+                        ctx,
+                        profile,
+                        resolved_model,
+                        result,
+                        artifacts,
+                        allowed_tools=allowed_tools,
+                        blocked_tools=blocked_tools,
+                        permission_mode=permission_mode,
+                        deny_dangerous=deny_dangerous,
+                        max_turns=max_turns,
+                        mcp_servers=mcp_servers,
+                    )
 
         return result, config, resolved_model
 
@@ -871,6 +891,12 @@ class ProjectManager:
                 "When reporting progress, update the status of existing milestones in "
                 "`.open-maestro/milestones.yaml` and keep milestone IDs unchanged."
             )
+
+        # MSTRO-104: inject dossier open items so agents cannot silently
+        # ignore unresolved decisions that may change frozen structure.
+        dossier_context = format_dossier_context(project_root)
+        if dossier_context:
+            parts.append(dossier_context)
 
         if ctx.memories:
             parts.append("\nRelevant project context:")
@@ -1278,6 +1304,93 @@ class ProjectManager:
         result.metadata["critic_agent"] = critic.id
         logger.info(
             "Critic gate: verdict=%s (%d finding lines)", verdict, len(findings)
+        )
+        return result
+
+    async def _run_artifact_critic_pass(
+        self,
+        ctx: OrchestrationContext,
+        profile: TaskProfile,
+        resolved_model: str | None,
+        result: AgentResult,
+        artifacts: list[str],
+        *,
+        allowed_tools: list[str] | None,
+        blocked_tools: list[str] | None,
+        permission_mode: str | None,
+        deny_dangerous: bool,
+        max_turns: int | None,
+        mcp_servers: dict[str, Any] | None,
+    ) -> AgentResult:
+        """Dispatch the code-critic agent to adversarially review design artifacts.
+
+        The critic reuses the code-critic agent but gets a citation-checking
+        brief: every file:line citation in the artifact must be re-read against
+        the repo and confirmed to prove its claim. BLOCK verdicts are surfaced
+        loudly but never auto-revert the artifact.
+        """
+        try:
+            critic = self.registry.get("code-critic")
+        except KeyError:
+            logger.warning(
+                "Critic gate: 'code-critic' agent not in registry; skipping artifact review pass"
+            )
+            return result
+
+        artifact_lines = "\n".join(f"- {path}" for path in artifacts)
+        critic_prompt = (
+            "Review the design artifact that was just produced. Adversarially "
+            "verify it against the repository — treat the artifact as a set of "
+            "claims to be proven, not as a report to be skimmed.\n\n"
+            f"Original request:\n{ctx.original_prompt}\n\n"
+            f"Design artifact(s) produced in this run:\n{artifact_lines}\n\n"
+            "Do all of the following:\n"
+            "1. Extract every file:line citation in the artifact and re-read "
+            "each one against the repository. Confirm it exists and actually "
+            "proves the claim it is attached to; flag every citation that is "
+            "wrong, stale, or doesn't support its claim.\n"
+            "2. Check every UI-facing value (labels, copy, formats, defaults) "
+            "against the highest-authority source in the repo.\n"
+            "3. List every element the artifact claims reuses an existing "
+            "pattern that is actually net-new (no such pattern exists in the "
+            "repo).\n"
+            "Output your findings as a table ordered P0/P1/P2 by severity, "
+            "then finish with '## Verdict: APPROVE', '## Verdict: WARN', or "
+            "'## Verdict: BLOCK'."
+        )
+
+        critic_result, _ = await self._execute_agent(
+            ctx,
+            profile,
+            resolved_model,
+            prompt=critic_prompt,
+            agent=critic,
+            allowed_tools=allowed_tools,
+            blocked_tools=blocked_tools,
+            permission_mode=permission_mode,
+            deny_dangerous=deny_dangerous,
+            max_turns=max_turns,
+            mcp_servers=mcp_servers,
+            session_id=None,
+            resume=False,
+            fork=False,
+            dry_run=False,
+        )
+
+        verdict = critic_mod.parse_verdict(critic_result.text)
+        if verdict is None:
+            verdict = "WARN"
+        findings = critic_mod.extract_findings(critic_result.text)
+        summary = f"\n\n---\nArtifact review (code-critic): {verdict}"
+        if findings:
+            summary += "\n" + "\n".join(findings)
+        result.text += summary
+        result.metadata["artifact_critic_verdict"] = verdict
+        result.metadata["artifact_critic_agent"] = critic.id
+        logger.info(
+            "Artifact critic gate: verdict=%s (%d finding lines)",
+            verdict,
+            len(findings),
         )
         return result
 

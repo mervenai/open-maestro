@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from open_maestro.milestones.commands import get_current_or_next_milestone_prompts
+from open_maestro.milestones.models import MilestoneStatus
 from open_maestro.milestones.playbook import (
     PromptPlaybook,
     PromptTemplate,
@@ -20,6 +22,8 @@ from open_maestro.milestones.playbook import (
     get_prompts_for_milestone,
     load_playbook,
 )
+from open_maestro.milestones.prompt_history import PromptHistoryStore
+from open_maestro.milestones.store import MilestoneStore
 
 
 @pytest.fixture()
@@ -111,7 +115,7 @@ def test_default_track_only_prompts_kept_for_default_track(tmp_project: Path) ->
         tmp_project, "design-blueprint", plan=None, epic_id="default"
     )
     ids = [template.id for template, _ in pairs]
-    assert ids == ["design-001", "design-002", "design-003", "design-004"]
+    assert ids == ["design-001", "design-002", "design-003", "design-004", "design-005"]
 
 
 def test_default_track_only_prompts_kept_without_epic(tmp_project: Path) -> None:
@@ -136,3 +140,81 @@ def test_format_prompt_list_caps_and_shows_preview() -> None:
 def test_format_prompt_list_empty() -> None:
     """format_prompt_list returns a friendly message when no prompts exist."""
     assert "No suggested prompts" in format_prompt_list([])
+
+
+PLAYBOOK_WITH_AFTER = """\
+playbook_id: test-after
+version: 1.0.0
+milestone_prompts:
+  design-blueprint:
+    - id: design-001
+      title: Draft contract
+      order: 1
+      artifact_target: docs/blueprint-design-and-data-contract.md
+      prompt: |
+        Draft the contract.
+    - id: design-002
+      title: Adversarially verify the drafted contract
+      order: 2
+      after: design-001
+      artifact_target: docs/adversarial-review.md
+      prompt: |
+        Review the contract.
+"""
+
+
+@pytest.fixture()
+def gated_project(tmp_path: Path) -> Path:
+    """Tmp project whose design milestone has an ``after``-gated prompt."""
+    config_dir = tmp_path / ".open-maestro"
+    config_dir.mkdir()
+    (config_dir / "playbook.yaml").write_text(PLAYBOOK_WITH_AFTER, encoding="utf-8")
+    store = MilestoneStore(tmp_path)
+    plan = store.load()
+    _epic, milestone = plan.find_milestone("design-blueprint")
+    assert milestone is not None
+    milestone.status = MilestoneStatus.IN_PROGRESS
+    store.update(plan)
+    return tmp_path
+
+
+def test_load_playbook_populates_after_field(tmp_project: Path) -> None:
+    """The optional ``after`` field populates PromptTemplate.after; default is None."""
+    config_dir = tmp_project / ".open-maestro"
+    config_dir.mkdir()
+    (config_dir / "playbook.yaml").write_text(PLAYBOOK_WITH_AFTER, encoding="utf-8")
+    playbook = load_playbook(tmp_project)
+    prompts = {p.id: p for p in playbook.prompts_for("design-blueprint")}
+    assert prompts["design-001"].after is None
+    assert prompts["design-002"].after == "design-001"
+
+
+def test_after_gated_prompt_hidden_until_prerequisite_runs(gated_project: Path) -> None:
+    """No run record and no artifact: the gated prompt is excluded from /next."""
+    prompts, epic_id, milestone_id = get_current_or_next_milestone_prompts(gated_project)
+    assert epic_id == "default"
+    assert milestone_id == "design-blueprint"
+    assert [template.id for template, _ in prompts] == ["design-001"]
+
+
+def test_after_gated_prompt_shown_with_run_record(gated_project: Path) -> None:
+    """A run record for the prerequisite prompt ungates the gated prompt."""
+    history = PromptHistoryStore(gated_project)
+    history.record("default", "design-blueprint", "design-001", "Draft contract")
+    prompts, _epic_id, _milestone_id = get_current_or_next_milestone_prompts(
+        gated_project, prompt_history=history
+    )
+    assert [template.id for template, _ in prompts] == ["design-001", "design-002"]
+
+
+def test_after_gated_prompt_shown_with_existing_artifact(gated_project: Path) -> None:
+    """An existing artifact file for the prerequisite prompt ungates the gated prompt."""
+    (gated_project / "docs").mkdir()
+    (gated_project / "docs" / "blueprint-design-and-data-contract.md").write_text(
+        "contract", encoding="utf-8"
+    )
+    history = PromptHistoryStore(gated_project)
+    prompts, _epic_id, _milestone_id = get_current_or_next_milestone_prompts(
+        gated_project, prompt_history=history
+    )
+    assert [template.id for template, _ in prompts] == ["design-001", "design-002"]

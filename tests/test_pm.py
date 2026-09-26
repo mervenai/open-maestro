@@ -729,6 +729,135 @@ class TestCriticGate:
         assert len(runtime.calls) == 1
 
 
+class ArtifactCriticFakeRuntime(FakeRuntime):
+    """Runtime that returns a structured verdict for artifact-review prompts."""
+
+    async def run(self, prompt: str, config: AgentConfig | None = None) -> AgentResult:
+        self.last_method = "run"
+        self.last_prompt = prompt
+        self.last_config = config
+        self.calls.append(("run", config.model if config else None))
+        if "Review the design artifact" in prompt:
+            return AgentResult(
+                text=(
+                    "## Verdict: WARN\n\n## Findings\n\n"
+                    "| Severity | File | Line | Issue | Fix |\n"
+                    "|----------|------|------|-------|-----|\n"
+                    "| P1 | docs/api/contract.md | 12 | citation does not prove claim | re-verify |\n"
+                ),
+                session_id="critic_session",
+                metadata={},
+            )
+        return AgentResult(text="implemented", session_id="new_session", metadata={})
+
+
+class TestArtifactCriticGate:
+    def _patch_detection(self, monkeypatch, artifacts):
+        monkeypatch.setenv("MAESTRO_CRITIC_GATE", "on")
+        monkeypatch.setattr(critic_mod, "snapshot_head", lambda p: "abc123")
+        # No code changes: isolate the artifact gate from the code gate.
+        monkeypatch.setattr(critic_mod, "detect_source_changes", lambda p, ref: [])
+        monkeypatch.setattr(
+            critic_mod, "detect_artifact_changes", lambda p, ref: list(artifacts)
+        )
+
+    async def test_artifact_gate_dispatches_critic(self, monkeypatch):
+        self._patch_detection(monkeypatch, ["docs/api/contract.md"])
+        runtime = ArtifactCriticFakeRuntime()
+        pm = ProjectManager(runtime=runtime, registry=_critic_registry())
+
+        result = await pm.handle("draft the data contract", agent_id="engineer")
+
+        assert result.is_error is False
+        assert result.metadata.get("artifact_critic_verdict") == "WARN"
+        assert result.metadata.get("artifact_critic_agent") == "code-critic"
+        assert "Artifact review (code-critic): WARN" in result.text
+        assert "citation does not prove claim" in result.text
+        assert len(runtime.calls) == 2  # engineer + artifact critic
+        assert "docs/api/contract.md" in runtime.last_prompt
+        assert "draft the data contract" in runtime.last_prompt
+
+    async def test_artifact_gate_skips_small_or_non_docs_artifacts(self, monkeypatch):
+        # The detection function is the gate's filter; stub it to return
+        # nothing as it would for <=50-line docs files or .md outside docs/.
+        self._patch_detection(monkeypatch, [])
+        runtime = ArtifactCriticFakeRuntime()
+        pm = ProjectManager(runtime=runtime, registry=_critic_registry())
+
+        result = await pm.handle("tweak the readme", agent_id="engineer")
+
+        assert "artifact_critic_verdict" not in result.metadata
+        assert len(runtime.calls) == 1
+
+    async def test_artifact_gate_recursion_guard_on_critic_turn(self, monkeypatch):
+        self._patch_detection(monkeypatch, ["docs/api/contract.md"])
+        runtime = ArtifactCriticFakeRuntime()
+        pm = ProjectManager(runtime=runtime, registry=_critic_registry())
+
+        result = await pm.handle("review this artifact", agent_id="code-critic")
+
+        assert "artifact_critic_verdict" not in result.metadata
+        assert len(runtime.calls) == 1
+
+    async def test_artifact_gate_disabled_by_env(self, monkeypatch):
+        self._patch_detection(monkeypatch, ["docs/api/contract.md"])
+        monkeypatch.setenv("MAESTRO_ARTIFACT_CRITIC", "off")
+        runtime = ArtifactCriticFakeRuntime()
+        pm = ProjectManager(runtime=runtime, registry=_critic_registry())
+
+        result = await pm.handle("draft the data contract", agent_id="engineer")
+
+        assert "artifact_critic_verdict" not in result.metadata
+        assert len(runtime.calls) == 1
+
+    async def test_artifact_gate_tolerates_missing_critic_agent(self, monkeypatch):
+        self._patch_detection(monkeypatch, ["docs/api/contract.md"])
+        runtime = ArtifactCriticFakeRuntime()
+        pm = ProjectManager(
+            runtime=runtime, registry=_critic_registry(with_critic=False)
+        )
+
+        result = await pm.handle("draft the data contract", agent_id="engineer")
+
+        assert result.is_error is False
+        assert "artifact_critic_verdict" not in result.metadata
+        assert len(runtime.calls) == 1
+
+
+class TestArtifactChangeFilter:
+    """Unit tests for the pure artifact filter in critic.py."""
+
+    def test_filter_keeps_large_docs_markdown(self):
+        assert critic_mod.filter_artifact_changes(
+            [("docs/api/contract.md", 60)]
+        ) == ["docs/api/contract.md"]
+        assert critic_mod.filter_artifact_changes(
+            [("docs/deep/nested/spec.md", 200), ("src/app.py", 80)]
+        ) == ["docs/deep/nested/spec.md"]
+
+    def test_filter_excludes_small_docs_and_non_docs_markdown(self):
+        assert critic_mod.filter_artifact_changes(
+            [("docs/api/contract.md", 50)]  # boundary: must EXCEED 50
+        ) == []
+        assert critic_mod.filter_artifact_changes(
+            [("README.md", 400), ("notes/todo.md", 100)]
+        ) == []
+
+    def test_filter_honors_min_lines_env(self, monkeypatch):
+        monkeypatch.setenv("MAESTRO_ARTIFACT_MIN_LINES", "10")
+        assert critic_mod.filter_artifact_changes(
+            [("docs/api/contract.md", 12)]
+        ) == ["docs/api/contract.md"]
+        assert critic_mod.filter_artifact_changes([("docs/x.md", 5)]) == []
+
+    def test_artifact_gate_enabled_env(self, monkeypatch):
+        monkeypatch.delenv("MAESTRO_ARTIFACT_CRITIC", raising=False)
+        assert critic_mod.artifact_gate_enabled()
+        for off in ("off", "0", "false", "no"):
+            monkeypatch.setenv("MAESTRO_ARTIFACT_CRITIC", off)
+            assert not critic_mod.artifact_gate_enabled()
+
+
 class TestSoleAgentDirective:
     """Guardrail: single-agent runs must not role-play a read-only worker."""
 

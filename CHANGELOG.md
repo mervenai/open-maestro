@@ -5,6 +5,46 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.0] - 2026-09-26
+
+### Added
+- **Dossier open-items are injected into every prompt.** Open/pending items
+  from `docs/**dossier*.md` and `docs/**decision*.md` files (bullets or
+  headings containing open/pending/TBD/unresolved/needs-decision, checked
+  items excluded) are surfaced to the agent as an `## Open items from
+  dossier` block, capped at ~2k chars. Previously a drafted contract could
+  claim "none of the gates changes frozen structure" while the project's
+  dossier had open items that do — the agent never saw them. (MSTRO-104)
+- **Adversarial self-review prompt gated on its prerequisite.** New
+  `design-002` — "Adversarially verify the drafted contract" — extracts every
+  file:line citation from the produced contract, re-reads each against the
+  repo, checks UI-facing values against the highest-authority source, exposes
+  net-new elements presented as existing patterns, and outputs P0/P1/P2
+  findings to `docs/adversarial-review.md`. Prompts support a new optional
+  `after: <prompt-id>` field: the prompt only appears once its prerequisite
+  has a run record in `.open-maestro/prompt_history.yaml` or its artifact
+  exists on disk. Existing design-002/003/004 renumbered to 003/004/005.
+  (MSTRO-105)
+- **Artifact-critic gate for design documents.** After a run that creates or
+  modifies a `docs/**.md` artifact larger than 50 changed lines, the
+  code-critic agent adversarially verifies it (citation re-checks,
+  highest-authority source check, net-new exposure) and returns
+  `## Verdict: APPROVE/WARN/BLOCK`, mirroring the existing code-critic gate.
+  Disable with `MAESTRO_ARTIFACT_CRITIC=off`; threshold override via
+  `MAESTRO_ARTIFACT_MIN_LINES`. (MSTRO-106)
+
+### Changed
+- **design-001 now requires verified citations and honest anchors.** The
+  "Draft data and API contract" prompt requires re-reading every cited
+  file:line to confirm it proves its claim, recording the commit SHA of each
+  repo checked, labeling each element `[existing]` or `[net-new]`, flagging
+  mechanism mismatches (e.g., a MongoDB pattern cited for a SQL Server
+  feature), and taking UI-facing values from the highest-authority source
+  (prototype bundle beats PRD). Motivated by a human adversarial review that
+  found 13 defects in a contract drafted without these checks. (MSTRO-103)
+- `pyproject.toml` version aligned with the released version (was stale at
+  1.15.5; built wheels misreported their version).
+
 ## [1.20.6] - 2026-09-25
 
 ### Fixed

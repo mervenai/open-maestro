@@ -483,8 +483,11 @@ async def _handle_command(
         return _handle_status_command(Path.cwd())
 
     if cmd == "next":
+        project_root = Path.cwd()
         prompts, epic_id, milestone_id = get_current_or_next_milestone_prompts(
-            Path.cwd()
+            project_root,
+            project_root=project_root,
+            prompt_history=PromptHistoryStore(project_root),
         )
         state.current_epic_id = epic_id
         state.current_milestone_id = milestone_id

@@ -10,19 +10,70 @@ from open_maestro.milestones import MilestoneStatus
 from open_maestro.milestones.detector import MilestoneDetector
 from open_maestro.milestones.models import Blocker, Milestone, MilestonePlan
 from open_maestro.milestones.playbook import (
+    PromptPlaybook,
     format_prompt_list,
     get_prompts_for_milestone,
+    load_playbook,
 )
+from open_maestro.milestones.prompt_history import PromptHistoryStore
 from open_maestro.milestones.store import MilestoneStore
+
+
+def _prerequisite_prompt_ran(
+    template: Any,
+    playbook: PromptPlaybook,
+    milestone_id: str,
+    epic_id: str,
+    project_root: Path,
+    prompt_history: PromptHistoryStore | None,
+) -> bool:
+    """Check whether the prompt referenced by ``template.after`` has effectively run.
+
+    A prompt counts as run when either a run record exists in the prompt
+    history for (epic_id, milestone_id, after), or the referenced prompt's
+    artifact_target file exists on disk under project_root (covering runs
+    from before prompt history existed, same idea as
+    ``PromptHistoryStore.backfill_from_artifacts``). When the referenced
+    prompt has no artifact_target, there is nothing to check on disk, so it
+    is treated as satisfied to avoid hiding prompts permanently.
+    """
+    if not template.after:
+        return True
+    if prompt_history is not None:
+        history = prompt_history.load()
+        if history.get(epic_id, milestone_id, template.after) is not None:
+            return True
+    referenced = next(
+        (p for p in playbook.prompts_for(milestone_id) if p.id == template.after),
+        None,
+    )
+    if referenced is None or not referenced.artifact_target:
+        return True
+    target = referenced.artifact_target
+    for key, value in (("{date}", "*"), ("{epic_id}", epic_id or "*"), ("{epic_name}", "*")):
+        target = target.replace(key, value)
+    if list(project_root.glob(target)):
+        return True
+    return bool(list(project_root.rglob(target.lstrip("/"))))
 
 
 def get_current_or_next_milestone_prompts(
     project_path: Path,
+    project_root: Path | None = None,
+    prompt_history: PromptHistoryStore | None = None,
 ) -> tuple[list[tuple[Any, str]], str | None, str | None]:
     """Return prompts for the milestone /next would focus on, plus epic/milestone IDs.
 
     This is used by interactive mode to let users select a suggested prompt by
     number after running /next.
+
+    Prompts whose template has ``after`` set are hidden until the referenced
+    prompt has effectively run: either a run record exists in the prompt
+    history, or the referenced prompt's artifact file exists on disk. Gating
+    behavior when the new params are left as None (backwards compatible):
+    ``project_root`` defaults to ``project_path``, and a ``None``
+    ``prompt_history`` simply skips the run-record check, falling back to
+    artifact-file existence alone.
     """
     store = MilestoneStore(project_path)
     plan = store.load()
@@ -53,6 +104,15 @@ def get_current_or_next_milestone_prompts(
     prompts = get_prompts_for_milestone(
         project_path, milestone.id, plan=plan, epic_id=epic_id
     )
+    playbook = load_playbook(project_path, plan=plan)
+    root = project_root if project_root is not None else project_path
+    prompts = [
+        pair
+        for pair in prompts
+        if _prerequisite_prompt_ran(
+            pair[0], playbook, milestone.id, epic_id, root, prompt_history
+        )
+    ]
     return prompts, epic_id, milestone.id
 
 

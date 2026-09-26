@@ -34,6 +34,7 @@ class PromptTemplate:
     artifact_target: str = ""
     example_from: str = ""
     default_track_only: bool = False
+    after: str | None = None  # id of the prompt that must have run first
 
     def __post_init__(self) -> None:
         if self.tags is None:
@@ -148,6 +149,7 @@ def load_playbook(
                     artifact_target=item.get("artifact_target", ""),
                     example_from=item.get("example_from", ""),
                     default_track_only=item.get("default_track_only", False),
+                    after=item.get("after"),
                 )
             )
         decks[milestone_id] = MilestonePromptDeck(
