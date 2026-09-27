@@ -1693,6 +1693,35 @@ def _read_input_with_paste(prompt: str = "> ") -> str:
     return "\n".join(lines)
 
 
+def _echo_user_prompt(text: str) -> None:
+    """Echo a user prompt in bold warm color so it stands out in scrollback.
+
+    Falls back to plain ``print`` when stdout is not a TTY or NO_COLOR is
+    set. MAESTRO_PROMPT_COLOR overrides the default color (e.g. "ansigreen").
+    """
+    import html
+
+    color = os.environ.get("MAESTRO_PROMPT_COLOR", "ansiyellow")
+    if sys.stdout.isatty() and "NO_COLOR" not in os.environ:
+        from prompt_toolkit import HTML, print_formatted_text
+
+        print_formatted_text(
+            HTML(f"<{color}><b>&gt; {html.escape(text)}</b></{color}>")
+        )
+        return
+    print(f"> {text}")
+
+
+def _echo_turn_separator(turn: int) -> None:
+    """Print the post-turn separator, dimmed on a TTY."""
+    if sys.stdout.isatty() and "NO_COLOR" not in os.environ:
+        from prompt_toolkit import HTML, print_formatted_text
+
+        print_formatted_text(HTML(f"\n<dim>─── Turn {turn} ───</dim>\n"))
+        return
+    print(f"\n─── Turn {turn} ───\n")
+
+
 def _read_input_tui(prompt: str = "> ") -> str:
     """Read multi-line input via prompt_toolkit.
 
@@ -1709,7 +1738,7 @@ def _read_input_tui(prompt: str = "> ") -> str:
     both delays cancel and swallows the next typed character. Ctrl+C
     cancels immediately and reliably instead.
     """
-    from prompt_toolkit import PromptSession
+    from prompt_toolkit import HTML, PromptSession
     from prompt_toolkit.history import FileHistory
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.keys import Keys
@@ -1746,8 +1775,13 @@ def _read_input_tui(prompt: str = "> ") -> str:
         else:
             buf.cursor_down()
 
+    color = os.environ.get("MAESTRO_PROMPT_COLOR", "ansiyellow")
+    label = (
+        HTML(f"<b><{color}>&gt;</{color}></b> ") if prompt == "> " else prompt
+    )
     session = PromptSession(
-        f"{prompt}",
+        label,
+        style="bold",
         key_bindings=bindings,
         multiline=True,
         history=FileHistory(str(_HISTORY_FILE)),
@@ -2021,7 +2055,7 @@ async def run_interactive(args: Any) -> int:
             pending_prompt_id, user_input, pending_edited, selected_title = (
                 state.pending_prompts.pop(0)
             )
-            print(f"> {user_input}")
+            _echo_user_prompt(user_input)
         else:
             try:
                 user_input = await _read_line("> ")
@@ -2302,7 +2336,7 @@ async def run_interactive(args: Any) -> int:
             state.dry_run_next = False
             state.show_plan_next = False
 
-        print(f"\n─── Turn {state.turn} ───\n")
+        _echo_turn_separator(state.turn)
         print(f"{result.text}\n")
 
         artifact_warning = _warn_if_artifact_missing(prompt, result.text, Path.cwd())

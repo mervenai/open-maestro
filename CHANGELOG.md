@@ -5,6 +5,18 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.1] - 2026-09-27
+
+### Added
+- **User prompts render bold and colored in interactive mode.** Typed input
+  and queued `/next` prompt echoes now render as bold amber `> ...` (the same
+  visual treatment kimi-cli gives user messages), making your prompts easy to
+  spot when scrolling back through session history. The `─── Turn N ───`
+  separator renders dim so prompts stand out further. Styling is applied via
+  prompt_toolkit and is skipped when stdout is not a TTY or `NO_COLOR` is
+  set; `MAESTRO_PROMPT_COLOR` overrides the color (e.g. `ansigreen`).
+  (MSTRO-108)
+
 ## [1.21.0] - 2026-09-26
 
 ### Added

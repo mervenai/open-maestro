@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+import types
+
+from prompt_toolkit import HTML
+from prompt_toolkit.formatted_text import to_formatted_text
 
 from open_maestro.agents.definition import AgentDefinition
 from open_maestro.agents.registry import AgentRegistry
@@ -10,6 +15,7 @@ from open_maestro.session.store import SessionRecord, SessionStore
 from open_maestro.interactive import (
     InteractiveState,
     _assemble_prompt,
+    _echo_user_prompt,
     _handle_command,
     _looks_like_decision,
     _resolve_suggested_prompt,
@@ -349,3 +355,67 @@ class TestArtifactMissingWarning:
         prompt = "Draft it.\nWrite the output to docs/contract-{epic_id}.md."
         result = "No artifact written (read-only worker)."
         assert _warn_if_artifact_missing(prompt, result, tmp_path) is None
+
+
+class TestEchoUserPrompt:
+    """Bold/colored echo of user prompts, with plain fallbacks."""
+
+    def test_plain_output_when_not_tty(self, monkeypatch, capsys):
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: False, raising=False)
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        _echo_user_prompt("hello world")
+        out = capsys.readouterr().out
+        assert out == "> hello world\n"
+        assert "\x1b" not in out
+
+    def test_plain_output_when_no_color_set(self, monkeypatch, capsys):
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True, raising=False)
+        monkeypatch.setenv("NO_COLOR", "1")
+        _echo_user_prompt("hello world")
+        out = capsys.readouterr().out
+        assert out == "> hello world\n"
+        assert "\x1b" not in out
+
+    def test_bold_colored_output_when_tty(self, monkeypatch):
+        calls: list = []
+
+        def fake_print_formatted_text(formatted_text, **_kwargs):
+            calls.append(formatted_text)
+
+        fake_pt = types.SimpleNamespace(
+            HTML=HTML, print_formatted_text=fake_print_formatted_text
+        )
+        monkeypatch.setitem(sys.modules, "prompt_toolkit", fake_pt)
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True, raising=False)
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        _echo_user_prompt("ship it <now>")
+        assert len(calls) == 1
+        fragments = to_formatted_text(calls[0])
+        tokens = {tok for style, _ in fragments for tok in style.split(",")}
+        text = "".join(fragment for _, fragment in fragments)
+        # prompt_toolkit maps <b> to the style token "b".
+        assert "b" in tokens
+        assert "class:ansiyellow" in tokens
+        assert text.startswith("> ")
+        assert "ship it" in text
+        # HTML metacharacters in the input must not break the markup.
+        assert "<now>" in text
+
+    def test_color_override_via_env(self, monkeypatch):
+        calls: list = []
+
+        def fake_print_formatted_text(formatted_text, **_kwargs):
+            calls.append(formatted_text)
+
+        fake_pt = types.SimpleNamespace(
+            HTML=HTML, print_formatted_text=fake_print_formatted_text
+        )
+        monkeypatch.setitem(sys.modules, "prompt_toolkit", fake_pt)
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True, raising=False)
+        monkeypatch.setenv("MAESTRO_PROMPT_COLOR", "ansigreen")
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        _echo_user_prompt("hello")
+        assert len(calls) == 1
+        fragments = to_formatted_text(calls[0])
+        tokens = {tok for style, _ in fragments for tok in style.split(",")}
+        assert "class:ansigreen" in tokens
