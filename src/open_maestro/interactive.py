@@ -1783,7 +1783,7 @@ def _read_input_tui(prompt: str = "> ") -> str:
 
     session = PromptSession(
         label,
-        style=Style([("", "bold")]),
+        style=Style([("", f"bold {color}")]),
         key_bindings=bindings,
         multiline=True,
         history=FileHistory(str(_HISTORY_FILE)),
