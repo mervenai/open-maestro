@@ -1779,9 +1779,11 @@ def _read_input_tui(prompt: str = "> ") -> str:
     label = (
         HTML(f"<b><{color}>&gt;</{color}></b> ") if prompt == "> " else prompt
     )
+    from prompt_toolkit.styles import Style
+
     session = PromptSession(
         label,
-        style="bold",
+        style=Style([("", "bold")]),
         key_bindings=bindings,
         multiline=True,
         history=FileHistory(str(_HISTORY_FILE)),
