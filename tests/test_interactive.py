@@ -23,6 +23,7 @@ from open_maestro.interactive import (
     _looks_like_decision,
     _maybe_clarify_repo_path,
     _resolve_suggested_prompt,
+    _restore_latest_session,
     _strip_plan_prefix,
     _turn_includes_history,
     _warn_if_artifact_missing,
@@ -514,3 +515,53 @@ def test_clarify_repo_path_proceeds_for_git_remote(monkeypatch):
     prompt = "Please analyze https://github.com/org/repo and summarize it"
     with pytest.raises(_ClarificationReached):
         asyncio.run(_maybe_clarify_repo_path(prompt, [], None))
+
+
+def _make_record(session_id: str, runtime: str, **kwargs) -> SessionRecord:
+    from datetime import datetime, timezone
+
+    return SessionRecord(
+        session_id=session_id,
+        runtime_name=runtime,
+        agent_id="ticketing",
+        model="claude-haiku-4-5",
+        prompt_summary="task",
+        created_at=kwargs.get("created_at", datetime.now(timezone.utc)),
+        updated_at=kwargs.get("updated_at", datetime.now(timezone.utc)),
+    )
+
+
+def test_restore_latest_session_sets_state(tmp_path):
+    # MSTRO-111: the most recent project session is restored into state so
+    # the next turn resumes the backend session across maestro restarts.
+    store = SessionStore(base_dirs=[tmp_path])
+    store.save(_make_record("sess-1", "claude-cli"))
+    state = InteractiveState()
+    record = _restore_latest_session(state, store)
+    assert record is not None
+    assert state.session_id == "sess-1"
+    assert state.session_runtime == "claude-cli"
+    # And the restored session makes the turn a native resume (no history
+    # re-injection) for a matching runtime.
+    assert _turn_includes_history(state, "claude-cli") is False
+
+
+def test_restore_latest_session_prefers_most_recent(tmp_path):
+    from datetime import datetime, timezone
+
+    store = SessionStore(base_dirs=[tmp_path])
+    older = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    newer = datetime(2026, 9, 29, tzinfo=timezone.utc)
+    store.save(_make_record("sess-old", "kimi-cli", updated_at=older))
+    store.save(_make_record("sess-new", "claude-cli", updated_at=newer))
+    state = InteractiveState()
+    _restore_latest_session(state, store)
+    assert state.session_id == "sess-new"
+
+
+def test_restore_latest_session_empty_store(tmp_path):
+    store = SessionStore(base_dirs=[tmp_path])
+    state = InteractiveState()
+    assert _restore_latest_session(state, store) is None
+    assert state.session_id is None
+    assert state.session_runtime is None

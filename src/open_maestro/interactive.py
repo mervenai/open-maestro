@@ -62,7 +62,7 @@ from open_maestro.runtime import quota as quota_mod
 from open_maestro.runtime.base import AgentConfig
 from open_maestro.runtime.factory import create_runtime, select_runtime_for_task
 from open_maestro.search.vector_client import VectorSearchClient
-from open_maestro.session.store import SessionStore
+from open_maestro.session.store import SessionRecord, SessionStore
 from open_maestro.sources.config import SourceRegistry
 from open_maestro.sources.sync import sync_source
 from open_maestro.todos.commands import handle_todo_command
@@ -295,6 +295,30 @@ def _turn_includes_history(state: "InteractiveState", turn_runtime: str) -> bool
 
         return kimi_cli.resume_broken()
     return False
+
+
+def _restore_latest_session(
+    state: "InteractiveState", store: SessionStore
+) -> SessionRecord | None:
+    """Restore the most recent project session into *state* (MSTRO-111).
+
+    The backend session id otherwise lives only in memory, so restarting
+    maestro between turns silently dropped continuity — a follow-up like
+    "proceed from the last session" started a fresh backend session with no
+    transcript.  Returns the restored record, or None when there is nothing
+    to restore.
+    """
+    try:
+        recent = store.list_recent(limit=1)
+    except Exception as exc:
+        logger.warning("Failed to list recent sessions: %s", exc)
+        return None
+    if not recent:
+        return None
+    record = recent[0]
+    state.session_id = record.session_id
+    state.session_runtime = record.runtime_name
+    return record
 
 
 # Result phrasings that indicate the agent finished without writing and
@@ -2136,8 +2160,24 @@ async def run_interactive(args: Any) -> int:
         prefer_local=args.prefer_local or getattr(args, "ask_escalate", False),
     )
 
+    # MSTRO-111: resume the most recent *project-scoped* backend session so
+    # turns stay continuous across maestro restarts.  The user-level session
+    # dir is deliberately excluded — it aggregates sessions from every
+    # project and resuming one of those here would pull in the wrong context.
+    restore_dirs = (
+        [args.session_dir]
+        if args.session_dir
+        else [Path.cwd() / ".open-maestro" / "sessions"]
+    )
+    restored = _restore_latest_session(state, SessionStore(base_dirs=restore_dirs))
+
     publish_line = DashboardPublishHistoryStore(Path.cwd()).format_last()
     print(_banner(session_id=state.session_id, publish_line=publish_line))
+    if restored is not None:
+        print(
+            f"Resuming session {restored.session_id} "
+            f"({restored.runtime_name}); /reset to start fresh."
+        )
 
     milestone_msg = await _discover_milestones_interactive(Path.cwd())
     if milestone_msg:

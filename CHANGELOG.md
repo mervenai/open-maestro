@@ -5,6 +5,23 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.2] - 2026-09-29
+
+### Fixed
+- **Interactive sessions now survive maestro restarts** (MSTRO-111). The
+  backend session id lived only in memory, so restarting `maestro
+  --interactive` between turns silently dropped continuity — a follow-up
+  like "proceed from the last session" started a fresh backend session with
+  no transcript (a generated 39-comment Linear manifest was lost this way:
+  the posting turn had no comments in context and no tools connected, and
+  nothing reached Linear). On startup, interactive mode now restores the
+  most recent *project-scoped* session record (`.open-maestro/sessions`)
+  into state and prints a "Resuming session <id> (/reset to start fresh)"
+  line; the first turn then natively resumes the backend session
+  (`claude --resume` / `kimi -r`). The user-level session dir is
+  deliberately excluded so a session from a different project is never
+  resumed by mistake.
+
 ## [1.22.1] - 2026-09-29
 
 ### Fixed
