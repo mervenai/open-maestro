@@ -5,6 +5,22 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.3] - 2026-09-29
+
+### Fixed
+- **MCP tool names are no longer stripped from Claude CLI tool flags**
+  (follow-up to the Linear posting incident). `_filter_claude_tool_names`
+  dropped every name that is not a built-in Claude tool, so `mcp__*` entries
+  could never reach `--allowedTools`/`--disallowedTools`. `mcp__`-prefixed
+  names and per-server patterns (`mcp__linear__*`) now pass through, and
+  when maestro itself passes MCP servers to the runtime, an agent-level
+  allowlist is automatically widened with one `mcp__<server>__*` pattern per
+  server so user-configured MCP servers are not silently locked out.  Note:
+  Claude Code itself does not load MCP servers in `-p` print mode before
+  v2.1.221 (anthropics/claude-code#38987), so MCP through the claude-cli
+  runtime also requires a Claude Code upgrade; the kimi-cli runtime loads
+  MCP in prompt mode today.
+
 ## [1.22.2] - 2026-09-29
 
 ### Fixed

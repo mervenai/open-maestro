@@ -79,7 +79,11 @@ def _filter_claude_tool_names(tool_names: Iterable[str] | None) -> list[str]:
         return []
     valid: list[str] = []
     for name in tool_names:
-        if name in _KNOWN_CLAUDE_TOOLS:
+        # MCP tool names (and per-server patterns like "mcp__linear__*") are
+        # meaningful to the Claude CLI even though they are not built-in
+        # tools; dropping them silently locked user-configured MCP servers
+        # out of --allowedTools/--disallowedTools.
+        if name in _KNOWN_CLAUDE_TOOLS or name.startswith("mcp__"):
             valid.append(name)
         else:
             logger.debug(
@@ -186,9 +190,21 @@ class ClaudeCLIRuntime(AgentRuntime):
                 # Preserve the caller's tool order (dict.fromkeys dedupes
                 # deterministically); a plain set() would randomize the CLI
                 # argument on every process.
-                args.extend(
-                    ["--allowedTools", ",".join(_filter_claude_tool_names(dict.fromkeys(config.allowed_tools)))]
+                allowed = _filter_claude_tool_names(
+                    dict.fromkeys(config.allowed_tools)
                 )
+                # An agent-level allowlist must not silently lock out
+                # user-configured MCP servers: widen it with a per-server
+                # pattern for every server maestro is passing along.  (A
+                # global "mcp__*" is rejected by the CLI — patterns must
+                # name the server scope.)
+                if allowed and config.mcp_servers:
+                    servers = config.mcp_servers.get("mcpServers", config.mcp_servers)
+                    for server_name in servers:
+                        pattern = f"mcp__{server_name}__*"
+                        if pattern not in allowed:
+                            allowed.append(pattern)
+                args.extend(["--allowedTools", ",".join(allowed)])
 
             if config.blocked_tools:
                 args.extend(

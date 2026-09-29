@@ -109,6 +109,53 @@ class TestClaudeCLIOptionMapping:
         mode_index = args.index("--permission-mode")
         assert args[mode_index + 1] == "auto"
 
+    def test_mcp_tool_names_pass_through_filter(self):
+        # mcp__ tool names and per-server patterns must survive the filter
+        # even though they are not built-in Claude tools.
+        from open_maestro.runtime.claude_cli import _filter_claude_tool_names
+
+        assert _filter_claude_tool_names(["Read", "mcp__linear__save_comment"]) == [
+            "Read",
+            "mcp__linear__save_comment",
+        ]
+        assert _filter_claude_tool_names(["mcp__linear__*"]) == ["mcp__linear__*"]
+        # Unknown non-mcp names are still dropped.
+        assert _filter_claude_tool_names(["Read", "NotATool"]) == ["Read"]
+
+    def test_allowed_tools_widened_with_mcp_server_patterns(self):
+        # An agent-level allowlist must not lock out MCP servers maestro is
+        # passing along: each server gets an mcp__<server>__* pattern.
+        runtime = ClaudeCLIRuntime()
+        config = AgentConfig(
+            allowed_tools=["Read", "Bash"],
+            mcp_servers={"linear": {"url": "https://mcp.linear.app/mcp"}},
+        )
+        args = runtime._build_args("do it", config=config)
+        allowed_index = args.index("--allowedTools")
+        assert args[allowed_index + 1] == "Read,Bash,mcp__linear__*"
+
+    def test_allowed_tools_not_widened_without_mcp_servers(self):
+        # No mcp_servers configured -> allowlist stays exactly as given
+        # (servers from the user's own claude config are governed by their
+        # claude settings, not silently widened).
+        runtime = ClaudeCLIRuntime()
+        config = AgentConfig(allowed_tools=["Read", "Bash"])
+        args = runtime._build_args("do it", config=config)
+        allowed_index = args.index("--allowedTools")
+        assert args[allowed_index + 1] == "Read,Bash"
+
+    def test_allowed_tools_widened_with_mcpServers_wrapper(self):
+        runtime = ClaudeCLIRuntime()
+        config = AgentConfig(
+            allowed_tools=["Read"],
+            mcp_servers={
+                "mcpServers": {"linear": {"url": "https://mcp.linear.app/mcp"}}
+            },
+        )
+        args = runtime._build_args("do it", config=config)
+        allowed_index = args.index("--allowedTools")
+        assert args[allowed_index + 1] == "Read,mcp__linear__*"
+
     def test_mcp_config_writes_temp_file(self):
         runtime = ClaudeCLIRuntime()
         config = AgentConfig(
