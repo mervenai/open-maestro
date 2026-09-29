@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -48,6 +49,35 @@ _DEFAULT_CHAIN_TEMPLATES: dict[str, list[str]] = {
     "analyze": ["research", "documentation"],
 }
 
+_DIRECT_ACTION_TOOL_RE = re.compile(r"\bmcp__[a-z0-9_]+", re.IGNORECASE)
+_DIRECT_ACTION_VERB_RE = re.compile(
+    r"\b(post|create|update|delete|file|submit|publish|"
+    r"transition|close|comment|apply|push)\b",
+    re.IGNORECASE,
+)
+_DIRECT_ACTION_SYSTEM_RE = re.compile(
+    r"\b(linear|jira|confluence|slack|notion|github)\b", re.IGNORECASE
+)
+
+
+def is_direct_action(prompt: str) -> bool:
+    """Detect prompts that name a concrete external action.
+
+    Direct-action tasks ("post these comments to Linear via
+    ``mcp__linear__save_comment``") need no multi-agent decomposition:
+    planning only scatters them into recall/verification steps that never
+    execute the action.  A prompt qualifies when it names an explicit MCP
+    tool, or combines an imperative mutation verb with an external system
+    name.  Conservative by design: a false positive merely means a single
+    agent handles the task instead of a chain.
+    """
+    if _DIRECT_ACTION_TOOL_RE.search(prompt):
+        return True
+    return bool(
+        _DIRECT_ACTION_VERB_RE.search(prompt)
+        and _DIRECT_ACTION_SYSTEM_RE.search(prompt)
+    )
+
 _PLANNER_SYSTEM_PROMPT = """You are a multi-agent workflow planner.
 
 Given the user's task and the available specialist agents, break the task into a
@@ -62,7 +92,11 @@ IDs. Respond with **only** a JSON object in this exact shape:
 }
 
 Keep the chain as short as possible while producing a complete result. If the
-task can be handled well by a single agent, return one step. Do not include
+task can be handled well by a single agent, return one step. If the task is a
+direct action on an external system (posting comments, creating or updating
+tickets/documents, filing issues), return exactly ONE step for the most
+appropriate agent — never add recall, verification, or ledger steps the user
+did not ask for. Do not include
 markdown fences or any text outside the JSON.
 """  # noqa: E501
 
@@ -119,7 +153,21 @@ class ChainPlanner:
 
         Tries an LLM-driven planner first; if that fails or returns no usable
         steps, falls back to a keyword-driven predefined chain.
+
+        Direct-action prompts skip decomposition entirely: planning would
+        only scatter them into verification steps (see ``is_direct_action``).
         """
+        if is_direct_action(prompt):
+            agent = first_agent or self._pick_default_agent()
+            if agent is not None:
+                logger.info(
+                    "Direct-action prompt detected; single-step chain via '%s'",
+                    agent.id,
+                )
+                return HandoffPlan(
+                    steps=[HandoffStep(agent_id=agent.id, purpose=prompt)],
+                    original_prompt=prompt,
+                )
         llm_plan = await self._llm_plan(prompt, profile=profile)
         if llm_plan is not None and llm_plan.steps:
             return llm_plan

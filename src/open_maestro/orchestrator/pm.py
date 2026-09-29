@@ -35,7 +35,11 @@ from open_maestro.context.monitor import ContextMonitor, ContextSnapshot
 from open_maestro.events.bus import EventBus
 from open_maestro.milestones import format_dossier_context, format_prompt_context
 from open_maestro.orchestrator import critic as critic_mod
-from open_maestro.orchestrator.chain import ChainExecutor, ChainPlanner
+from open_maestro.orchestrator.chain import (
+    ChainExecutor,
+    ChainPlanner,
+    is_direct_action,
+)
 from open_maestro.orchestrator.load import (
     LoadLevel,
     apply_source_load,
@@ -533,6 +537,14 @@ class ProjectManager:
         #    runtime/model selection); otherwise fall back to the sequential
         #    chain planner.
         ctx.executed_as_chain = False
+        if chain and not resume and not fork and is_direct_action(prompt):
+            # Direct-action tasks (post to Linear, file a Jira ticket) are
+            # handled by the router-selected agent alone; decomposition only
+            # scatters them into verification steps that never act.
+            logger.info(
+                "Direct-action prompt detected; bypassing chain/swarm planning"
+            )
+            chain = False
         if chain and not resume and not fork:
             ctx.executed_as_chain = True
             swarm_plan = None

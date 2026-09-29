@@ -17,6 +17,7 @@ from open_maestro.orchestrator.chain import (
     HandoffPlan,
     HandoffStep,
     MAX_CHAIN_STEPS,
+    is_direct_action,
 )
 from open_maestro.runtime.base import AgentConfig, AgentResult, AgentRuntime
 
@@ -179,6 +180,60 @@ class TestChainPlanner:
         planner = ChainPlanner(runtime=runtime, registry=sample_registry)
         plan = await planner._llm_plan("task")
         assert len(plan.steps) == MAX_CHAIN_STEPS
+
+    async def test_direct_action_prompt_skips_llm_planner(self, sample_registry):
+        runtime = FakeRuntime(
+            '{"steps": [{"agent_id": "researcher", "purpose": "recall"},'
+            ' {"agent_id": "documentation", "purpose": "verify"}]}'
+        )
+        planner = ChainPlanner(runtime=runtime, registry=sample_registry)
+        first = sample_registry.get("researcher")
+        plan = await planner.plan(
+            "Post the 10 comments to Linear document abc via "
+            "mcp__linear__save_comment",
+            first_agent=first,
+        )
+        assert [s.agent_id for s in plan.steps] == ["researcher"]
+        assert plan.steps[0].purpose.startswith("Post the 10 comments")
+        # The LLM planner must not even have been consulted.
+        assert runtime.last_prompt == ""
+
+
+class TestIsDirectAction:
+    def test_explicit_mcp_tool_names(self):
+        assert is_direct_action(
+            "post each comment via mcp__linear__save_comment with documentId"
+        )
+        assert is_direct_action("Call mcp__jira__createIssue now")
+
+    def test_mutation_verb_plus_system(self):
+        assert is_direct_action(
+            "Post comments 1-10 to Linear document 81e8fdac"
+        )
+        assert is_direct_action("File a Jira ticket for this bug")
+        assert is_direct_action("Update the Confluence page with results")
+        assert is_direct_action("Close the Jira story and transition it to Done")
+        assert is_direct_action("Push the fix to github")
+
+    def test_analysis_tasks_are_not_direct_actions(self):
+        assert not is_direct_action("analyze the project architecture")
+        assert not is_direct_action("compare the two synthesis documents")
+        assert not is_direct_action("evaluate whether the epics need updating")
+        assert not is_direct_action(
+            "summarize the current milestone status for the team"
+        )
+
+    def test_implementation_tasks_are_not_direct_actions(self):
+        assert not is_direct_action("implement the budget import feature")
+        assert not is_direct_action("build a parser for the config files")
+        assert not is_direct_action("create a dashboard mechanism later")
+
+    def test_system_mention_alone_is_not_direct_action(self):
+        # Naming a system without a mutation verb must not bypass chaining.
+        assert not is_direct_action(
+            "review the Linear document and summarize its open threads"
+        )
+        assert not is_direct_action("how do I connect Jira to maestro")
 
 
 class TestChainExecutor:

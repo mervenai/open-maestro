@@ -5,6 +5,23 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.5] - 2026-09-29
+
+### Fixed
+- **Direct-action prompts bypass chain/swarm decomposition** (MSTRO-114).
+  Tasks like "post these comments to Linear via `mcp__linear__save_comment`"
+  were being scattered by the chain planner into recall/verification steps
+  (memory-manager, research, product-owner) that never executed the action —
+  four attempts produced zero `save_comment` calls. A new
+  `is_direct_action()` classifier in `orchestrator/chain.py` detects prompts
+  that name an explicit MCP tool, or combine an imperative mutation verb
+  (post, create, update, file, close, push, ...) with an external system
+  (Linear, Jira, Confluence, ...). Such prompts now go straight to the
+  router-selected agent as a single-step run, bypassing both the swarm and
+  chain planners; `ChainPlanner.plan()` keeps the same gate as
+  defense-in-depth for other entry points, and the planner system prompt now
+  forbids adding unrequested recall/verification steps to direct actions.
+
 ## [1.22.4] - 2026-09-29
 
 ### Fixed
