@@ -749,6 +749,12 @@ _REPO_ANALYSIS_ACTIONS = {
     "check out",
 }
 
+# Word-boundary matchers for the action verbs, so noun usages ("adversarial
+# review") and derived words ("reviewer") don't trip the verb match.
+_REPO_ANALYSIS_ACTION_RES = tuple(
+    re.compile(r"\b" + re.escape(kw) + r"\b") for kw in _REPO_ANALYSIS_ACTIONS
+)
+
 # Weak context keywords: mentioning these alone is not enough to trigger repo
 # clarification; they need to appear with an action verb or explicit path/URL.
 _REPO_ANALYSIS_CONTEXT = {
@@ -783,13 +789,55 @@ _URL_RE = re.compile(
 )
 
 
+# Host substrings identifying well-known git forges.
+_GIT_FORGE_HOST_PARTS = (
+    "github",
+    "gitlab",
+    "bitbucket",
+    "codeberg",
+    "gitea",
+    "dev.azure.com",
+    "visualstudio.com",
+)
+
+
+def _looks_like_git_remote(url: str) -> bool:
+    """Return True when *url* looks like a remote git repository.
+
+    A URL qualifies when it (a) ends with ".git" (case-insensitive), (b) its
+    host matches a known git forge (GitHub, GitLab, Bitbucket, Codeberg,
+    Gitea, Azure DevOps, Visual Studio), or (c) it is an scp-style
+    "git@host:path" URL.  Plain document/issue links (e.g. Linear, Google
+    Docs) are not git remotes and never qualify.  Never raises.
+    """
+    try:
+        raw = url.strip()
+        if not raw:
+            return False
+        lowered = raw.lower()
+        # scp-style git@host:path
+        if raw.startswith("git@"):
+            return True
+        # .git suffix
+        if lowered.endswith(".git"):
+            return True
+        from urllib.parse import urlparse
+
+        host = (urlparse(raw).netloc or "").lower()
+        if not host and "://" not in raw:
+            return False
+        return any(part in host for part in _GIT_FORGE_HOST_PARTS)
+    except Exception:
+        return False
+
+
 def _extract_remote_urls(prompt: str) -> list[str]:
-    """Return remote repository URLs mentioned in *prompt*."""
+    """Return remote git repository URLs mentioned in *prompt*."""
     urls: list[str] = []
     seen: set[str] = set()
     for match in _URL_RE.finditer(prompt):
         raw = match.group(0).strip()
-        if raw and raw not in seen:
+        if raw and raw not in seen and _looks_like_git_remote(raw):
             urls.append(raw)
             seen.add(raw)
     return urls
@@ -820,15 +868,24 @@ def _extract_candidate_paths(prompt: str) -> list[Path]:
 def _looks_like_repo_analysis(prompt: str) -> bool:
     """Return True only when the user explicitly asks for new repo work.
 
-    A request needs either a strong action verb ("analyze the codebase") or an
-    explicit filesystem path / remote URL.  Merely mentioning "analysis",
-    "repo", "project", or a filename is not enough to trigger clarification.
+    A request needs a strong action verb ("analyze the codebase") together
+    with code context or an explicit filesystem path / remote URL, or code
+    context together with an explicit path/URL.  Merely mentioning "analysis",
+    "repo", "project", a filename, or a document URL is not enough — and a
+    bare action verb is not enough either ("compare to the adversarial
+    review" is a document task, not repo work).
     """
     lowered = prompt.lower()
-    has_action = any(kw in lowered for kw in _REPO_ANALYSIS_ACTIONS)
+    has_action = any(rx.search(lowered) for rx in _REPO_ANALYSIS_ACTION_RES)
     has_context = any(kw in lowered for kw in _REPO_ANALYSIS_CONTEXT)
     has_explicit_path = bool(_extract_remote_urls(prompt) or _extract_candidate_paths(prompt))
-    return has_action or (has_context and has_explicit_path)
+    # MSTRO-110: a bare action verb is not enough — "compare to the adversarial
+    # review" is a document task, not repo work. Require code context or an
+    # explicit path/URL alongside the verb (or context plus path) before
+    # asking which repository to analyze.
+    return (has_action and (has_context or has_explicit_path)) or (
+        has_context and has_explicit_path
+    )
 
 
 # Keywords indicating a prompt's *deliverable* depends on source code being

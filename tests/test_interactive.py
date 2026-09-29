@@ -12,12 +12,16 @@ from prompt_toolkit.formatted_text import to_formatted_text
 from open_maestro.agents.definition import AgentDefinition
 from open_maestro.agents.registry import AgentRegistry
 from open_maestro.session.store import SessionRecord, SessionStore
+import pytest
+
 from open_maestro.interactive import (
     InteractiveState,
     _assemble_prompt,
     _echo_user_prompt,
+    _extract_remote_urls,
     _handle_command,
     _looks_like_decision,
+    _maybe_clarify_repo_path,
     _resolve_suggested_prompt,
     _strip_plan_prefix,
     _turn_includes_history,
@@ -419,3 +423,94 @@ class TestEchoUserPrompt:
         fragments = to_formatted_text(calls[0])
         tokens = {tok for style, _ in fragments for tok in style.split(",")}
         assert "class:ansigreen" in tokens
+
+
+class TestExtractRemoteUrls:
+    def test_linear_document_url_is_ignored(self):
+        assert (
+            _extract_remote_urls(
+                "comments go to "
+                "https://linear.app/merven-ai/document/AM-123-blueprint-notes"
+            )
+            == []
+        )
+
+    def test_google_docs_url_is_ignored(self):
+        assert (
+            _extract_remote_urls(
+                "see https://docs.google.com/document/d/abc123-def-456 for details"
+            )
+            == []
+        )
+
+    def test_github_url_is_kept(self):
+        assert _extract_remote_urls("check https://github.com/org/repo please") == [
+            "https://github.com/org/repo"
+        ]
+
+    def test_github_url_with_git_suffix_is_kept(self):
+        assert (
+            _extract_remote_urls("clone https://github.com/org/repo.git now")
+            == ["https://github.com/org/repo.git"]
+        )
+
+    def test_scp_style_git_url_is_kept(self):
+        assert (
+            _extract_remote_urls("use git@github.com:org/repo.git here")
+            == ["git@github.com:org/repo.git"]
+        )
+
+    def test_mixed_prompt_keeps_only_git_remote(self):
+        prompt = (
+            "compare the drafts and file the result at "
+            "https://linear.app/merven-ai/document/AM-123-notes while cloning "
+            "https://github.com/org/repo"
+        )
+        assert _extract_remote_urls(prompt) == ["https://github.com/org/repo"]
+
+
+def test_clarify_repo_path_ignores_document_url():
+    # MSTRO-110: a local comparison task that merely *links* a Linear document
+    # as a destination for comments must not trigger repo clarification.
+    prompt = (
+        "Compare the new 3.1 version of the blueprint with the adversarial "
+        "assessment and write up this analysis in a md file. Afterwards, share "
+        "the summary as a comment on "
+        "https://linear.app/merven-ai/document/AM-123-blueprint-notes"
+    )
+    result = asyncio.run(_maybe_clarify_repo_path(prompt, [], None))
+    assert result == (prompt, None)
+
+
+def test_clarify_repo_path_ignores_adversarial_review_noun():
+    # MSTRO-110: the user's verbatim prompt — "adversarial review" uses
+    # "review" as a noun and the Linear link is a document, not a git remote;
+    # no repo clarification may fire.
+    prompt = (
+        "with the new 3.1 version of the blueprint compare to the adversarial "
+        "review provided here. For sections C and D, specifically log which "
+        "items are agreed upon and which items are contested and why. Write "
+        "up this analysis in a md file. Later this md file will be used to "
+        "provide in-line comments on the file: "
+        "https://linear.app/merven-ai/document/am-resolution-pack-for-blueprint-v3-mer-11-63b550481705"
+    )
+    result = asyncio.run(_maybe_clarify_repo_path(prompt, [], None))
+    assert result == (prompt, None)
+
+
+def test_clarify_repo_path_proceeds_for_git_remote(monkeypatch):
+    # A real git remote URL in the prompt must still lead to clarification
+    # (i.e. the questionary prompt), not an immediate (prompt, None) return.
+    class _ClarificationReached(Exception):
+        pass
+
+    fake_questionary = types.ModuleType("questionary")
+    fake_questionary.Choice = lambda **kwargs: kwargs
+    fake_questionary.select = lambda *args, **kwargs: (_ for _ in ()).throw(
+        _ClarificationReached()
+    )
+    monkeypatch.setitem(sys.modules, "questionary", fake_questionary)
+
+    prompt = "Please analyze https://github.com/org/repo and summarize it"
+    with pytest.raises(_ClarificationReached):
+        asyncio.run(_maybe_clarify_repo_path(prompt, [], None))

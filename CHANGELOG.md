@@ -5,6 +5,22 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.1] - 2026-09-29
+
+### Fixed
+- **Repo clarification no longer fires for document URLs or noun usages of
+  action verbs** (MSTRO-110). A prompt comparing a local blueprint against
+  an "adversarial review" and linking a Linear document previously triggered
+  "Which repository should I analyze?" for two independent reasons: any URL
+  (including Linear/Google Docs links) was treated as a git remote, and the
+  action-verb matcher substring-matched "review" inside the noun phrase
+  "adversarial review". Remote URL extraction now keeps only URLs that look
+  like git remotes (`.git` suffix, known forge hosts, or `git@` scp-style),
+  and the repo-analysis gate requires an action verb to co-occur with code
+  context or an explicit path/URL — a bare verb no longer triggers the
+  question. Verb matching also uses word boundaries so derived words like
+  "reviewer" don't trip it.
+
 ## [1.22.0] - 2026-09-29
 
 ### Fixed
