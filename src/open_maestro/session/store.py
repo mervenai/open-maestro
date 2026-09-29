@@ -36,6 +36,11 @@ class SessionRecord:
     tokens_used: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    # Tail of the turn's final text, persisted so a follow-up turn can be
+    # handed off explicitly even when native backend resume is unavailable
+    # or the model loses anchoring in a long resumed conversation
+    # (MSTRO-113).
+    last_output: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:

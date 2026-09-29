@@ -121,6 +121,10 @@ class InteractiveState:
     # Runtime that produced session_id (e.g. "kimi-cli", "claude-cli").
     # Used to avoid resuming a session on a different backend.
     session_runtime: str | None = None
+    # Tail of the previous turn's final text, used to hand execution-style
+    # follow-ups ("ok, proceed with the next steps") to the next turn
+    # explicitly even when native backend resume is active (MSTRO-113).
+    prior_turn_output: str | None = None
     agent_id: str | None = None
     model: str | None = None
     show_plan_next: bool = False
@@ -318,7 +322,48 @@ def _restore_latest_session(
     record = recent[0]
     state.session_id = record.session_id
     state.session_runtime = record.runtime_name
+    state.prior_turn_output = record.last_output
     return record
+
+
+# Execution-intent phrasings for follow-ups that refer to the previous
+# turn's output ("ok, proceed with the recommended next steps").  Distinct
+# from _FOLLOW_UP_PHRASES, which matches *questions about* prior work.
+_EXECUTION_FOLLOW_UP_RE = re.compile(
+    r"(?i)\b("
+    r"proceed|continue|go ahead|execute|follow up|next steps?|do (?:it|that|the)"
+    r"|finish|complete the|apply the|run the|implement the|work on the"
+    r")\b"
+)
+
+# Cap for the handoff block injected into execution-style follow-ups.
+_HANDOFF_EXCERPT_CAP = 4000
+
+
+def _is_execution_follow_up(prompt: str) -> bool:
+    """True when *prompt* asks to act on the previous turn's output.
+
+    Short prompts only: long prompts carry their own context and don't need
+    a handoff injection.
+    """
+    text = prompt.strip()
+    return len(text) <= 400 and bool(_EXECUTION_FOLLOW_UP_RE.search(text))
+
+
+def _handoff_excerpt(prior_output: str) -> str:
+    """Pick the most useful slice of the prior turn's text for a handoff.
+
+    When the output has a Recommendations/Next steps section, hand off from
+    there to the end; otherwise hand off the tail.
+    """
+    match = re.search(
+        r"(?im)^#{1,4}\s.*(recommendations|next steps).*$", prior_output
+    )
+    if match:
+        section = prior_output[match.start() :]
+        if len(section) <= _HANDOFF_EXCERPT_CAP:
+            return section
+    return prior_output[-_HANDOFF_EXCERPT_CAP:]
 
 
 # Result phrasings that indicate the agent finished without writing and
@@ -2360,8 +2405,29 @@ async def run_interactive(args: Any) -> int:
         can_resume = not include_history
         effective_session_id = state.session_id if can_resume else None
 
+        # MSTRO-113: execution-style follow-ups ("ok, proceed with the
+        # recommended next steps") get the prior turn's output injected
+        # explicitly.  Native resume carries the conversation but models can
+        # lose anchoring in a long resumed thread and produce adjacent work
+        # instead of executing the stated recommendations.
+        handoff_input = user_input
+        if (
+            not (
+                state.dry_run_next
+                or state.show_plan_next
+                or args.dry_run
+                or args.show_plan
+            )
+            and state.prior_turn_output
+            and _is_execution_follow_up(user_input)
+        ):
+            handoff_input = (
+                f"{user_input}\n\n[Previous turn's output — act on this]\n"
+                f"{_handoff_excerpt(state.prior_turn_output)}"
+            )
+
         prompt = _assemble_prompt(
-            user_input, state.history if include_history else []
+            handoff_input, state.history if include_history else []
         )
         logger.debug(
             "Assembled prompt: %s bytes, history turns=%d, resume=%s",
@@ -2503,6 +2569,11 @@ async def run_interactive(args: Any) -> int:
             # one selected for the turn, and resume eligibility depends on this.
             state.session_runtime = pm.runtime.runtime_name
             print(f"[session: {state.session_id}]")
+
+        # MSTRO-113: keep the tail of this turn's output for handoff to an
+        # execution-style follow-up, even if the session id was not returned.
+        if not dry_run and result.text:
+            state.prior_turn_output = result.text[-_HANDOFF_EXCERPT_CAP:]
 
         # Record that a suggested playbook prompt was executed and advance the
         # milestone status if appropriate.

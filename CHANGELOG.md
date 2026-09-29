@@ -5,6 +5,22 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.4] - 2026-09-29
+
+### Fixed
+- **Explicit turn-to-turn handoff for execution-style follow-ups**
+  (MSTRO-113). Native session resume carries the prior conversation, but in
+  a long resumed thread the model can lose anchoring: a follow-up like "ok,
+  proceed with the recommended next steps" produced adjacent planning work
+  instead of executing the stated recommendations. Each persisted session
+  record now keeps the tail of the turn's final text (`last_output`, capped
+  at 6k chars), and when a short follow-up matches execution intent
+  ("proceed", "continue", "go ahead", "next steps", …) the previous turn's
+  Recommendations/Next-steps section (or tail, capped at 4k chars) is
+  injected into the prompt as `[Previous turn's output — act on this]`.
+  The handoff excerpt is also restored on maestro restart alongside the
+  session id, so it works across restarts, not just within one process.
+
 ## [1.22.3] - 2026-09-29
 
 ### Fixed

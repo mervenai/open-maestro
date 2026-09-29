@@ -111,6 +111,11 @@ class OrchestrationContext:
 
 _MAX_QUOTA_FALLBACKS = 3
 
+# MSTRO-113: how much of a turn's final text is persisted for handoff to a
+# follow-up turn.  Sized to keep the "Recommendations / Next steps" tail that
+# execution-style follow-ups ("ok, proceed with the next steps") refer to.
+_LAST_OUTPUT_CAP = 6000
+
 
 class ProjectManager:
     """Minimal vendor-agnostic PM orchestrator."""
@@ -895,6 +900,9 @@ class ProjectManager:
             tokens_used=self.context_monitor.snapshot.tokens_used,
             input_tokens=self.context_monitor.snapshot.input_tokens,
             output_tokens=self.context_monitor.snapshot.output_tokens,
+            # MSTRO-113: keep the tail of the turn's final text so the next
+            # turn can be handed off explicitly on execution-style follow-ups.
+            last_output=(result.text[-_LAST_OUTPUT_CAP:] if result.text else None),
             metadata={
                 "is_error": result.is_error,
                 "duration_ms": result.duration_ms,

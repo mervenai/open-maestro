@@ -23,6 +23,8 @@ from open_maestro.interactive import (
     _looks_like_decision,
     _maybe_clarify_repo_path,
     _resolve_suggested_prompt,
+    _handoff_excerpt,
+    _is_execution_follow_up,
     _restore_latest_session,
     _strip_plan_prefix,
     _turn_includes_history,
@@ -565,3 +567,54 @@ def test_restore_latest_session_empty_store(tmp_path):
     assert _restore_latest_session(state, store) is None
     assert state.session_id is None
     assert state.session_runtime is None
+
+
+def test_execution_follow_up_matcher() -> None:
+    assert _is_execution_follow_up("ok, proceed with recommendation next steps")
+    assert _is_execution_follow_up("go ahead")
+    assert _is_execution_follow_up("continue with the remaining numbers")
+    assert _is_execution_follow_up("execute the 6 rebasing tasks")
+    # Long prompts carry their own context.
+    assert not _is_execution_follow_up(
+        "proceed with the next steps " + "and also analyze " * 100
+    )
+    # Questions about prior work are not execution requests.
+    assert not _is_execution_follow_up("where did the document editing leave off?")
+
+
+def test_handoff_excerpt_prefers_recommendations_section() -> None:
+    prior = (
+        "# Report\n\nlots of findings text here.\n\n"
+        "## Recommendations\n\n1. Regenerate quotedText verbatim\n"
+        "2. Post the 10 critical comments first\n"
+    )
+    excerpt = _handoff_excerpt(prior)
+    assert excerpt.startswith("## Recommendations")
+    assert "Regenerate quotedText verbatim" in excerpt
+
+
+def test_handoff_excerpt_falls_back_to_tail() -> None:
+    prior = "x" * 10000
+    excerpt = _handoff_excerpt(prior)
+    assert len(excerpt) == 4000
+    assert excerpt == prior[-4000:]
+
+
+def test_restore_latest_session_keeps_prior_output(tmp_path):
+    from datetime import datetime, timezone
+
+    store = SessionStore(base_dirs=[tmp_path])
+    store.save(
+        _make_record(
+            "sess-out",
+            "kimi-cli",
+            updated_at=datetime(2026, 9, 29, tzinfo=timezone.utc),
+        )
+    )
+    rec = store.get("sess-out")
+    rec.last_output = "## Recommendations\n\n1. Do the thing\n"
+    store.save(rec)
+    state = InteractiveState()
+    _restore_latest_session(state, store)
+    assert state.prior_turn_output is not None
+    assert "Do the thing" in state.prior_turn_output
