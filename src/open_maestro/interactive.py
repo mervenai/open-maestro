@@ -135,8 +135,13 @@ class InteractiveState:
     # by typing their number (1-indexed). Each tuple is (prompt_id, title, rendered_text).
     suggested_prompts: list[tuple[str, str, str]] = field(default_factory=list)
     # Prompts queued by /select for execution in subsequent turns.
-    # Each tuple is (prompt_id, rendered_text, edited, title).
-    pending_prompts: list[tuple[str, str, bool, str]] = field(default_factory=list)
+    # Each tuple is (prompt_id, rendered_text, edited, title, read_only).
+    pending_prompts: list[tuple[str, str, bool, str, bool]] = field(
+        default_factory=list
+    )
+    # read_only flags by prompt_id for the most recently suggested prompts,
+    # so queued playbook turns can forbid mutating code repos (MSTRO-109).
+    suggested_prompt_read_only: dict[str, bool] = field(default_factory=dict)
     # Epic/milestone context for the most recently shown suggested prompts.
     current_epic_id: str | None = None
     current_milestone_id: str | None = None
@@ -494,6 +499,9 @@ async def _handle_command(
         state.suggested_prompts = [
             (t.id, t.title, rendered) for t, rendered in prompts
         ]
+        state.suggested_prompt_read_only = {
+            t.id: t.read_only for t, _ in prompts
+        }
         # Show milestone context without the prompt list; the TUI will present
         # the prompts and let the user pick, edit, or skip them in one step.
         info = handle_next_command(Path.cwd(), include_prompts=False)
@@ -517,7 +525,7 @@ async def _handle_command(
         state.suggested_prompts = []
         if not selected:
             return "No prompts selected."
-        pending: list[tuple[str, str, bool, str]] = []
+        pending: list[tuple[str, str, bool, str, bool]] = []
         for prompt_id, title, rendered in selected:
             try:
                 action = await _prompt_action_tui(title)
@@ -536,7 +544,15 @@ async def _handle_command(
                     return "Cancelled."
             text = rendered.strip()
             if text:
-                pending.append((prompt_id, text, edited, title))
+                pending.append(
+                    (
+                        prompt_id,
+                        text,
+                        edited,
+                        title,
+                        state.suggested_prompt_read_only.get(prompt_id, False),
+                    )
+                )
         if not pending:
             return "No prompts selected for execution."
         state.pending_prompts = pending
@@ -573,6 +589,9 @@ async def _handle_command(
             (template.id, template.title, rendered)
             for template, rendered in prompts
         ]
+        state.suggested_prompt_read_only = {
+            template.id: template.read_only for template, _ in prompts
+        }
         history_store = PromptHistoryStore(Path.cwd())
         history_store.backfill_from_artifacts()
         run_history = history_store.load()
@@ -591,7 +610,7 @@ async def _handle_command(
         if not selected:
             return "No prompts selected."
 
-        pending: list[tuple[str, str, bool, str]] = []
+        pending: list[tuple[str, str, bool, str, bool]] = []
         for prompt_id, title, rendered in selected:
             try:
                 action = await _prompt_action_tui(title)
@@ -610,7 +629,15 @@ async def _handle_command(
                     return "Cancelled."
             text = rendered.strip()
             if text:
-                pending.append((prompt_id, text, edited, title))
+                pending.append(
+                    (
+                        prompt_id,
+                        text,
+                        edited,
+                        title,
+                        state.suggested_prompt_read_only.get(prompt_id, False),
+                    )
+                )
         if not pending:
             return "No prompts selected for execution."
         state.pending_prompts = pending
@@ -631,6 +658,9 @@ async def _handle_command(
             state.suggested_prompts = [
                 (t.id, t.title, rendered) for t, rendered in prompts
             ]
+            state.suggested_prompt_read_only = {
+                t.id: t.read_only for t, _ in prompts
+            }
         return result
 
     if cmd == "select":
@@ -654,7 +684,7 @@ async def _handle_command(
         if not selected:
             return "No prompts selected."
         # For each selected prompt, ask execute/edit/skip and queue for execution.
-        pending: list[tuple[str, str, bool, str]] = []
+        pending: list[tuple[str, str, bool, str, bool]] = []
         for prompt_id, title, rendered in selected:
             try:
                 action = await _prompt_action_tui(title)
@@ -675,7 +705,15 @@ async def _handle_command(
                     return "Cancelled."
             text = rendered.strip()
             if text:
-                pending.append((prompt_id, text, edited, title))
+                pending.append(
+                    (
+                        prompt_id,
+                        text,
+                        edited,
+                        title,
+                        state.suggested_prompt_read_only.get(prompt_id, False),
+                    )
+                )
         state.suggested_prompts = []
         if not pending:
             return "No prompts selected for execution."
@@ -2051,12 +2089,17 @@ async def run_interactive(args: Any) -> int:
     while True:
         pending_prompt_id: str | None = None
         pending_edited = False
+        pending_read_only = False
         selected_title: str | None = None
         from_playbook = bool(state.pending_prompts)
         if state.pending_prompts:
-            pending_prompt_id, user_input, pending_edited, selected_title = (
-                state.pending_prompts.pop(0)
-            )
+            (
+                pending_prompt_id,
+                user_input,
+                pending_edited,
+                selected_title,
+                pending_read_only,
+            ) = state.pending_prompts.pop(0)
             _echo_user_prompt(user_input)
         else:
             try:
@@ -2291,6 +2334,7 @@ async def run_interactive(args: Any) -> int:
                         model=turn_model,
                         allowed_tools=args.allowed_tools,
                         blocked_tools=args.block_tools,
+                        read_only=pending_read_only,
                         permission_mode=args.permission_mode,
                         deny_dangerous=args.deny_dangerous,
                         max_turns=args.max_turns,
@@ -2310,6 +2354,7 @@ async def run_interactive(args: Any) -> int:
                 model=turn_model,
                 allowed_tools=args.allowed_tools,
                 blocked_tools=args.block_tools,
+                read_only=pending_read_only,
                 permission_mode=args.permission_mode,
                 deny_dangerous=args.deny_dangerous,
                 max_turns=args.max_turns,

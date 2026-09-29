@@ -218,3 +218,56 @@ def test_after_gated_prompt_shown_with_existing_artifact(gated_project: Path) ->
         gated_project, prompt_history=history
     )
     assert [template.id for template, _ in prompts] == ["design-001", "design-002"]
+
+
+PLAYBOOK_WITH_READ_ONLY = """\
+playbook_id: test-read-only
+version: 1.0.0
+milestone_prompts:
+  design-blueprint:
+    - id: design-002
+      title: Adversarially verify the drafted contract
+      order: 1
+      read_only: true
+      prompt: |
+        Review the contract.
+  implementation:
+    - id: impl-001
+      title: Scaffold endpoints
+      order: 1
+      prompt: |
+        Implement the endpoints.
+"""
+
+
+def test_load_playbook_populates_read_only_field(tmp_project: Path) -> None:
+    """The optional ``read_only`` field loads; default is False (MSTRO-109)."""
+    config_dir = tmp_project / ".open-maestro"
+    config_dir.mkdir()
+    (config_dir / "playbook.yaml").write_text(
+        PLAYBOOK_WITH_READ_ONLY, encoding="utf-8"
+    )
+    playbook = load_playbook(tmp_project)
+    design = {p.id: p for p in playbook.prompts_for("design-blueprint")}
+    impl = {p.id: p for p in playbook.prompts_for("implementation")}
+    assert design["design-002"].read_only is True
+    assert impl["impl-001"].read_only is False
+
+
+def test_default_playbook_tags_analysis_prompts_read_only(tmp_project: Path) -> None:
+    """The bundled playbook marks analysis/pre-dev prompts as read-only."""
+    playbook = load_playbook(tmp_project)
+    by_id = {
+        p.id: p
+        for deck in playbook.decks.values()
+        for p in deck.prompts
+    }
+    assert by_id["intake-001"].read_only is True  # PRD synthesis
+    assert by_id["intake-002"].read_only is True  # reuse assessment
+    assert by_id["intake-003"].read_only is True  # risk register
+    assert by_id["plan-001"].read_only is True  # verify architecture
+    assert by_id["design-002"].read_only is True  # adversarial verification
+    # Build/implementation/QA prompts stay mutating.
+    assert by_id["intake-004"].read_only is False
+    assert by_id["impl-001"].read_only is False
+    assert by_id["qa-001"].read_only is False

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+import subprocess
 from datetime import UTC, datetime
+from pathlib import Path
 
 from open_maestro.agents.definition import AgentDefinition
 from open_maestro.agents.registry import AgentRegistry
@@ -22,6 +25,8 @@ from open_maestro.orchestrator.critic import (
 )
 from open_maestro.orchestrator.pm import ProjectManager
 from open_maestro.runtime.base import AgentConfig, AgentResult, AgentRuntime
+from open_maestro.security import clones as clone_guard_mod
+from open_maestro.security.policy import _MUTATING_TOOLS
 from open_maestro.session.store import SessionRecord, SessionStore
 
 
@@ -894,3 +899,165 @@ class TestSoleAgentDirective:
         assert not result.is_error
         assert runtime.last_prompt is not None
         assert _SOLE_AGENT_DIRECTIVE in runtime.last_prompt
+
+
+class MutatingRuntime(FakeRuntime):
+    """Runtime that appends a line to a tracked clone file on each run."""
+
+    def __init__(self, target: Path):
+        super().__init__()
+        self.target = target
+
+    async def run(self, prompt: str, config: AgentConfig | None = None) -> AgentResult:
+        with self.target.open("a", encoding="utf-8") as fh:
+            fh.write("mutated by agent\n")
+        return await super().run(prompt, config)
+
+
+def _make_clone(project: Path, name: str = "M3Repo") -> Path:
+    """Create a fake nested git clone with one committed tracked file."""
+    clone = project / name
+    clone.mkdir()
+    subprocess.run(["git", "-C", str(clone), "init", "-q"], check=True)
+    tracked = clone / "appsettings.json"
+    tracked.write_text('{"permissions": []}\n', encoding="utf-8")
+    subprocess.run(["git", "-C", str(clone), "add", "."], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(clone),
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "-qm",
+            "init",
+        ],
+        check=True,
+    )
+    return clone
+
+
+class TestReadOnlyPrompts:
+    """MSTRO-109: read_only=True forbids the policy's mutating tools."""
+
+    async def test_read_only_merges_mutating_tools_into_blocked_tools(self):
+        runtime = FakeRuntime()
+        pm = ProjectManager(runtime=runtime, registry=_critic_registry())
+
+        await pm.handle(
+            "verify the drafted contract against the repos",
+            agent_id="engineer",
+            read_only=True,
+        )
+
+        assert runtime.last_blocked_tools is not None
+        assert set(_MUTATING_TOOLS) <= set(runtime.last_blocked_tools)
+        # The merged block set activates the guarded (hook-enforced) path.
+        assert runtime.ran_with_hooks
+
+    async def test_read_only_preserves_explicit_blocked_tools(self):
+        runtime = FakeRuntime()
+        pm = ProjectManager(runtime=runtime, registry=_critic_registry())
+
+        await pm.handle(
+            "verify the drafted contract",
+            agent_id="engineer",
+            read_only=True,
+            blocked_tools=["SomeCustomTool"],
+        )
+
+        blocked = set(runtime.last_blocked_tools or ())
+        assert "SomeCustomTool" in blocked
+        assert "Write" in blocked
+
+    async def test_default_turn_does_not_block_mutating_tools(self):
+        runtime = FakeRuntime()
+        pm = ProjectManager(runtime=runtime, registry=_critic_registry())
+
+        await pm.handle("verify the drafted contract", agent_id="engineer")
+
+        # The agent definition may block tools of its own; read_only=False
+        # must not add the policy's mutating tools to that set.
+        blocked = set(runtime.last_blocked_tools or ())
+        assert not set(_MUTATING_TOOLS) <= blocked
+        assert "Bash" not in blocked
+
+
+class TestCloneGuard:
+    """MSTRO-109: pre-implementation turns revert clone mutations."""
+
+    async def test_pre_impl_milestone_restores_clone_modifications(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        clone = _make_clone(tmp_path)
+        tracked = clone / "appsettings.json"
+        monkeypatch.setattr(
+            clone_guard_mod,
+            "current_inprogress_milestone_ids",
+            lambda p: ["design-blueprint"],
+        )
+        runtime = MutatingRuntime(tracked)
+        pm = ProjectManager(
+            runtime=runtime, registry=_critic_registry(), critic_gate=False
+        )
+
+        result = await pm.handle(
+            "adversarially verify the drafted contract against the clone",
+            agent_id="engineer",
+        )
+
+        assert tracked.read_text(encoding="utf-8") == '{"permissions": []}\n'
+        assert result.is_error is False
+        assert "Clone guard" in result.text
+        assert "M3Repo" in result.text
+        assert "reverted 1 file(s)" in result.text
+
+    async def test_impl_milestone_leaves_clone_modifications(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        clone = _make_clone(tmp_path)
+        tracked = clone / "appsettings.json"
+        monkeypatch.setattr(
+            clone_guard_mod,
+            "current_inprogress_milestone_ids",
+            lambda p: ["implementation"],
+        )
+        runtime = MutatingRuntime(tracked)
+        pm = ProjectManager(
+            runtime=runtime, registry=_critic_registry(), critic_gate=False
+        )
+
+        result = await pm.handle(
+            "adversarially verify the drafted contract against the clone",
+            agent_id="engineer",
+        )
+
+        assert "mutated by agent" in tracked.read_text(encoding="utf-8")
+        assert "Clone guard" not in result.text
+
+    async def test_no_milestone_plan_keeps_guard_active(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        clone = _make_clone(tmp_path)
+        tracked = clone / "appsettings.json"
+        monkeypatch.setattr(
+            clone_guard_mod,
+            "current_inprogress_milestone_ids",
+            lambda p: [],
+        )
+        runtime = MutatingRuntime(tracked)
+        pm = ProjectManager(
+            runtime=runtime, registry=_critic_registry(), critic_gate=False
+        )
+
+        result = await pm.handle(
+            "adversarially verify the drafted contract against the clone",
+            agent_id="engineer",
+        )
+
+        assert tracked.read_text(encoding="utf-8") == '{"permissions": []}\n'
+        assert "Clone guard" in result.text

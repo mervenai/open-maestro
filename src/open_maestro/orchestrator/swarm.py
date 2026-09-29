@@ -64,6 +64,44 @@ _FILE_PATH_RE = re.compile(r"[\w./-]+\.(?:md|py|ts|tsx|js|jsx|yaml|yml|json)")
 _DIR_TOKEN_RE = re.compile(r"[./]?[\w-]+(?:/[\w.-]+)*/?")
 
 
+# Directories that may hold generated artifacts; a not-yet-existing write
+# target is only allowed when its first path segment lands under one of
+# these (case-insensitive).
+_ARTIFACT_DIRS = frozenset(
+    {"docs", "requirements", "prd", "tests", "scripts", "specs"}
+)
+
+# Marker written by interactive._assemble_prompt between the transcript and
+# the actual user input.
+_CURRENT_TASK_MARKER = "\nCurrent task: "
+
+
+def _current_task_text(prompt: str) -> str:
+    """Strip any transcript prefix, keeping only the current user task.
+
+    Interactive mode passes the assembled transcript ("Conversation so
+    far:\nUser: ...\n\nCurrent task: <input>"), so file-path tokens from
+    history would otherwise become write targets. The CLI path has no
+    prefix and is returned unchanged.
+    """
+    idx = prompt.rfind(_CURRENT_TASK_MARKER)
+    if idx == -1:
+        return prompt
+    return prompt[idx + len(_CURRENT_TASK_MARKER):]
+
+
+def _inside_nested_git_repo(path: Path, root: Path) -> bool:
+    """True when *path* sits inside a directory that itself holds a .git
+    entry (a cloned code repo). The project root itself does not count."""
+    directory = path if path.is_dir() else path.parent
+    for parent in (directory, *directory.parents):
+        if parent == root:
+            break
+        if (parent / ".git").exists():
+            return True
+    return False
+
+
 def _extract_dir_tokens(prompt: str) -> list[str]:
     """Directory-looking tokens from the prompt, stripped of punctuation."""
     tokens: list[str] = []
@@ -273,14 +311,30 @@ class SwarmPlanner:
         *folder expansion*: directories named in the prompt are scanned for
         markdown artifacts (docs folders), so "update whatever needs updating
         in docs/" fans out without the user listing every file.
+
+        Extraction runs on the current task only (an interactive transcript
+        prefix, if present, is stripped first), and each target is validated
+        before a worker is created: paths inside nested git repos (code
+        clones) and not-yet-existing paths outside the artifact directories
+        are rejected.
         """
-        targets = self._extract_targets(prompt)
+        targets = self._extract_targets(_current_task_text(prompt))
         targets = targets[:MAX_SWARM_WORKERS]
-        if len(targets) < 3:
+        valid: list[str] = []
+        for target in targets:
+            if self._is_allowed_write_target(target):
+                valid.append(target)
+            else:
+                logger.warning(
+                    "Swarm heuristic: rejecting write target %r "
+                    "(inside a code clone or outside artifact dirs)",
+                    target,
+                )
+        if len(valid) < 3:
             return None
 
         workers: list[SwarmWorker] = []
-        for target in targets:
+        for target in valid:
             agent = self._agent_for_target(target) or first_agent
             if agent is None:
                 continue
@@ -309,6 +363,33 @@ class SwarmPlanner:
                 if rel not in targets:
                     targets.append(rel)
         return targets
+
+    @staticmethod
+    def _is_allowed_write_target(target: str) -> bool:
+        """Gate a heuristic write target before a worker is created for it.
+
+        - Existing paths are allowed unless they sit inside a nested git
+          repository (a cloned code repo); the project root doesn't count.
+        - Not-yet-existing paths are allowed only under a known artifact
+          directory (first path segment, case-insensitive): docs/,
+          requirements/, PRD/, prd/, tests/, scripts/, specs/.
+        - Everything else is rejected.
+        """
+        root = Path.cwd().resolve()
+        path = Path(target)
+        if not path.is_absolute():
+            path = root / path
+        resolved = path.resolve()
+        if _inside_nested_git_repo(resolved, root):
+            return False
+        if resolved.exists():
+            return True
+        try:
+            relative = resolved.relative_to(root)
+        except ValueError:
+            return False
+        parts = relative.parts
+        return bool(parts) and parts[0].lower() in _ARTIFACT_DIRS
 
     def _agent_for_target(self, target: str) -> AgentDefinition | None:
         """Pick an agent for a heuristic worker: documentation for existing

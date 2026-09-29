@@ -15,6 +15,7 @@ from open_maestro.orchestrator.swarm import (
     SwarmPlanner,
     SwarmPlan,
     SwarmWorker,
+    _current_task_text,
 )
 from open_maestro.runtime.base import AgentResult
 
@@ -244,6 +245,188 @@ class TestSwarmPlannerHeuristic:
             "docs/b.md",
             "docs/c.md",
         ]
+
+
+class TestCurrentTaskText:
+    """MSTRO-109 fix 1: heuristic extraction must see the current task only,
+    not file-path tokens from an interactive transcript's history."""
+
+    def test_prompt_without_marker_is_returned_unchanged(self):
+        prompt = "update docs/a.md, docs/b.md, and docs/c.md"
+        assert _current_task_text(prompt) == prompt
+
+    def test_transcript_prefix_is_stripped(self):
+        prompt = (
+            "Conversation so far:\n"
+            "User: fix DefaultRole_SystemAdministrator.js\n"
+            "Assistant: done\n\n"
+            "Current task: summarize the milestone status"
+        )
+        assert _current_task_text(prompt) == "summarize the milestone status"
+
+    def test_history_paths_yield_no_targets(self):
+        prompt = (
+            "Conversation so far:\n"
+            "User: rewrite DefaultRole_SystemAdministrator.js and docs/history.md\n"
+            "Assistant: ok\n\n"
+            "Current task: summarize the milestone status"
+        )
+        planner = SwarmPlanner.__new__(SwarmPlanner)
+        assert planner._extract_targets(_current_task_text(prompt)) == []
+
+    def test_current_task_paths_are_extracted(self, tmp_path, monkeypatch):
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        for name in ("a.md", "b.md", "c.md"):
+            (docs / name).write_text("# doc\n")
+        monkeypatch.chdir(tmp_path)
+        prompt = (
+            "Conversation so far:\n"
+            "User: fix DefaultRole_SystemAdministrator.js\n"
+            "Assistant: done\n\n"
+            "Current task: update docs/a.md, docs/b.md, and docs/c.md"
+        )
+        planner = SwarmPlanner.__new__(SwarmPlanner)
+        assert planner._extract_targets(_current_task_text(prompt)) == [
+            "docs/a.md",
+            "docs/b.md",
+            "docs/c.md",
+        ]
+
+
+class TestHeuristicCurrentTaskOnly:
+    """Assembled-transcript regression: history must not feed the heuristic."""
+
+    async def test_history_only_paths_do_not_swarm(self, swarm_registry):
+        """Before the fix, the two history paths + the .js hallucination would
+        fan out; with current-task-only extraction there are no targets."""
+        prompt = (
+            "Conversation so far:\n"
+            "User: please update docs/impact.md and docs/map.md and fix "
+            "DefaultRole_SystemAdministrator.js\n"
+            "Assistant: I updated DefaultRole_SystemAdministrator.js\n\n"
+            "Current task: give me a quick summary of where we are"
+        )
+        planner = SwarmPlanner(
+            runtime=FakeRuntime("not json"), registry=swarm_registry
+        )
+        assert await planner.plan(prompt) is None
+
+    async def test_doc_only_current_task_swarms_without_history_target(
+        self, swarm_registry, tmp_path, monkeypatch
+    ):
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        for name in ("a.md", "b.md", "c.md"):
+            (docs / name).write_text("# doc\n")
+        monkeypatch.chdir(tmp_path)
+        prompt = (
+            "Conversation so far:\n"
+            "User: fix DefaultRole_SystemAdministrator.js\n"
+            "Assistant: done\n\n"
+            "Current task: update docs/a.md, docs/b.md, and docs/c.md"
+        )
+        planner = SwarmPlanner(
+            runtime=FakeRuntime("not json"), registry=swarm_registry
+        )
+        plan = await planner.plan(prompt)
+        assert plan is not None
+        targets = [w.target_file for w in plan.workers]
+        assert sorted(targets) == ["docs/a.md", "docs/b.md", "docs/c.md"]
+        assert not any("DefaultRole_SystemAdministrator" in t for t in targets)
+
+
+class TestWriteTargetValidation:
+    """MSTRO-109 fix 2: _is_allowed_write_target gates heuristic targets."""
+
+    def test_existing_file_inside_nested_git_repo_rejected(
+        self, tmp_path, monkeypatch
+    ):
+        clone = tmp_path / "clone"
+        (clone / ".git").mkdir(parents=True)
+        (clone / "src").mkdir()
+        (clone / "src" / "app.js").write_text("// x\n")
+        monkeypatch.chdir(tmp_path)
+        assert (
+            SwarmPlanner._is_allowed_write_target("clone/src/app.js") is False
+        )
+
+    def test_nonexistent_path_inside_nested_git_repo_rejected(
+        self, tmp_path, monkeypatch
+    ):
+        clone = tmp_path / "clone"
+        (clone / ".git").mkdir(parents=True)
+        monkeypatch.chdir(tmp_path)
+        assert SwarmPlanner._is_allowed_write_target("clone/new.md") is False
+
+    def test_nonexistent_under_docs_allowed(self, tmp_path, monkeypatch):
+        (tmp_path / "docs").mkdir()
+        monkeypatch.chdir(tmp_path)
+        assert SwarmPlanner._is_allowed_write_target("docs/new.md") is True
+
+    def test_nonexistent_at_repo_root_rejected(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        assert SwarmPlanner._is_allowed_write_target("new.md") is False
+
+    def test_existing_file_at_repo_root_allowed(self, tmp_path, monkeypatch):
+        (tmp_path / "a.md").write_text("# a\n")
+        monkeypatch.chdir(tmp_path)
+        assert SwarmPlanner._is_allowed_write_target("a.md") is True
+
+    def test_project_root_git_dir_does_not_count(self, tmp_path, monkeypatch):
+        (tmp_path / ".git").mkdir()
+        (tmp_path / "a.md").write_text("# a\n")
+        monkeypatch.chdir(tmp_path)
+        assert SwarmPlanner._is_allowed_write_target("a.md") is True
+
+
+class TestHeuristicWriteTargetValidation:
+    async def test_three_doc_targets_swarm(self, swarm_registry, tmp_path, monkeypatch):
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        for name in ("a.md", "b.md", "c.md"):
+            (docs / name).write_text("# doc\n")
+        monkeypatch.chdir(tmp_path)
+        planner = SwarmPlanner(
+            runtime=FakeRuntime("not json"), registry=swarm_registry
+        )
+        plan = await planner.plan("update docs/a.md, docs/b.md, and docs/c.md")
+        assert plan is not None
+        assert len(plan.workers) == 3
+
+    async def test_code_repo_target_dropped_below_three(
+        self, swarm_registry, tmp_path, monkeypatch
+    ):
+        """2 doc targets + 1 real code file inside a cloned repo: the code
+        worker is dropped, leaving fewer than 3 → no swarm."""
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        for name in ("a.md", "b.md"):
+            (docs / name).write_text("# doc\n")
+        clone = tmp_path / "clone"
+        (clone / ".git").mkdir(parents=True)
+        (clone / "app.js").write_text("// x\n")
+        monkeypatch.chdir(tmp_path)
+        planner = SwarmPlanner(
+            runtime=FakeRuntime("not json"), registry=swarm_registry
+        )
+        plan = await planner.plan("update docs/a.md, docs/b.md, and clone/app.js")
+        assert plan is None
+
+    async def test_folder_expansion_inside_code_clone_rejected(
+        self, swarm_registry, tmp_path, monkeypatch
+    ):
+        """Folder expansion over a cloned repo's markdown must be validated
+        the same way as explicit file targets."""
+        clone = tmp_path / "clone"
+        (clone / ".git").mkdir(parents=True)
+        for name in ("a.md", "b.md", "c.md"):
+            (clone / name).write_text("# doc\n")
+        monkeypatch.chdir(tmp_path)
+        planner = SwarmPlanner(
+            runtime=FakeRuntime("not json"), registry=swarm_registry
+        )
+        assert await planner.plan(f"update the markdown in {clone}") is None
 
 
 class TestSwarmExecutor:

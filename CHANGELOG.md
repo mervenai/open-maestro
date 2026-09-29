@@ -5,6 +5,34 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.0] - 2026-09-29
+
+### Fixed
+- **Swarm heuristic planner no longer writes into code repos from stale
+  history tokens.** In interactive mode the prompt carries the full
+  transcript ("Conversation so far: … Current task: …"), and the heuristic
+  swarm planner's target extraction scanned all of it — a stale, hallucinated
+  `DefaultRole_SystemAdministrator.js` token from an earlier turn became a
+  write target during two doc-only tasks, and workers appended permission
+  rows to `DefaultRole_*.json` inside a cloned repo. Target extraction now
+  considers only the current task (`_current_task_text`), and heuristic write
+  targets are validated: existing paths inside nested git repositories are
+  rejected, and non-existent paths are only allowed under artifact dirs
+  (`docs/`, `requirements/`, `prd/`, `tests/`, `scripts/`, `specs/`).
+  (MSTRO-109)
+
+### Added
+- **Read-only guardrails for pre-dev phases.** Playbook prompts support
+  `read_only: true` (tagged on intake-001/002/003, plan-001, design-002);
+  the mutating-tool set (Write/Edit/Bash/…) is merged into `blocked_tools`,
+  hard-enforced on openai-sdk/claude-sdk/ACP and system-prompt-enforced on
+  kimi-cli. Independently, a clone guard snapshots nested git-repo clones
+  under the project before each turn and auto-reverts tracked modifications
+  (`git checkout -- .`) after the turn while the current milestone is a
+  pre-implementation phase (intake through build-planning; active by default
+  when no plan exists). Untracked files are never touched. Disable with
+  `MAESTRO_CLONE_GUARD=off`. (MSTRO-109)
+
 ## [1.21.3] - 2026-09-27
 
 ### Fixed

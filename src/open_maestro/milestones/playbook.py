@@ -34,6 +34,9 @@ class PromptTemplate:
     artifact_target: str = ""
     example_from: str = ""
     default_track_only: bool = False
+    # MSTRO-109: prompt must not mutate cloned code repos (analysis/pre-dev
+    # turns). Docs/artifact writes under the project stay allowed.
+    read_only: bool = False
     after: str | None = None  # id of the prompt that must have run first
 
     def __post_init__(self) -> None:
@@ -149,6 +152,7 @@ def load_playbook(
                     artifact_target=item.get("artifact_target", ""),
                     example_from=item.get("example_from", ""),
                     default_track_only=item.get("default_track_only", False),
+                    read_only=item.get("read_only", False),
                     after=item.get("after"),
                 )
             )

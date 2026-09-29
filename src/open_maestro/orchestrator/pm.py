@@ -47,7 +47,8 @@ from open_maestro.runtime.availability import is_model_available
 from open_maestro.runtime.base import AgentConfig, AgentResult, AgentRuntime
 from open_maestro.runtime.factory import create_runtime, select_runtime_for_task
 from open_maestro.runtime.latency import record_result
-from open_maestro.security.policy import PermissionPolicy, evaluate
+from open_maestro.security import clones as clone_guard_mod
+from open_maestro.security.policy import PermissionPolicy, _MUTATING_TOOLS, evaluate
 from open_maestro.session.store import SessionRecord, SessionStore
 from open_maestro.todos.store import TodoStore
 
@@ -150,6 +151,7 @@ class ProjectManager:
         model: str | None = None,
         allowed_tools: list[str] | None = None,
         blocked_tools: list[str] | None = None,
+        read_only: bool = False,
         permission_mode: str | None = None,
         deny_dangerous: bool = False,
         max_turns: int | None = None,
@@ -257,6 +259,26 @@ class ProjectManager:
         if ctx.selected_agent.required_capabilities is not None:
             profile = ctx.selected_agent.required_capabilities.merge_into_profile(profile)
 
+        # MSTRO-109: read-only playbook prompts (analysis/pre-dev turns) must
+        # not mutate code repos. Merge the policy's mutating tools into the
+        # blocked set so every runtime path (single, chain, swarm) enforces
+        # it; the guard text then also lands in the system prompt.
+        if read_only:
+            merged_blocked = set(blocked_tools or ())
+            merged_blocked.update(_MUTATING_TOOLS)
+            blocked_tools = sorted(merged_blocked)
+
+        # MSTRO-109: during pre-implementation milestones, snapshot nested
+        # code-repo clones before the turn and revert any new tracked
+        # modifications afterwards (swarm workers once wrote into clone JSON
+        # files during design-blueprint). Skipped for dry runs.
+        clone_repos: list[Path] = []
+        clone_snapshots: dict[Path, set[str]] | None = None
+        if not dry_run and clone_guard_mod.clone_guard_active(Path.cwd()):
+            clone_repos = clone_guard_mod.find_clone_repos(Path.cwd())
+            if clone_repos:
+                clone_snapshots = clone_guard_mod.snapshot_clones(clone_repos)
+
         # 5-9. Execute once, then degrade gracefully: when a model's quota is
         #     exhausted mid-task, remember it on the session circuit breaker
         #     and re-run with the next capable model instead of dead-ending
@@ -344,6 +366,22 @@ class ProjectManager:
                 "use /model to pick one explicitly."
                 f"\n\n{result.text}"
             )
+
+        # MSTRO-109: the agent (and any critic passes) have run; revert any
+        # new tracked modifications in cloned repos made during this turn.
+        if clone_snapshots is not None:
+            for clone, files in clone_guard_mod.restore_modified_clones(
+                clone_repos, clone_snapshots
+            ):
+                shown = ", ".join(files[:10]) + (
+                    " ..." if len(files) > 10 else ""
+                )
+                warning = (
+                    f"Clone guard: '{clone.name}' was modified during this "
+                    f"analysis turn; reverted {len(files)} file(s): {shown}"
+                )
+                logger.warning("%s", warning)
+                result.text += f"\n\n---\n⚠️ {warning}"
 
         # 10. Credit the vendor and model used for this turn.
         if not dry_run and not result.is_error and not ctx.executed_as_chain:

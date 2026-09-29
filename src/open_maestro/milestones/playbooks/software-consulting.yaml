@@ -12,6 +12,7 @@ milestone_prompts:
       order: 1
       agent_hint: researcher
       tags: [discover]
+      read_only: true
       artifact_target: docs/intake/synthesis-{date}.md
       prompt: |
         Read the PRD/RFP in the requirements/ folder and any linked documents.
@@ -29,6 +30,7 @@ milestone_prompts:
       order: 2
       agent_hint: researcher
       tags: [discover, architecture]
+      read_only: true
       artifact_target: docs/intake/reuse-assessment.md
       prompt: |
         Search the codebase for existing capabilities that could be reused for this feature.
@@ -40,6 +42,7 @@ milestone_prompts:
       order: 3
       agent_hint: researcher
       tags: [discover, planning]
+      read_only: true
       artifact_target: docs/intake/risk-register.md
       prompt: |
         Based on the PRD, synthesis, and reuse assessment, create a risk register.
@@ -68,6 +71,7 @@ milestone_prompts:
       order: 1
       agent_hint: researcher
       tags: [discover, architecture]
+      read_only: true
       artifact_target: docs/execution-plan-{date}.md
       prompt: |
         First, re-verify the intake synthesis's load-bearing claims (reuse assets, contract assumptions, reuse instructions) against the actual repos; flag every claim that fails re-verification before proceeding.
@@ -118,6 +122,7 @@ milestone_prompts:
       order: 2
       agent_hint: researcher
       tags: [verify, backend]
+      read_only: true
       artifact_target: docs/adversarial-review.md
       default_track_only: true
       after: design-001
