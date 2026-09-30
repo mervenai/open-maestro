@@ -5,6 +5,49 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.23.0] - 2026-09-29
+
+### Added
+- **Adversarial review package** (`open_maestro.review`, MSTRO-115..120).
+  Evaluation of the existing critic gate vs. the skill-share review
+  discipline vs. karpathy/llm-council concluded: adopt the skill-share
+  core, keep the critic gate as the per-turn tripwire, skip llm-council as
+  a dependency (only its anonymized cross-ranking was cherry-picked).
+  - `review.personas` (MSTRO-116): the 7 fresh-agent audit prompts
+    (blind-reader, fidelity, quote-context, noise, delta, reader-roles,
+    comment-audit), model-agnostic with `$placeholder` substitution and a
+    mandatory machine-parseable `RESULT k=v` line per persona.
+  - `review.gate` (MSTRO-117): RESULT-line parser, numeric THRESHOLDS per
+    persona, append-only audit ledger keyed to the artifact's sha256 (any
+    edit stales every record), and the carry/delta mechanism — full
+    re-audits never converge, so after a round the delta persona checks
+    only changed lines and clean records carry to the fixed version.
+  - `review.panel` (MSTRO-118): multi-model adversarial panel seated with
+    the 3 existing model families (Kimi k3 / GLM-5.3-Flash / Claude), one
+    attack lens per seat (Falsifier / Practitioner skeptic / Steel-Man).
+    Claims are routed E/Q/W/J before the panel — only Judgment questions
+    go to models; Executable/Queryable/Web claims are returned for tool
+    verification. Cross-ranking is anonymized; reviewer scoring discards
+    zero-finding voices (never counted as approval); errored/silent seats
+    are recorded as unreachable — silence is not consent. The chairman is
+    never GLM; GLM balance exhaustion degrades to the remaining voices.
+  - `review.blueprint` (MSTRO-119): deep review of design artifacts
+    (`docs/blueprint*`, `*contract*`, `*spec*`) with the admission bar
+    (a finding enters the register only with a failure scenario or a
+    security/tenant-isolation/audit/irreversibility marker) and the
+    "resolve, don't list" resolution pack for round 2+. Wired into the
+    milestone exit: `/complete` on a milestone owning blueprint artifacts
+    refuses while the review gate is unpassed (`--force` overrides), and
+    `/next` shows a non-blocking advisory. New CLI command:
+    `maestro --review <doc.md>` runs the gating personas and exits
+    non-zero unless every gate passes on the current bytes.
+  - `review.calibrate` (MSTRO-120): calibration harness that plants 6
+    sentinel-marked defect classes (count-framing, invented-detail,
+    overstatement, contradiction, status-flip, wrong-section-ref) into a
+    copy of a real artifact and scores per-persona recall deterministically.
+    CLI: `python -m open_maestro.review.calibrate <doc> --persona fidelity`.
+    A missed defect class requires a prompt change or a code check.
+
 ## [1.22.5] - 2026-09-29
 
 ### Fixed

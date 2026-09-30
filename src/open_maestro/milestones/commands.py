@@ -140,6 +140,13 @@ def _format_missing(milestone: Milestone, suggestion: Any) -> str:
     )
 
 
+def gate_advisory(project_path: Path) -> str:
+    """Non-blocking review-gate advisory for in-progress milestones."""
+    from open_maestro.review.blueprint import gate_advisory as _advisory
+
+    return _advisory(project_path)
+
+
 def handle_next_command(project_path: Path, include_prompts: bool = True) -> str:
     """Suggest the next concrete action based on milestone state.
 
@@ -172,6 +179,9 @@ def handle_next_command(project_path: Path, include_prompts: bool = True) -> str
             missing = _format_missing(milestone, suggestions.get((epic_id, milestone.id)))
             if missing:
                 lines.append(missing)
+            advisory = gate_advisory(project_path)
+            if advisory:
+                lines.append(advisory)
             if not include_prompts:
                 continue
             prompt_pairs = get_prompts_for_milestone(
@@ -242,6 +252,18 @@ def handle_complete_command(project_path: Path, args: list[str]) -> str:
             f"Missing: {missing}\n"
             f"Run `/complete {epic_id}/{milestone.id} --force` to mark it complete anyway."
         )
+
+    if not force:
+        from open_maestro.review.blueprint import milestone_review_problems
+
+        review_problems = milestone_review_problems(project_path, milestone)
+        if review_problems:
+            listed = "\n".join(f"  - {p}" for p in review_problems)
+            return (
+                f"Adversarial review gate not passed for '{milestone.name}' in {epic_id}.\n"
+                f"The design artifacts below have no passing audit on their current bytes:\n{listed}\n"
+                f"Run `maestro --review <doc>` (then `/complete ... --force` to override)."
+            )
 
     milestone.status = MilestoneStatus.COMPLETED
     milestone.completed_at = date.today()

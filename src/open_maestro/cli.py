@@ -302,6 +302,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Add a Git source for skills and exit",
     )
     parser.add_argument(
+        "--review",
+        metavar="DOC",
+        help=(
+            "Run the adversarial review personas (blind-reader, fidelity, "
+            "quote-context) against a design artifact and record the gate. "
+            "Exit 0 only if every persona passes."
+        ),
+    )
+    parser.add_argument(
         "--remove-agent-source",
         metavar="NAME",
         help="Remove an agent source by name and exit",
@@ -451,6 +460,32 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+async def _run_review_command(args: argparse.Namespace) -> int:
+    """`maestro --review <doc>`: run the gating personas and print the verdict."""
+    from open_maestro.review.blueprint import deep_review
+    from open_maestro.review.gate import GateLedger
+
+    doc = Path(args.review).expanduser().resolve()
+    if not doc.is_file():
+        print(f"Review target not found: {doc}", file=sys.stderr)
+        return 2
+    project = Path.cwd()
+    review = await deep_review(doc, project_path=project)
+    print(review.register_text())
+    problems = GateLedger().for_project(project).check(doc)
+    if review.errors:
+        print("\nErrors:")
+        for persona, err in review.errors.items():
+            print(f"  - {persona}: {err}")
+    if problems:
+        print("\nGate: FAIL")
+        for p in problems:
+            print(f"  - {p}")
+        return 1
+    print("\nGate: all required audits passed on this version")
+    return 0
+
+
 async def main_async() -> int:
     parser = _build_parser()
     args = parser.parse_args()
@@ -589,6 +624,9 @@ async def main_async() -> int:
 
     if args.interactive:
         return await run_interactive(args)
+
+    if args.review:
+        return await _run_review_command(args)
 
     source_registry = SourceRegistry.load()
     source_action = (
