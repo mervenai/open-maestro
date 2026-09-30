@@ -5,7 +5,11 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.23.0] - 2026-09-29
+## [2.0.0] - 2026-09-29
+
+Major release: the adversarial review layer turns maestro from a
+single-reviewer pipeline (critic gate) into a disciplined multi-reviewer
+system with measured, machine-enforced quality gates.
 
 ### Added
 - **Adversarial review package** (`open_maestro.review`, MSTRO-115..120).
