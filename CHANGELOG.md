@@ -5,6 +5,22 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-09-29
+
+### Fixed
+- **Interactive prompt never reappearing after a long-running task**
+  (`maestro --interactive`). The Esc-cancel keyboard listener was an
+  `asyncio.to_thread` coroutine "cancelled" with `task.cancel()`, which
+  does not stop the thread — it only noticed completion via a `task.done()`
+  poll (up to 0.2 s late) and then restored termios with `TCSADRAIN`,
+  blocking behind the large output drain a long task leaves pending. The
+  restore-to-cooked-mode landed inside the *next* prompt_toolkit session's
+  raw-mode setup, so the `> ` prompt never painted until the user pressed a
+  key to force a repaint. Fixed with a deterministic `threading.Event`
+  stop, a named daemon thread, a real `join` before returning to the prompt
+  loop, and `TCSANOW` for the restore. Regression test added
+  (`tests/test_interrupt_thread.py`).
+
 ## [2.0.0] - 2026-09-29
 
 Major release: the adversarial review layer turns maestro from a

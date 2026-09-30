@@ -7,6 +7,7 @@ conversation history and a single session across turns.
 from __future__ import annotations
 
 import asyncio
+import threading
 import json
 import logging
 import os
@@ -1622,6 +1623,7 @@ async def _run_with_interrupt(coro: Any, indicator: ProgressIndicator | None = N
 
     task: asyncio.Task[Any] = asyncio.create_task(coro)
     cancelled_by_user = False
+    stop_event = threading.Event()
 
     def _keyboard_listener() -> None:
         nonlocal cancelled_by_user
@@ -1631,7 +1633,13 @@ async def _run_with_interrupt(coro: Any, indicator: ProgressIndicator | None = N
             tty.setcbreak(fd)
             esc_count = 0
             last_esc = 0.0
-            while not task.done():
+            # Stop on the event (set in the finally below) as well as on
+            # task completion: relying on task.done() alone leaves the
+            # thread alive after the turn, and its deferred termios restore
+            # then lands inside the NEXT prompt session's raw-mode setup —
+            # the terminal flips to cooked mode under prompt_toolkit and
+            # the prompt never reappears until the user presses Enter.
+            while not stop_event.is_set() and not task.done():
                 ready, _, _ = select.select([fd], [], [], 0.2)
                 if not ready:
                     continue
@@ -1662,11 +1670,17 @@ async def _run_with_interrupt(coro: Any, indicator: ProgressIndicator | None = N
                     esc_count = 0
         finally:
             try:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+                # TCSANOW, not TCSADRAIN: DRAIN blocks behind any pending
+                # output drain, which after a long task can postpone this
+                # restore into the next prompt session (same race as above).
+                termios.tcsetattr(fd, termios.TCSANOW, old)
             except Exception:
                 pass
 
-    listener = asyncio.create_task(asyncio.to_thread(_keyboard_listener))
+    listener_thread = threading.Thread(
+        target=_keyboard_listener, name="maestro-esc-listener", daemon=True
+    )
+    listener_thread.start()
     try:
         return await task
     except asyncio.CancelledError:
@@ -1674,11 +1688,10 @@ async def _run_with_interrupt(coro: Any, indicator: ProgressIndicator | None = N
             raise TUICancelled("Execution cancelled")
         raise
     finally:
-        listener.cancel()
-        try:
-            await listener
-        except asyncio.CancelledError:
-            pass
+        stop_event.set()
+        # Wait until the listener has actually exited AND restored the
+        # terminal before returning control to the prompt loop.
+        await asyncio.to_thread(listener_thread.join, 5.0)
 
 
 def _add_escape_binding(question: Any) -> None:
