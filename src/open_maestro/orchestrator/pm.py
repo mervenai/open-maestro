@@ -756,6 +756,21 @@ class ProjectManager:
                         max_turns=max_turns,
                         mcp_servers=mcp_servers,
                     )
+            # 9.7 Auto deep review: milestone-significant blueprint changes
+            #    (new artifact, big edit, or version-marker change) get the
+            #    3-persona adversarial audit + gate ledger record (MSTRO-123).
+            from open_maestro.review import blueprint as review_bp
+
+            if review_bp.auto_review_enabled():
+                deep_targets = review_bp.select_deep_review_targets(
+                    Path.cwd(),
+                    critic_mod._detect_changes(Path.cwd(), before_ref),
+                    before_ref=before_ref,
+                )
+                if deep_targets:
+                    result = await self._run_deep_review_pass(
+                        ctx, result, deep_targets
+                    )
 
         return result, config, resolved_model
 
@@ -1450,6 +1465,58 @@ class ProjectManager:
             verdict,
             len(findings),
         )
+        return result
+
+    async def _run_deep_review_pass(
+        self,
+        ctx: OrchestrationContext,
+        result: AgentResult,
+        targets: list[tuple[Path, str]],
+    ) -> AgentResult:
+        """Run the 3-persona deep review on *targets* and record the register.
+
+        Each doc gets fresh isolated persona agents (they have not seen the
+        author's reasoning) via ``review.blueprint.deep_review``, which also
+        writes RESULT lines to the gate ledger — the same ledger the
+        ``/complete`` milestone gate checks. Failures degrade to a note;
+        they never fail the turn.
+        """
+        from open_maestro.review.blueprint import deep_review
+
+        for doc, reason in targets:
+            logger.info("Deep review triggered on %s (%s)", doc, reason)
+            try:
+                review = await deep_review(doc, project_path=Path.cwd())
+            except Exception as exc:  # noqa: BLE001 — review must not crash the turn
+                logger.warning("Deep review failed on %s: %s", doc, exc)
+                result.text += (
+                    f"\n\n---\nDeep review ({doc.name}): failed to run: {exc}"
+                )
+                continue
+            status = "PASS" if review.passed else "FAIL"
+            result.text += (
+                f"\n\n---\nDeep review ({doc.name}): {status} — {reason}\n"
+                f"{review.register_text()}"
+            )
+            result.metadata.setdefault("deep_reviews", []).append(
+                {
+                    "doc": str(doc),
+                    "reason": reason,
+                    "passed": review.passed,
+                    "personas": {
+                        persona: verdict
+                        for persona, (verdict, _fails) in review.persona_verdicts.items()
+                    },
+                    "errors": review.errors,
+                }
+            )
+            logger.info(
+                "Deep review on %s: %s (%d personas, %d errored)",
+                doc,
+                status,
+                len(review.persona_verdicts),
+                len(review.errors),
+            )
         return result
 
     def _select_writer_agent(self, task_description: str = "") -> AgentDefinition | None:

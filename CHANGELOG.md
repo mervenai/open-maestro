@@ -5,6 +5,31 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-10-01
+
+### Added
+- **Auto-invoked deep review for milestone-significant blueprint changes**
+  (MSTRO-123). `deep_review` (the 3-persona adversarial audit with
+  `GateLedger` recording) previously only ran via explicit
+  `maestro --review <doc>` or the `/complete` gate, making it easy to
+  forget — the v3.0 blueprint passed the cheap per-turn artifact-critic
+  pass while a manual review found 15 issues (13 accepted). The PM turn
+  pipeline now runs it automatically (stage 9.7, after the artifact-critic
+  tripwire) when a changed artifact matches the blueprint patterns and ANY
+  trigger holds:
+  - **new artifact** (`git ls-files` detects untracked files that
+    `git diff` misses), or
+  - **volume**: >= 150 changed lines (`MAESTRO_DEEP_REVIEW_MIN_LINES`), or
+  - **version-marker change** (`vN.N` / `Version:` / `supersedes`) in the
+    first 50 lines of the document.
+  Suppressed when `MAESTRO_DEEP_REVIEW=off`, when no in-progress milestone
+  owns blueprint artifacts, or when the ledger already holds a passing
+  audit for the artifact's current bytes. The persona register summary is
+  appended to the turn result and per-doc verdicts recorded in metadata;
+  review failures degrade to a note and never fail the turn. The
+  `/complete` ledger gate remains the enforcement point. 7 regression
+  tests added.
+
 ## [2.0.2] - 2026-10-01
 
 ### Fixed

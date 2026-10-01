@@ -7,12 +7,14 @@ from pathlib import Path
 import pytest
 
 from open_maestro.review import calibrate, gate, panel
+from open_maestro.review import blueprint as review_blueprint
 from open_maestro.review.blueprint import (
     admission_summary,
     deep_review,
     find_blueprint_artifacts,
     milestone_review_problems,
     resolution_pack,
+    select_deep_review_targets,
 )
 from open_maestro.review.personas import PERSONAS, READER_ROLES, render
 from open_maestro.runtime.base import AgentConfig, AgentResult, AgentRuntime
@@ -585,3 +587,98 @@ class TestCalibrate:
         assert result.recall, "planted defects should be scored"
         # Fake runtime never emits the sentinel, so nothing is caught.
         assert result.recall_rate == 0.0
+
+
+# ---------------------------------------------------------------- auto deep review
+
+
+def _make_git_project(tmp_path):
+    """A git repo with one tracked blueprint artifact."""
+    import subprocess
+
+    def git(*args):
+        subprocess.run(
+            ["git", *args], cwd=tmp_path, check=True, capture_output=True
+        )
+
+    git("init", "-q")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "test")
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    doc = docs / "blueprint-x.md"
+    doc.write_text("Version: 1.0\n\n" + "filler line\n" * 100)
+    git("add", "-A")
+    git("commit", "-qm", "init")
+    return doc
+
+
+class TestSelectDeepReviewTargets:
+    def test_new_untracked_artifact_triggers(self, tmp_path, monkeypatch):
+        _make_git_project(tmp_path)
+        monkeypatch.setattr(
+            review_blueprint, "blueprint_milestone_in_progress", lambda p: True
+        )
+        (tmp_path / "docs" / "blueprint-new.md").write_text("# New contract\n" * 40)
+        targets = select_deep_review_targets(tmp_path, [])
+        assert len(targets) == 1
+        assert targets[0][0].name == "blueprint-new.md"
+        assert targets[0][1] == "new blueprint artifact"
+
+    def test_large_change_triggers(self, tmp_path, monkeypatch):
+        doc = _make_git_project(tmp_path)
+        monkeypatch.setattr(
+            review_blueprint, "blueprint_milestone_in_progress", lambda p: True
+        )
+        with doc.open("a") as fh:
+            fh.write("added line\n" * 200)
+        targets = select_deep_review_targets(
+            tmp_path, [("docs/blueprint-x.md", 200)]
+        )
+        assert [t[1] for t in targets] == ["200 changed lines (>= 150)"]
+
+    def test_version_marker_change_triggers(self, tmp_path, monkeypatch):
+        doc = _make_git_project(tmp_path)
+        monkeypatch.setattr(
+            review_blueprint, "blueprint_milestone_in_progress", lambda p: True
+        )
+        doc.write_text(
+            doc.read_text().replace("Version: 1.0", "Version: 2.0", 1)
+        )
+        targets = select_deep_review_targets(tmp_path, [("docs/blueprint-x.md", 1)])
+        assert [t[1] for t in targets] == ["version marker changed"]
+
+    def test_small_edit_without_marker_skips(self, tmp_path, monkeypatch):
+        doc = _make_git_project(tmp_path)
+        monkeypatch.setattr(
+            review_blueprint, "blueprint_milestone_in_progress", lambda p: True
+        )
+        with doc.open("a") as fh:
+            fh.write("minor clarification\n")
+        assert select_deep_review_targets(tmp_path, [("docs/blueprint-x.md", 1)]) == []
+
+    def test_kill_switch_disables(self, tmp_path, monkeypatch):
+        _make_git_project(tmp_path)
+        monkeypatch.setattr(
+            review_blueprint, "blueprint_milestone_in_progress", lambda p: True
+        )
+        monkeypatch.setenv("MAESTRO_DEEP_REVIEW", "off")
+        (tmp_path / "docs" / "blueprint-new.md").write_text("# New\n")
+        assert select_deep_review_targets(tmp_path, []) == []
+
+    def test_no_in_progress_blueprint_milestone_skips(self, tmp_path, monkeypatch):
+        _make_git_project(tmp_path)
+        monkeypatch.setattr(
+            review_blueprint, "blueprint_milestone_in_progress", lambda p: False
+        )
+        (tmp_path / "docs" / "blueprint-new.md").write_text("# New\n")
+        assert select_deep_review_targets(tmp_path, []) == []
+
+    def test_current_ledger_audit_suppresses(self, tmp_path, monkeypatch):
+        _make_git_project(tmp_path)
+        monkeypatch.setattr(
+            review_blueprint, "blueprint_milestone_in_progress", lambda p: True
+        )
+        (tmp_path / "docs" / "blueprint-new.md").write_text("# New\n")
+        monkeypatch.setattr(review_blueprint.GateLedger, "check", lambda self, doc, profile="review": [])
+        assert select_deep_review_targets(tmp_path, []) == []

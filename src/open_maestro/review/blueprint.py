@@ -22,7 +22,9 @@ from __future__ import annotations
 
 import fnmatch
 import logging
+import os
 import re
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -38,6 +40,18 @@ BLUEPRINT_PATTERNS: tuple[str, ...] = (
     "docs/*contract*.md",
     "docs/*spec*.md",
 )
+
+# Auto deep-review thresholds (MSTRO-123). The per-turn artifact-critic gate
+# stays at its cheap 50-line tripwire; the 3-persona deep review is an order
+# of magnitude more expensive, so it only fires when the change is
+# milestone-significant. All knobs are env-tunable, mirroring the
+# MAESTRO_ARTIFACT_* convention.
+DEFAULT_DEEP_REVIEW_MIN_LINES = 150
+DEEP_REVIEW_HEADER_LINES = 50  # version-marker window from the top of the file
+
+# A changed line in the header region that looks like a deliberate version
+# event (v3.1, "Version: 2.0", "supersedes ...") — not just any number pair.
+VERSION_MARKER_RE = re.compile(r"(?i)(version\s*[:=]?\s*v?\d|\bv\d+\.\d|supersedes)")
 
 # Personas that gate a blueprint artifact (the "review" profile minus noise
 # triage and panel, which run separately or by the caller).
@@ -79,6 +93,168 @@ def find_blueprint_artifacts(project_path: str | Path) -> list[Path]:
     for pattern in BLUEPRINT_PATTERNS:
         found.extend(p for p in root.glob(pattern) if p.is_file())
     return sorted(set(found))
+
+
+def auto_review_enabled() -> bool:
+    """Whether the auto deep-review may run (default on, MSTRO-123).
+
+    Mirrors the ``MAESTRO_ARTIFACT_CRITIC`` kill-switch convention: set
+    ``MAESTRO_DEEP_REVIEW=off`` (also "0", "false", "no") to disable the
+    auto-invocation. The explicit ``maestro --review`` command and the
+    ``/complete`` gate are unaffected.
+    """
+    flag = os.environ.get("MAESTRO_DEEP_REVIEW", "").strip().lower()
+    return flag not in {"off", "0", "false", "no"}
+
+
+def _deep_review_min_lines() -> int:
+    """Effective volume threshold, honoring ``MAESTRO_DEEP_REVIEW_MIN_LINES``."""
+    raw = os.environ.get("MAESTRO_DEEP_REVIEW_MIN_LINES", "").strip()
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            logger.debug("deep review: bad MAESTRO_DEEP_REVIEW_MIN_LINES=%r", raw)
+    return DEFAULT_DEEP_REVIEW_MIN_LINES
+
+
+def _matches_blueprint_pattern(rel_path: str) -> bool:
+    rel = rel_path.replace(os.sep, "/")
+    return any(fnmatch.fnmatch(rel, pattern) for pattern in BLUEPRINT_PATTERNS)
+
+
+def blueprint_milestone_in_progress(project_path: str | Path) -> bool:
+    """Soft condition: some in-progress milestone owns blueprint artifacts.
+
+    Auto-reviewing every project's docs edits would burn personas on
+    projects that have no design milestone. Projects without a milestone
+    plan still get reviewed (the plan may not exist yet — e.g. right after
+    the first blueprint is drafted).
+    """
+    from open_maestro.milestones.models import MilestoneStatus
+    from open_maestro.milestones.store import MilestoneStore
+
+    root = Path(project_path)
+    try:
+        plan = MilestoneStore(root).load()
+    except Exception as exc:  # no plan yet, or unreadable — do not suppress
+        logger.debug("deep review: no milestone plan (%s); reviewing anyway", exc)
+        return True
+    for epic in plan.epics:
+        for milestone in epic.milestones:
+            if milestone.status != MilestoneStatus.IN_PROGRESS:
+                continue
+            if any(
+                _matches_blueprint_pattern(a.path) for a in milestone.artifacts
+            ):
+                return True
+    return False
+
+
+def _git(root: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args], cwd=root, capture_output=True, text=True, timeout=30
+    )
+
+
+def _is_new_file(root: Path, rel: str) -> bool:
+    """True when *rel* is not tracked at HEAD (created or still untracked)."""
+    out = _git(root, ["cat-file", "-e", f"HEAD:{rel}"])
+    return out.returncode != 0
+
+
+def _untracked_blueprint_files(root: Path) -> list[str]:
+    out = _git(root, ["ls-files", "--others", "--exclude-standard"])
+    if out.returncode != 0:
+        return []
+    return [
+        line.strip()
+        for line in out.stdout.splitlines()
+        if line.strip() and _matches_blueprint_pattern(line.strip())
+    ]
+
+
+def _version_marker_changed(root: Path, rel: str, before_ref: str | None) -> bool:
+    """True when the diff touches a version-marker line in the header region."""
+    commands = []
+    if before_ref:
+        commands.append(["diff", f"{before_ref}..HEAD", "--", rel])
+    commands.append(["diff", "HEAD", "--", rel])
+    for args in commands:
+        out = _git(root, args)
+        if out.returncode != 0:
+            continue
+        new_line = 0
+        for line in out.stdout.splitlines():
+            hunk = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
+            if hunk:
+                new_line = int(hunk.group(1)) - 1
+                continue
+            if line.startswith("+") or line.startswith("-"):
+                new_line += 1 if line.startswith("+") else 0
+                if new_line <= DEEP_REVIEW_HEADER_LINES and VERSION_MARKER_RE.search(
+                    line[1:]
+                ):
+                    return True
+            elif not line.startswith("\\"):
+                new_line += 1
+    return False
+
+
+def select_deep_review_targets(
+    project_path: str | Path,
+    changes: list[tuple[str, int]],
+    before_ref: str | None = None,
+) -> list[tuple[Path, str]]:
+    """Blueprint artifacts changed this turn that warrant a deep review.
+
+    *changes* is the raw [(path, changed-lines)] list for the turn (the
+    same plumbing the critic gate uses). Returns [(doc, reason)] for docs
+    that pass ALL of:
+
+    * kill switch ``MAESTRO_DEEP_REVIEW`` not set to off,
+    * an in-progress milestone owns blueprint artifacts (soft condition),
+    * the gate ledger has no passing audit for the doc's *current* bytes,
+    * and the change is significant: new artifact, >= threshold changed
+      lines (``MAESTRO_DEEP_REVIEW_MIN_LINES``, default 150), or a
+      version-marker change in the header region.
+    """
+    root = Path(project_path)
+    if not auto_review_enabled():
+        return []
+    if not blueprint_milestone_in_progress(root):
+        return []
+
+    ledger = GateLedger().for_project(root)
+    min_lines = _deep_review_min_lines()
+    candidates: dict[str, int] = {}
+    for rel, n in changes:
+        if _matches_blueprint_pattern(rel):
+            candidates[rel] = candidates.get(rel, 0) + n
+    # Newly created artifacts are often untracked, so git diff misses them.
+    for rel in _untracked_blueprint_files(root):
+        candidates.setdefault(rel, 0)
+
+    targets: list[tuple[Path, str]] = []
+    for rel, n in sorted(candidates.items()):
+        doc = root / rel
+        if not doc.is_file():
+            continue
+        try:
+            if not ledger.check(doc):
+                continue  # passing audit already recorded for these bytes
+        except Exception as exc:
+            logger.debug("deep review: ledger check failed for %s: %s", rel, exc)
+        if _is_new_file(root, rel):
+            reason = "new blueprint artifact"
+        elif n >= min_lines:
+            reason = f"{n} changed lines (>= {min_lines})"
+        elif _version_marker_changed(root, rel, before_ref):
+            reason = "version marker changed"
+        else:
+            continue
+        targets.append((doc, reason))
+    return targets
 
 
 def admission_summary(report_text: str) -> FindingSummary:
