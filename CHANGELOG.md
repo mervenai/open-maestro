@@ -5,6 +5,20 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] - 2026-10-01
+
+### Fixed
+- **Swarm worker anchored on a maestro-internal epic name and drafted a
+  contract for the milestone-tracking tooling itself** (MSTRO-124).
+  Session b3591e11 (`$9.99`, no usable deliverable): the DTO worker read
+  "Project Process epic" (the `default` epic's name in
+  `.open-maestro/milestones.yaml`) as the subject matter and produced
+  Pydantic DTOs for the tracking machinery, while a sibling worker
+  correctly scoped to the actual product — the consistency check caught
+  the divergence. `format_prompt_context()` now opens the milestone block
+  with a note that epic/milestone names are delivery-process labels
+  (workflow stage), not the subject of the task.
+
 ## [2.1.0] - 2026-10-01
 
 ### Added

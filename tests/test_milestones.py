@@ -288,6 +288,17 @@ class TestMilestoneCommands:
         assert "Project milestone context" in context
         assert "Design Blueprint" in context
 
+    def test_prompt_context_marks_names_as_process_labels(self, tmp_path):
+        """MSTRO-124: epic/milestone names must not be read as subject matter."""
+        store = MilestoneStore(tmp_path)
+        plan = store.load()
+        plan.epics[0].milestones[2].status = MilestoneStatus.IN_PROGRESS
+        store.update(plan)
+
+        context = format_prompt_context(tmp_path)
+        assert "workflow stage, not the subject" in context
+        assert "never describe or design the milestone-tracking tooling" in context
+
     def test_prompt_context_empty_when_no_plan(self, tmp_path):
         context = format_prompt_context(tmp_path / "nonexistent")
         assert context == ""

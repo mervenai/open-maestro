@@ -419,6 +419,11 @@ def format_prompt_context(project_path: Path) -> str:
     lines = [
         "",
         "## Project milestone context",
+        "Note: epic and milestone names below are delivery-process labels "
+        "tracked in `.open-maestro/milestones.yaml` — they name the workflow "
+        "stage, not the subject of your task. The deliverable concerns the "
+        "project's own product, codebase, or business domain; never describe "
+        "or design the milestone-tracking tooling itself.",
         f"Overall completion: {plan.summary.overall_completion}%",
         "Current milestone(s):",
     ]
