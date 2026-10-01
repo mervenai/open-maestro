@@ -203,7 +203,12 @@ class TestProjectManagerDryRun:
         assert runtime.last_config is None
         assert result.is_error is False
         assert "coder" in result.text
-        assert "kimi-code/kimi-for-coding" in result.text
+        # The concrete model is profile-selected from the (user-editable)
+        # capability registry, so don't hardcode a name — just require that
+        # the alias resolved to something concrete and it is shown in the plan.
+        resolved = result.metadata.get("resolved_model")
+        assert resolved and resolved != "default"
+        assert resolved in result.text
         assert result.metadata.get("dry_run") is True
         assert result.metadata.get("selected_agent") == "coder"
 
