@@ -296,6 +296,120 @@ class TestPanel:
         normal = panel.choose_chairman(panel.PANEL_SEATS)
         assert normal is not None and normal.id != "glm-flash"
 
+    async def test_chairman_retries_transient_api_error(self, monkeypatch):
+        """MSTRO-122: 'API Error: Connection closed mid-response' must retry."""
+
+        monkeypatch.setattr(panel, "CHAIRMAN_RETRY_BACKOFF_S", 0.0)
+
+        class FlakyChairRuntime(AgentRuntime):
+            chairman_calls = 0
+
+            @property
+            def runtime_name(self):
+                return "fake"
+
+            async def run(self, prompt, config=None):
+                if "Classify each distinct claim" in prompt:
+                    return AgentResult(text='{"claims": [{"text": "x", "kind": "J"}]}')
+                if "ranking anonymized responses" in prompt:
+                    return AgentResult(text="r\nFINDINGS n=1")
+                if "CHAIRMAN" in prompt:
+                    FlakyChairRuntime.chairman_calls += 1
+                    if FlakyChairRuntime.chairman_calls == 1:
+                        return AgentResult(
+                            text="API Error: Connection closed mid-response. "
+                            "The response above may be incomplete."
+                        )
+                    return AgentResult(text="Synthesized after retry.")
+                return AgentResult(text="opinion\nFINDINGS n=1")
+
+            async def run_with_hooks(self, prompt, tool_guard=None, blocked_tools=None, config=None):
+                return await self.run(prompt, config)
+
+            async def resume(self, session_id, prompt, config=None):
+                return await self.run(prompt, config)
+
+        def factory(rt_type):
+            return FlakyChairRuntime()
+
+        result = await panel.run_panel("question", runtime_factory=factory)
+        assert result.chairman_response == "Synthesized after retry."
+        assert result.ok
+        assert result.chairman_seat == "claude-sonnet"  # retry, no fallback
+        assert any(
+            "attempt 1/2 failed" in n and "claude-sonnet" in n for n in result.notes
+        )
+
+    async def test_chairman_falls_back_to_next_preference(self, monkeypatch):
+        """MSTRO-122: preferred chairman dying for good falls back (never to GLM)."""
+
+        monkeypatch.setattr(panel, "CHAIRMAN_RETRY_BACKOFF_S", 0.0)
+
+        class DeadChairRuntime(AgentRuntime):
+            chairman_calls = 0
+
+            @property
+            def runtime_name(self):
+                return "fake"
+
+            async def run(self, prompt, config=None):
+                if "Classify each distinct claim" in prompt:
+                    return AgentResult(text='{"claims": [{"text": "x", "kind": "J"}]}')
+                if "ranking anonymized responses" in prompt:
+                    return AgentResult(text="r\nFINDINGS n=1")
+                if "CHAIRMAN" in prompt:
+                    DeadChairRuntime.chairman_calls += 1
+                    if DeadChairRuntime.chairman_calls <= 2:
+                        return AgentResult(text="boom", is_error=True)
+                    return AgentResult(text="Kimi synthesized.")
+                return AgentResult(text="opinion\nFINDINGS n=1")
+
+            async def run_with_hooks(self, prompt, tool_guard=None, blocked_tools=None, config=None):
+                return await self.run(prompt, config)
+
+            async def resume(self, session_id, prompt, config=None):
+                return await self.run(prompt, config)
+
+        def factory(rt_type):
+            return DeadChairRuntime()
+
+        result = await panel.run_panel("question", runtime_factory=factory)
+        assert result.chairman_response == "Kimi synthesized."
+        assert result.ok
+        assert result.chairman_seat == "kimi-k3"
+        assert any("chairman fell back from claude-sonnet to kimi-k3" in n for n in result.notes)
+
+    async def test_chairman_all_candidates_fail_records_error(self, monkeypatch):
+        monkeypatch.setattr(panel, "CHAIRMAN_RETRY_BACKOFF_S", 0.0)
+
+        class AllDeadRuntime(AgentRuntime):
+            @property
+            def runtime_name(self):
+                return "fake"
+
+            async def run(self, prompt, config=None):
+                if "Classify each distinct claim" in prompt:
+                    return AgentResult(text='{"claims": [{"text": "x", "kind": "J"}]}')
+                if "ranking anonymized responses" in prompt:
+                    return AgentResult(text="r\nFINDINGS n=1")
+                if "CHAIRMAN" in prompt:
+                    return AgentResult(text="boom", is_error=True)
+                return AgentResult(text="opinion\nFINDINGS n=1")
+
+            async def run_with_hooks(self, prompt, tool_guard=None, blocked_tools=None, config=None):
+                return await self.run(prompt, config)
+
+            async def resume(self, session_id, prompt, config=None):
+                return await self.run(prompt, config)
+
+        def factory(rt_type):
+            return AllDeadRuntime()
+
+        result = await panel.run_panel("question", runtime_factory=factory)
+        assert result.chairman_response.startswith("ERROR: chairman failed")
+        assert not result.ok
+        assert any("kimi-k3" in n and "failed" in n for n in result.notes)
+
     def test_parse_claims_tolerates_fences(self):
         text = '```json\n{"claims": [{"text": "a", "kind": "J"}]}\n```'
         claims = panel.parse_claims(text)

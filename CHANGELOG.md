@@ -5,6 +5,20 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] - 2026-10-01
+
+### Fixed
+- **Panel chairman synthesis failed permanently on transient runtime errors**
+  (`review.panel`, MSTRO-122). Observed live: claude-cli returned
+  "API Error: Connection closed mid-response" as result text (without
+  `is_error`), which `_run_seat` could not catch, so the panel ended with
+  no aggregate verdict — a second degradation on top of any unreachable
+  seat. The chairman stage now: (1) treats `API Error…`-prefixed result
+  text as a failure, (2) retries each chairman candidate up to
+  `CHAIRMAN_ATTEMPTS` (2) with linear backoff, and (3) falls back to the
+  next preference-ordered seat (never GLM) before recording an error.
+  Three regression tests added.
+
 ## [2.0.1] - 2026-09-29
 
 ### Fixed

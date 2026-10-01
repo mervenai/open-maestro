@@ -60,6 +60,13 @@ PANEL_SEATS: tuple[PanelSeat, ...] = (
 # Chairman preference order; GLM is deliberately absent.
 CHAIRMAN_PREFERENCE: tuple[str, ...] = ("claude-sonnet", "kimi-k3")
 
+# Chairman synthesis retries (MSTRO-122): transient runtime failures
+# (e.g. claude-cli "Connection closed mid-response") used to end the panel
+# with no aggregate verdict. Each chairman candidate gets this many
+# attempts before falling back to the next preference-ordered seat.
+CHAIRMAN_ATTEMPTS = 2
+CHAIRMAN_RETRY_BACKOFF_S = 2.0
+
 LENSES: dict[str, str] = {
     "falsifier": (
         "You are the FALSIFIER. Find the ONE claim in the material that, if "
@@ -159,6 +166,16 @@ def parse_claims(text: str) -> list[dict]:
 def _findings_count(text: str) -> int | None:
     m = FINDINGS_RE.search(text)
     return int(m.group(1)) if m else None
+
+
+def _looks_failed(text: str) -> bool:
+    """Detect a runtime that returned an error string without raising.
+
+    claude-cli reports mid-stream failures as a result whose text starts
+    with "API Error: ..." while is_error stays False on the wrapper we see,
+    so _run_seat cannot catch it — check the payload here.
+    """
+    return text.lstrip().startswith("API Error")
 
 
 def choose_chairman(seats: tuple[PanelSeat, ...]) -> PanelSeat | None:
@@ -310,8 +327,43 @@ async def run_panel(
         f"Material:\n{material[:30000]}\n\n{digest}"
     )
     try:
-        final = await _run_seat(chairman, chair_prompt, runtime_factory)
-        result.chairman_response = final
-    except Exception as exc:
+        # Chairman candidates: preferred chairman first, then remaining
+        # preference-ordered seats. GLM is never a candidate (see module
+        # docstring). Each candidate gets CHAIRMAN_ATTEMPTS tries before
+        # falling back — a single transient runtime failure must not end
+        # the panel without an aggregate verdict.
+        candidates = [chairman] + [
+            seat
+            for preferred in CHAIRMAN_PREFERENCE
+            for seat in seats
+            if seat.id == preferred and seat is not chairman
+        ]
+        last_exc: Exception | None = None
+        for chair in candidates:
+            for attempt in range(1, CHAIRMAN_ATTEMPTS + 1):
+                try:
+                    final = await _run_seat(chair, chair_prompt, runtime_factory)
+                    if _looks_failed(final):
+                        raise RuntimeError(f"runtime returned error text: {final[:200]}")
+                    result.chairman_response = final
+                    result.chairman_seat = chair.id
+                    if chair is not chairman:
+                        result.notes.append(
+                            f"chairman fell back from {chairman.id} to {chair.id}"
+                        )
+                    break
+                except Exception as exc:  # noqa: BLE001 — any seat failure retries
+                    last_exc = exc
+                    result.notes.append(
+                        f"chairman {chair.id} attempt {attempt}/{CHAIRMAN_ATTEMPTS} "
+                        f"failed: {exc}"
+                    )
+                    if attempt < CHAIRMAN_ATTEMPTS:
+                        await asyncio.sleep(CHAIRMAN_RETRY_BACKOFF_S * attempt)
+            if result.chairman_response:
+                break
+        if not result.chairman_response:
+            result.chairman_response = f"ERROR: chairman failed: {last_exc}"
+    except Exception as exc:  # defensive: never lose the whole panel result
         result.chairman_response = f"ERROR: chairman failed: {exc}"
     return result
