@@ -75,6 +75,43 @@ _ARTIFACT_DIRS = frozenset(
 # the actual user input.
 _CURRENT_TASK_MARKER = "\nCurrent task: "
 
+# Explicit single-file output instructions, e.g. "Write the output to
+# docs/blueprint.md" (MSTRO-126). Conservative: the verb must name an
+# output-ish object (output/result/document/...), so "update docs/a.md"
+# and "cite docs/b.md" are not mistaken for output designations.
+_EXPLICIT_OUTPUT_RES = (
+    re.compile(
+        r"(?:write|save|output|export|persist)\s+"
+        r"(?:the\s+)?(?:output|result|document|file|report|contract|"
+        r"summary|analysis|plan|spec)\s+"
+        r"(?:to|as|into)\s+(`?)([./]?[\w.-]+(?:/[\w.-]+)*\.[A-Za-z0-9]{1,5})\1",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:output|save)\s+(?:file|path|location)\s*[:=]\s*"
+        r"(`?)([./]?[\w.-]+(?:/[\w.-]+)*\.[A-Za-z0-9]{1,5})\1",
+        re.IGNORECASE,
+    ),
+)
+
+
+def detect_explicit_output(prompt: str) -> str | None:
+    """The single file path the task explicitly designates as its output.
+
+    Returns the first (most recent phrasing wins in practice — prompts put
+    the binding instruction last) path that survives sanity filtering, or
+    None. URLs and home-absolute paths are rejected; a leading ``/`` is
+    kept as project-relative (``/docs/x.md``), matching the convention
+    used elsewhere in the planner.
+    """
+    for regex in _EXPLICIT_OUTPUT_RES:
+        for match in regex.finditer(prompt):
+            path = match.group(2)
+            if "://" in path or path.startswith("~"):
+                continue
+            return path.lstrip("./") if path.startswith("./") else path
+    return None
+
 
 def _current_task_text(prompt: str) -> str:
     """Strip any transcript prefix, keeping only the current user task.
@@ -157,6 +194,11 @@ Rules:
   workers writing the same file is forbidden — leave such work sequential.
 - 3 to 6 workers. Fewer than 3 independent workstreams is not a swarm.
 - Each worker must use one of the listed agent IDs.
+- If the task explicitly names an output file (e.g. "Write the output to
+  <path>"), that file MUST be produced: either target it directly with a
+  worker, or produce fragments under your own layout and add a final merge
+  worker whose target_file is exactly that path. The fragment layout itself
+  is yours to choose.
 - Do not include markdown fences or any text outside the JSON.
 """  # noqa: E501
 
@@ -208,9 +250,53 @@ class SwarmPlanner:
     ) -> SwarmPlan | None:
         """Return a swarm plan for *prompt*, or None if the task isn't a swarm."""
         llm_plan = await self._llm_plan(prompt, profile=profile)
-        if llm_plan is not None:
-            return llm_plan
-        return self._heuristic_plan(prompt, first_agent=first_agent)
+        planned = llm_plan if llm_plan is not None else self._heuristic_plan(
+            prompt, first_agent=first_agent
+        )
+        if planned is None:
+            return None
+        self._ensure_explicit_output(planned, prompt)
+        return planned
+
+    def _ensure_explicit_output(self, plan: SwarmPlan, prompt: str) -> None:
+        """Guarantee the task's explicit output file is a write target (MSTRO-126).
+
+        The planner may freely invent a fragment layout (per-topic files in a
+        working folder), but an explicit instruction like "Write the output to
+        docs/blueprint.md" is binding: if no worker targets that exact path,
+        append a final merge worker whose job is to read every fragment,
+        resolve cross-references, and write the complete merged document to
+        the required path. Deterministic — does not rely on planner-LLM
+        compliance. Targets inside nested git repos (code clones) are
+        unwritable and skipped.
+        """
+        explicit = detect_explicit_output(_current_task_text(prompt))
+        if not explicit:
+            return
+        if any(w.target_file == explicit for w in plan.workers):
+            return
+        target = Path(explicit)
+        if target.is_absolute() or _inside_nested_git_repo(
+            target.resolve() if target.exists() else (Path.cwd() / target).resolve(),
+            Path.cwd(),
+        ):
+            return
+        writer = self._agent_for_target(explicit)
+        if writer is None:
+            return
+        plan.workers.append(
+            SwarmWorker(
+                agent_id=writer.id,
+                purpose=(
+                    f"Merge the workers' per-topic fragments into the single "
+                    f"document the task requires at `{explicit}`. Read every "
+                    "fragment the other workers produced, resolve "
+                    "cross-references and contradictions, and write the "
+                    "complete merged document to that exact path."
+                ),
+                target_file=explicit,
+            )
+        )
 
     async def _llm_plan(
         self,

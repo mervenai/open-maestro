@@ -726,3 +726,96 @@ class TestSwarmResilience:
         )
         assert result.metadata["swarm_consistency"] == "failed"
         assert "CONSISTENCY CHECK DID NOT PASS" in result.text
+
+
+class TestExplicitOutputRespect:
+    def test_detect_explicit_output_variants(self):
+        from open_maestro.orchestrator.swarm import detect_explicit_output
+
+        assert detect_explicit_output(
+            "Draft the contract. Write the output to "
+            "docs/blueprint-design-and-data-contract.md."
+        ) == "docs/blueprint-design-and-data-contract.md"
+        assert detect_explicit_output(
+            "Save the summary as docs/intake/synthesis.md"
+        ) == "docs/intake/synthesis.md"
+        assert detect_explicit_output("Output file: reports/out.csv") == (
+            "reports/out.csv"
+        )
+        # Not output designations:
+        assert detect_explicit_output("update docs/a.md and docs/b.md") is None
+        assert detect_explicit_output("cite docs/a.md for evidence") is None
+        assert (
+            detect_explicit_output("Write the output to https://example.com/x.md")
+            is None
+        )
+
+    async def test_llm_plan_appends_merge_worker(self, swarm_registry, tmp_path, monkeypatch):
+        """MSTRO-126: fragment layout is fine, but the explicit output file
+        must still be produced — via an appended merge worker."""
+        monkeypatch.chdir(tmp_path)
+        payload = json.dumps(
+            {
+                "leader": False,
+                "consistency": True,
+                "workers": [
+                    {"agent_id": "researcher", "purpose": "draft dtos",
+                     "target_file": "docs/_contract/dtos.md"},
+                    {"agent_id": "engineer", "purpose": "draft endpoints",
+                     "target_file": "docs/_contract/endpoints.md"},
+                    {"agent_id": "documentation", "purpose": "draft events",
+                     "target_file": "docs/_contract/events.md"},
+                ],
+            }
+        )
+        planner = SwarmPlanner(runtime=FakeRuntime(payload), registry=swarm_registry)
+        plan = await planner.plan(
+            "Draft the data contract. Write the output to "
+            "docs/blueprint-design-and-data-contract.md."
+        )
+        assert plan is not None
+        merge = [
+            w
+            for w in plan.workers
+            if w.target_file == "docs/blueprint-design-and-data-contract.md"
+        ]
+        assert len(merge) == 1
+        assert "merge" in merge[0].purpose.lower()
+
+    async def test_llm_plan_respects_direct_target(self, swarm_registry, tmp_path, monkeypatch):
+        """A worker already targeting the explicit file: nothing appended."""
+        monkeypatch.chdir(tmp_path)
+        payload = json.dumps(
+            {
+                "workers": [
+                    {"agent_id": "researcher", "purpose": "a"},
+                    {"agent_id": "engineer", "purpose": "b"},
+                    {"agent_id": "documentation", "purpose": "write final",
+                     "target_file": "docs/blueprint-design-and-data-contract.md"},
+                ],
+            }
+        )
+        planner = SwarmPlanner(runtime=FakeRuntime(payload), registry=swarm_registry)
+        plan = await planner.plan(
+            "Draft the contract. Write the output to "
+            "docs/blueprint-design-and-data-contract.md."
+        )
+        assert plan is not None
+        assert len(plan.workers) == 3
+
+    async def test_heuristic_plan_appends_merge_worker(self, swarm_registry, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        for name in ("a.md", "b.md", "c.md"):
+            (docs / name).write_text("# doc\n")
+        planner = SwarmPlanner(
+            runtime=FakeRuntime("not json"), registry=swarm_registry
+        )
+        plan = await planner.plan(
+            "Update docs/a.md, docs/b.md, and docs/c.md. "
+            "Write the output to build/combined.md"
+        )
+        assert plan is not None
+        targets = [w.target_file for w in plan.workers]
+        assert "build/combined.md" in targets

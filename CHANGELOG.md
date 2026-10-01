@@ -5,6 +5,23 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.3] - 2026-10-01
+
+### Fixed
+- **Swarm planner overrides explicit file-output instructions**
+  (MSTRO-126). Session b3591e11: the task said "Write the output to
+  `docs/blueprint-design-and-data-contract.md`" but the planner invented a
+  `docs/_contract/` fragment layout, so the milestone's required artifact
+  was never produced. New rule: the planner keeps full freedom to design
+  its own layout (fragments, working folders) for everything else, but an
+  explicit output designation is binding — `detect_explicit_output()`
+  finds it in the current task text, and `_ensure_explicit_output()`
+  appends a final **merge worker** (writer-role agent, target = the exact
+  path) whenever no worker already targets it. Deterministic guarantee,
+  not planner-LLM compliance; the planner system prompt carries the same
+  rule so the merge worker is usually planned natively. Nested-git-repo
+  and absolute/URL targets are excluded. 4 regression tests added.
+
 ## [2.1.2] - 2026-10-01
 
 ### Fixed
