@@ -5,6 +5,31 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.2] - 2026-10-01
+
+### Fixed
+- **Swarm resilience** (MSTRO-125), from forensics on session b3591e11
+  ($9.99, 2 of 5 workers alive, no usable deliverable, recorded as
+  success):
+  - **Failed worker slices are re-seated once.** After the fan-out, each
+    worker that errored is re-run on a fresh seat; `_run_agent` marks
+    quota-exhausted models as workers fail, so the retry lands on the
+    next capable model instead of the dead one (the GLM-429 scenario).
+    Previously a failed worker's slice silently evaporated and only the
+    end-of-run consistency pass noticed.
+  - **Partial failure is no longer silent.** The digest now leads with a
+    "SWARM DEGRADED" / "CONSISTENCY CHECK DID NOT PASS" banner when any
+    worker failed or the consistency pass reported inconsistency, and the
+    result metadata records `swarm_degraded`, `swarm_failed_workers`, and
+    `swarm_consistency` — so session records and dashboards show the run
+    as degraded instead of complete.
+  - **Quota signals propagate on partial failure.** Previously
+    `quota_exhausted` metadata only surfaced when the entire swarm died;
+    now any failing worker's quota signal reaches `pm.handle`'s fallback
+    loop. (Worker seating already excluded quota-exhausted models via
+    `chain._run_agent`; the gap was recovery, not seating.)
+  3 regression tests added.
+
 ## [2.1.1] - 2026-10-01
 
 ### Fixed

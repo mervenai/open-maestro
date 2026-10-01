@@ -594,3 +594,135 @@ class TestProjectManagerSwarmIntegration:
         )
         assert result.metadata.get("swarm") is not True
         assert result.metadata.get("chain") is True
+
+def _resilience_plan(workers, **kwargs):
+    return SwarmPlan(
+        workers=workers,
+        original_prompt="propagate findings into analysis docs",
+        **kwargs,
+    )
+
+
+class TestSwarmResilience:
+    async def test_failed_worker_reseated_once_and_recovers(self, swarm_registry):
+        """MSTRO-125: a failed slice is re-run once and replaces the failure."""
+        plan = _resilience_plan(
+            [
+                SwarmWorker("researcher", "check assumptions"),
+                SwarmWorker("engineer", "assess code impact"),
+                SwarmWorker("documentation", "update synthesis"),
+            ]
+        )
+        executor = SwarmExecutor(registry=swarm_registry, critic_gate=False)
+
+        calls = {"n": 0}
+        state = {"failed": False}
+
+        def _create_runtime(name, config=None):
+            runtime = EchoRuntime(marker=f"rt{calls['n']}")
+            calls["n"] += 1
+            return runtime
+
+        real_run = EchoRuntime.run
+
+        async def _fail_once(self, prompt, config=None):
+            if "assess code impact" in prompt and not state["failed"]:
+                state["failed"] = True
+                return AgentResult(text="boom", is_error=True)
+            return await real_run(self, prompt, config)
+
+        with patch(
+            "open_maestro.runtime.factory.select_runtime_for_task",
+            return_value=("echo", "model-x"),
+        ), patch(
+            "open_maestro.runtime.factory.create_runtime",
+            side_effect=_create_runtime,
+        ), patch.object(EchoRuntime, "run", _fail_once):
+            result = await executor.execute(
+                plan, original_prompt="propagate findings into analysis docs"
+            )
+
+        by_agent = {w["agent_id"]: w for w in result.metadata["workers"]}
+        assert by_agent["engineer"]["is_error"] is False
+        assert "swarm_degraded" not in result.metadata
+        assert "SWARM DEGRADED" not in result.text
+
+    async def test_degraded_signaling_when_reseat_also_fails(self, swarm_registry):
+        """MSTRO-125: unrecoverable partial failure is loud, not silent."""
+        plan = _resilience_plan(
+            [
+                SwarmWorker("researcher", "check assumptions"),
+                SwarmWorker("engineer", "assess code impact"),
+                SwarmWorker("documentation", "update synthesis"),
+            ]
+        )
+        executor = SwarmExecutor(registry=swarm_registry, critic_gate=False)
+
+        calls = {"n": 0}
+
+        def _create_runtime(name, config=None):
+            runtime = EchoRuntime(marker=f"rt{calls['n']}")
+            calls["n"] += 1
+            return runtime
+
+        async def _always_fail(self, prompt, config=None):
+            if "assess code impact" in prompt:
+                return AgentResult(
+                    text="OpenAI API error: 429 insufficient balance",
+                    is_error=True,
+                    metadata={
+                        "quota_exhausted": "balance or quota exhausted",
+                        "quota_exhausted_model": "glm-5.3-flash",
+                    },
+                )
+            return AgentResult(text="worker ok")
+
+        with patch(
+            "open_maestro.runtime.factory.select_runtime_for_task",
+            return_value=("echo", "model-x"),
+        ), patch(
+            "open_maestro.runtime.factory.create_runtime",
+            side_effect=_create_runtime,
+        ), patch.object(EchoRuntime, "run", _always_fail):
+            result = await executor.execute(
+                plan, original_prompt="propagate findings into analysis docs"
+            )
+
+        assert result.is_error is False  # partial: 2 of 3 succeeded
+        assert result.metadata["swarm_degraded"] is True
+        assert "SWARM DEGRADED" in result.text
+        failed = result.metadata["swarm_failed_workers"]
+        assert [w["agent_id"] for w in failed] == ["engineer"]
+        # Quota signal must propagate even for partial failure.
+        assert result.metadata["quota_exhausted_model"] == "glm-5.3-flash"
+
+    def test_consistency_failure_flagged(self, swarm_registry):
+        """MSTRO-125: a 'not consistent' consistency pass is surfaced."""
+        from open_maestro.orchestrator.chain import HandoffStep, StepResult
+
+        plan = _resilience_plan(
+            [
+                SwarmWorker("researcher", "a"),
+                SwarmWorker("engineer", "b"),
+            ]
+        )
+        executor = SwarmExecutor(registry=swarm_registry, critic_gate=False)
+        results = []
+        for agent_id, purpose in (("researcher", "a"), ("engineer", "b")):
+            results.append(
+                StepResult(
+                    step=HandoffStep(agent_id=agent_id, purpose=purpose),
+                    agent=swarm_registry.get(agent_id),
+                    runtime_name="echo",
+                    model="m",
+                    result=AgentResult(text="ok"),
+                )
+            )
+
+        result = executor._synthesize(
+            plan,
+            results,
+            extras=["## Consistency\n**Summary:** Not consistent."],
+        )
+        assert result.metadata["swarm_consistency"] == "failed"
+        assert "CONSISTENCY CHECK DID NOT PASS" in result.text

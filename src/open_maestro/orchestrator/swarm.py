@@ -493,13 +493,16 @@ class SwarmExecutor(ChainExecutor):
         max_concurrent = max(1, int(os.environ.get("MAESTRO_SWARM_MAX_WORKERS", "4")))
         semaphore = asyncio.Semaphore(max_concurrent)
 
-        async def _run_one(idx: int, worker: SwarmWorker) -> StepResult:
+        async def _run_one(
+            idx: int, worker: SwarmWorker, attempt: int = 1
+        ) -> StepResult:
             async with semaphore:
                 await self._emit("swarm.worker_started", {
                     "worker": idx,
                     "total": len(plan.workers),
                     "agent_id": worker.agent_id,
                     "purpose": worker.purpose,
+                    "attempt": attempt,
                 })
                 try:
                     agent = self.registry.get(worker.agent_id)
@@ -567,6 +570,26 @@ class SwarmExecutor(ChainExecutor):
                 for idx, worker in enumerate(plan.workers, start=1)
             ]
         )
+
+        # MSTRO-125: re-seat each failed worker's slice once, on a live
+        # model. _run_agent marks quota-exhausted models as workers fail,
+        # so by retry time the dead seat is excluded from selection and the
+        # slice lands on the next capable model. Without this a failed
+        # worker's slice silently evaporates and only the end-of-run
+        # consistency pass notices — after the money is spent.
+        for idx, sr in enumerate(step_results):
+            if not sr.result.is_error:
+                continue
+            worker = plan.workers[idx]
+            logger.warning(
+                "Swarm worker %s (%s) failed; re-seating its slice once",
+                idx + 1,
+                worker.agent_id,
+            )
+            retry = await _run_one(idx + 1, worker, attempt=2)
+            if not retry.result.is_error:
+                logger.info("Swarm worker %s re-seated successfully", idx + 1)
+            step_results[idx] = retry
 
         extras: list[str] = []
 
@@ -845,10 +868,35 @@ class SwarmExecutor(ChainExecutor):
         if not step_results:
             return AgentResult(text="No swarm workers were executed.", is_error=True)
 
+        failed_count = sum(1 for sr in step_results if sr.result.is_error)
+        is_error = failed_count == len(step_results)
+        # MSTRO-125: a partially failed swarm is NOT a success. Without
+        # this flag the session record shows is_error=false and the run
+        # looks complete in dashboards even though slices are missing.
+        degraded = failed_count > 0 and not is_error
+        consistency_failed = any(
+            "not consistent" in (extra or "").lower() for extra in extras or []
+        )
+
         lines: list[str] = [
             f"# Swarm result ({len(step_results)} workers)",
             "",
         ]
+        if degraded:
+            lines.append(
+                f"⚠️ SWARM DEGRADED: {failed_count} of {len(step_results)} "
+                "workers failed — its slices are missing from this result. "
+                "Do not treat this run as complete; re-run the failed slices "
+                "before relying on it."
+            )
+            lines.append("")
+        if consistency_failed:
+            lines.append(
+                "⚠️ CONSISTENCY CHECK DID NOT PASS: worker artifacts "
+                "contradict each other or are missing. Treat the content "
+                "below as unverified."
+            )
+            lines.append("")
         for sr in step_results:
             lines.append(f"## {sr.agent.name} ({sr.agent.role})")
             lines.append(
@@ -863,7 +911,6 @@ class SwarmExecutor(ChainExecutor):
                 lines.append("")
 
         final_result = step_results[-1].result
-        is_error = all(sr.result.is_error for sr in step_results)
 
         # Aggregate metrics across all workers for context monitoring.
         total_cost = 0.0
@@ -895,18 +942,30 @@ class SwarmExecutor(ChainExecutor):
                 for sr in step_results
             ],
         }
-        # Propagate quota exhaustion from a failing worker so pm.handle can
-        # fall back to another model instead of dead-ending the turn.
-        if is_error:
-            for sr in step_results:
-                if sr.result.metadata.get("quota_exhausted"):
-                    metadata["quota_exhausted"] = sr.result.metadata[
-                        "quota_exhausted"
-                    ]
-                    metadata["quota_exhausted_model"] = sr.result.metadata.get(
-                        "quota_exhausted_model"
-                    )
-                    break
+        if degraded:
+            metadata["swarm_degraded"] = True
+            metadata["swarm_failed_workers"] = [
+                {
+                    "agent_id": sr.step.agent_id,
+                    "runtime": sr.runtime_name,
+                    "model": sr.model,
+                    "error": sr.result.text[:200],
+                }
+                for sr in step_results
+                if sr.result.is_error
+            ]
+        if consistency_failed:
+            metadata["swarm_consistency"] = "failed"
+        # Propagate quota exhaustion from any failing worker (not only
+        # when the whole swarm died) so pm.handle can fall back instead of
+        # dead-ending the turn — and so later selections skip the seat.
+        for sr in step_results:
+            if sr.result.is_error and sr.result.metadata.get("quota_exhausted"):
+                metadata["quota_exhausted"] = sr.result.metadata["quota_exhausted"]
+                metadata["quota_exhausted_model"] = sr.result.metadata.get(
+                    "quota_exhausted_model"
+                )
+                break
 
         return AgentResult(
             text="\n".join(lines),
