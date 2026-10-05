@@ -5,6 +5,25 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.4] - 2026-10-06
+
+### Fixed
+- **Review gates silently no-op outside git repos** (MSTRO-127). All
+  change-detection behind the gates was git-based (`_detect_changes`,
+  `_untracked_blueprint_files`, `_is_new_file`, `_version_marker_changed`),
+  so in a project that is not a git repository the artifact-critic gate
+  (9.6), the auto deep-review (2.1.0), and the `/complete` ledger checks
+  never fired — e.g. `IntelInvoiceCoding` shipped its blueprint with zero
+  adversarial review. Now: at turn start the pm captures an mtime/size/
+  content snapshot of gate-relevant files (code + markdown; VCS, dependency,
+  build dirs, and `.open-maestro` state excluded) — a cheap no-op inside a
+  git repo — and outside one `_detect_changes` diffs against that baseline
+  (difflib added-line counts) instead of `git diff`. Blueprint "new
+  artifact" detection falls back to files absent from the snapshot, so
+  pre-existing docs are treated as edits, not new artifacts. The first turn
+  seeds the baseline and never reviews pre-existing files. 9 regression
+  tests added.
+
 ## [2.1.3] - 2026-10-01
 
 ### Fixed

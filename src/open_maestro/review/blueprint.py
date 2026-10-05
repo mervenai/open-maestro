@@ -160,18 +160,49 @@ def _git(root: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
 def _is_new_file(root: Path, rel: str) -> bool:
     """True when *rel* is not tracked at HEAD (created or still untracked)."""
     out = _git(root, ["cat-file", "-e", f"HEAD:{rel}"])
-    return out.returncode != 0
+    if out.returncode == 0:
+        return False
+    # Non-git fallback (MSTRO-127): "new" = absent from the turn-start mtime
+    # snapshot. Without a snapshot we cannot tell pre-existing files from
+    # fresh ones, so treat everything as new rather than suppressing review.
+    from open_maestro.orchestrator import critic as critic_mod
+
+    if not critic_mod.in_git_repo(root):
+        snap = critic_mod.mtime_snapshot(root)
+        return True if snap is None else rel not in snap
+    return True
 
 
 def _untracked_blueprint_files(root: Path) -> list[str]:
     out = _git(root, ["ls-files", "--others", "--exclude-standard"])
     if out.returncode != 0:
-        return []
+        return _blueprint_files_new_since_snapshot(root)
     return [
         line.strip()
         for line in out.stdout.splitlines()
         if line.strip() and _matches_blueprint_pattern(line.strip())
     ]
+
+
+def _blueprint_files_new_since_snapshot(root: Path) -> list[str]:
+    """Non-git fallback (MSTRO-127): blueprint-pattern files absent from the
+    critic gate's mtime snapshot — i.e. created since the turn-start
+    baseline. Pre-existing files are handled as edits via their changed-line
+    count, not as "new artifacts"."""
+    from open_maestro.orchestrator import critic as critic_mod
+
+    if critic_mod.in_git_repo(root):
+        return []
+    snap = critic_mod.mtime_snapshot(root)
+    if snap is None:
+        return []
+    found = {
+        str(p.relative_to(root))
+        for pattern in BLUEPRINT_PATTERNS
+        for p in root.glob(pattern)
+        if p.is_file()
+    }
+    return sorted(found - set(snap))
 
 
 def _version_marker_changed(root: Path, rel: str, before_ref: str | None) -> bool:

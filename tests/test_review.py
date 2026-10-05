@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from open_maestro.orchestrator import critic as critic_mod
 from open_maestro.review import calibrate, gate, panel
 from open_maestro.review import blueprint as review_blueprint
 from open_maestro.review.blueprint import (
@@ -682,3 +683,140 @@ class TestSelectDeepReviewTargets:
         (tmp_path / "docs" / "blueprint-new.md").write_text("# New\n")
         monkeypatch.setattr(review_blueprint.GateLedger, "check", lambda self, doc, profile="review": [])
         assert select_deep_review_targets(tmp_path, []) == []
+
+
+# ---------------------------------------------------------------------------
+# Non-git change detection (MSTRO-127)
+
+
+class TestNonGitChangeDetection:
+    """Outside a git repo, gates diff against the turn-start mtime snapshot."""
+
+    def _make_plain_project(self, tmp_path):
+        """A non-git project with one pre-existing blueprint artifact."""
+        import os
+
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        doc = docs / "blueprint-x.md"
+        doc.write_text("Version: 1.0\n\n" + "filler line\n" * 100)
+        critic_mod.snapshot_mtimes(tmp_path)
+        return doc
+
+    def _touch(self, path):
+        import os
+
+        os.utime(path, None)  # guarantee mtime moves even on coarse clocks
+
+    def test_detect_changes_seeds_then_reports(self, tmp_path):
+        critic_mod.reset_mtimes_snapshot(tmp_path)
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        doc = docs / "blueprint-x.md"
+        doc.write_text("one\ntwo\nthree\n")
+        # First call seeds the baseline: pre-existing files are not changes.
+        assert critic_mod._detect_changes(tmp_path, None) == []
+        with doc.open("a") as fh:
+            fh.write("four\nfive\n")
+        self._touch(doc)
+        assert critic_mod._detect_changes(tmp_path, None) == [
+            ("docs/blueprint-x.md", 2)
+        ]
+
+    def test_detect_changes_counts_new_file_full_length(self, tmp_path):
+        critic_mod.reset_mtimes_snapshot(tmp_path)
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        critic_mod.snapshot_mtimes(tmp_path)
+        new_doc = docs / "blueprint-new.md"
+        new_doc.write_text("# New\n" * 40)
+        self._touch(new_doc)
+        assert critic_mod._detect_changes(tmp_path, None) == [
+            ("docs/blueprint-new.md", 40)
+        ]
+
+    def test_open_maestro_writes_do_not_count(self, tmp_path):
+        critic_mod.reset_mtimes_snapshot(tmp_path)
+        critic_mod.snapshot_mtimes(tmp_path)
+        state = tmp_path / ".open-maestro" / "gates"
+        state.mkdir(parents=True)
+        ledger_file = state / "ledger.json"
+        ledger_file.write_text('{"records": []}\n')
+        self._touch(ledger_file)
+        assert critic_mod._detect_changes(tmp_path, None) == []
+
+    def test_artifact_gate_finds_big_docs_edit(self, tmp_path):
+        critic_mod.reset_mtimes_snapshot(tmp_path)
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        doc = docs / "design-notes.md"
+        doc.write_text("intro\n")
+        critic_mod.snapshot_mtimes(tmp_path)
+        with doc.open("a") as fh:
+            fh.write("added line\n" * 60)
+        self._touch(doc)
+        assert critic_mod.detect_artifact_changes(tmp_path, None) == [
+            "docs/design-notes.md"
+        ]
+
+    def test_new_untracked_artifact_triggers_no_git(self, tmp_path, monkeypatch):
+        self._make_plain_project(tmp_path)
+        monkeypatch.setattr(
+            review_blueprint, "blueprint_milestone_in_progress", lambda p: True
+        )
+        (tmp_path / "docs" / "blueprint-new.md").write_text("# New contract\n" * 40)
+        targets = select_deep_review_targets(
+            tmp_path, critic_mod._detect_changes(tmp_path, None)
+        )
+        assert len(targets) == 1
+        assert targets[0][0].name == "blueprint-new.md"
+        assert targets[0][1] == "new blueprint artifact"
+
+    def test_preexisting_artifact_not_flagged_as_new_no_git(
+        self, tmp_path, monkeypatch
+    ):
+        """Untouched pre-existing blueprint: not a target, and not 'new'."""
+        doc = self._make_plain_project(tmp_path)
+        monkeypatch.setattr(
+            review_blueprint, "blueprint_milestone_in_progress", lambda p: True
+        )
+        assert not review_blueprint._is_new_file(tmp_path, "docs/blueprint-x.md")
+        targets = select_deep_review_targets(
+            tmp_path, critic_mod._detect_changes(tmp_path, None)
+        )
+        assert targets == []
+        assert doc.name == "blueprint-x.md"  # untouched baseline preserved
+
+    def test_large_change_triggers_no_git(self, tmp_path, monkeypatch):
+        doc = self._make_plain_project(tmp_path)
+        monkeypatch.setattr(
+            review_blueprint, "blueprint_milestone_in_progress", lambda p: True
+        )
+        with doc.open("a") as fh:
+            fh.write("added line\n" * 200)
+        self._touch(doc)
+        targets = select_deep_review_targets(
+            tmp_path, critic_mod._detect_changes(tmp_path, None)
+        )
+        assert [t[1] for t in targets] == ["200 changed lines (>= 150)"]
+
+    def test_small_edit_skips_no_git(self, tmp_path, monkeypatch):
+        doc = self._make_plain_project(tmp_path)
+        monkeypatch.setattr(
+            review_blueprint, "blueprint_milestone_in_progress", lambda p: True
+        )
+        with doc.open("a") as fh:
+            fh.write("minor clarification\n")
+        self._touch(doc)
+        targets = select_deep_review_targets(
+            tmp_path, critic_mod._detect_changes(tmp_path, None)
+        )
+        assert targets == []
+
+    def test_is_new_file_no_snapshot_treats_as_new(self, tmp_path, monkeypatch):
+        """Without a baseline everything is new — review is never suppressed."""
+        critic_mod.reset_mtimes_snapshot(tmp_path)
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        (docs / "blueprint-x.md").write_text("Version: 1.0\n")
+        assert review_blueprint._is_new_file(tmp_path, "docs/blueprint-x.md")

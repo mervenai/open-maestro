@@ -666,6 +666,10 @@ class ProjectManager:
         before_ref = (
             critic_mod.snapshot_head(Path.cwd()) if self.critic_gate else None
         )
+        # MSTRO-127: outside a git repo, the mtime snapshot becomes the
+        # "before" anchor for the critic and deep-review gates (cheap no-op
+        # inside a git repo, where git diff remains the source of truth).
+        critic_mod.snapshot_mtimes(Path.cwd())
 
         # 9. Handoff: if the task requires writing but the selected agent is
         #    read-only, run the read-only agent first for analysis, then delegate
