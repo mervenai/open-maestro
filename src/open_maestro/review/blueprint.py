@@ -346,6 +346,14 @@ class DeepReviewResult:
         return "\n".join(lines)
 
 
+# Personas get a few turns, not one: the prompts point at the artifact on
+# disk, and CLI-seated agents (kimi-cli, claude-cli) spend a turn reading
+# the file before answering. max_turns=1 cut them mid-tool-use with
+# error_max_turns (MSTRO-135) — tool-less endpoints (DeepSeek) were immune,
+# which is why calibration passed but --review did not.
+PERSONA_MAX_TURNS = 4
+
+
 def _seat_persona_runtime(
     used_models: set[str],
     base_exclude: set[str] | None = None,
@@ -494,7 +502,7 @@ async def deep_review(
                     runtime, seated_model = _seat_persona_runtime(
                         used_models, model_exclude
                     )
-                    cfg = AgentConfig(model=seated_model, max_turns=1)
+                    cfg = AgentConfig(model=seated_model, max_turns=PERSONA_MAX_TURNS)
                 else:
                     # Test/caller-supplied factory: honor it verbatim.
                     runtime = runtime_factory(None)

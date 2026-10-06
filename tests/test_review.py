@@ -910,6 +910,9 @@ class TestPersonaSeating:
 
         assert review.passed
         assert [r.configs[0].model for r in runtimes] == ["kimi-code/k3"] * 3
+        # MSTRO-135: CLI seats read the artifact before answering — one turn
+        # cut them mid-tool-use (error_max_turns).
+        assert runtimes[0].configs[0].max_turns == review_blueprint.PERSONA_MAX_TURNS
 
     async def test_personas_rotate_across_models(self, tmp_path, monkeypatch):
         doc = tmp_path / "blueprint.md"

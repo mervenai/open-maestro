@@ -235,10 +235,13 @@ async def calibrate_persona(
             # Seat on a configured model like deep_review does — the bare
             # create_runtime(None) default (gpt-4o) is unconfigured on most
             # machines and would calibrate nothing (same fix as MSTRO-132).
-            from open_maestro.review.blueprint import _seat_persona_runtime
+            from open_maestro.review.blueprint import (
+                PERSONA_MAX_TURNS,
+                _seat_persona_runtime,
+            )
 
             runtime, model = _seat_persona_runtime(set())
-            cfg = AgentConfig(model=model, max_turns=1)
+            cfg = AgentConfig(model=model, max_turns=PERSONA_MAX_TURNS)
         out = await runtime.run(prompt, config=cfg)
         report = "" if out.is_error else out.text
         if out.is_error:

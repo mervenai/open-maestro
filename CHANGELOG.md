@@ -5,6 +5,22 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.8] - 2026-10-06
+
+### Fixed
+- **Seated review personas died with `error_max_turns` on CLI seats**
+  (MSTRO-135). `maestro --review` on the IntelInvoiceCoding blueprint:
+  blind-reader (kimi-cli) completed, but fidelity (claude-cli) and
+  quote-context errored with `stop_reason: tool_use` at `num_turns: 2`.
+  Personas ran with `max_turns=1`, but the persona prompts point at the
+  artifact on disk and CLI-seated agents spend a turn reading the file
+  before answering — one turn cut them mid-tool-use. The DeepSeek
+  calibration was immune only because that endpoint exposes no tools,
+  which masked the bug until a CLI seat tried to read. New
+  `PERSONA_MAX_TURNS = 4` applied to the seated paths of `deep_review`
+  and `calibrate_persona`; caller-supplied factories keep `max_turns=1`
+  verbatim. Regression test added.
+
 ## [2.1.7] - 2026-10-06
 
 ### Fixed
