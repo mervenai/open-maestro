@@ -373,6 +373,7 @@ def _seat_persona_runtime(
     """
     from open_maestro.config.capabilities import (
         CodingStrength,
+        CostLevel,
         LatencyHint,
         ReasoningLevel,
         TaskProfile,
@@ -396,7 +397,13 @@ def _seat_persona_runtime(
             latency_preference=LatencyHint.MEDIUM,
         )
         try:
-            runtime_type, model = select_runtime_for_task(profile, exclude=excl)
+            # Review personas are auditors, not production workloads: a
+            # low-cost reasoning seat (e.g. deepseek-flash) is exactly what
+            # the rotation wants, so the default MEDIUM cost floor must not
+            # exclude it (MSTRO-137).
+            runtime_type, model = select_runtime_for_task(
+                profile, exclude=excl, min_cost_level=CostLevel.LOW
+            )
         except RuntimeError as exc:
             last_exc = exc
             continue

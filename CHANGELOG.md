@@ -5,6 +5,23 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.10] - 2026-10-06
+
+### Fixed
+- **Review personas never seated on low-cost reasoning models**
+  (MSTRO-137). `maestro --review` kept falling back to claude-cli seats
+  (errored personas returned Claude Code stream-json envelopes) even
+  though `deepseek-flash` was configured, keyed, and `reasoning: deep`.
+  Root cause: `_seat_persona_runtime` called `select_runtime_for_task`
+  with the router's default `min_cost_level=MEDIUM`, and the registry
+  marks deepseek `cost_level: low` — so it was filtered out before
+  reasoning matching and the third persona degraded to a LIGHT claude
+  seat. Personas are auditors, not production workloads; seating now
+  passes `min_cost_level=CostLevel.LOW` so the designed rotation
+  (k3 → claude-opus → deepseek-flash) actually happens. Verified live:
+  with the key exported, the DEEP seat now returns
+  `openai-sdk deepseek-flash` instead of raising "no available runtime".
+
 ## [2.1.9] - 2026-10-06
 
 ### Fixed

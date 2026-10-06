@@ -999,6 +999,23 @@ class TestPersonaSeating:
         with pytest.raises(RuntimeError, match="no configured model"):
             review_blueprint._seat_persona_runtime(set())
 
+    def test_low_cost_reasoning_model_is_not_cost_filtered(self, tmp_path, monkeypatch):
+        """MSTRO-137: deepseek-flash is cost_level=low; the default MEDIUM
+        cost floor filtered it out of persona seating and the third persona
+        fell through to a LIGHT claude seat. Auditors must see the LOW floor."""
+        from open_maestro.config.capabilities import CostLevel
+
+        calls = self._patch_router(monkeypatch, [("openai-sdk", "deepseek-flash")])
+        runtime = FakeRuntime(self.REPORTS[0])
+        self._patch_create(monkeypatch, [runtime])
+
+        used: set = set()
+        _, model = review_blueprint._seat_persona_runtime(used)
+
+        assert model == "deepseek-flash"
+        assert calls[0]["min_cost_level"] == CostLevel.LOW
+
+
 
 def _quota_error() -> AgentResult:
     return AgentResult(
