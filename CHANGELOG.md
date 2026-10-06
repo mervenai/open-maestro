@@ -5,6 +5,25 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.9] - 2026-10-06
+
+### Fixed
+- **Persona turn budget still too tight for multi-file citation auditors**
+  (MSTRO-136). The 2.1.8 bump to 4 turns wasn't enough: `quote-context`
+  errored again with `error_max_turns` at `num_turns: 5` on the 56KB
+  IntelInvoiceCoding contract. The persona prompts are file-pointer
+  prompts, and the citation personas are multi-file auditors by design
+  (fidelity's prompt instructs it to open 12+ cited repo files). Budget
+  raised to `PERSONA_MAX_TURNS = 12` — covers read + citation
+  verification + answer with headroom while still bounding a stuck agent.
+- **Registry correction: `deepseek-flash` `tool_use: false` → `true`**.
+  The 2.1.6 entry assumed V3-era "no tools on this endpoint". The
+  openai-sdk runtime offers tools regardless of the registry flag (the
+  flag only gates routing), and the live calibration run executed read
+  tools through the DeepSeek endpoint and caught all six planted
+  sentinels — impossible without real file reads. V4.1 handles function
+  calling.
+
 ## [2.1.8] - 2026-10-06
 
 ### Fixed

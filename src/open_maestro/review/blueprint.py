@@ -346,12 +346,14 @@ class DeepReviewResult:
         return "\n".join(lines)
 
 
-# Personas get a few turns, not one: the prompts point at the artifact on
-# disk, and CLI-seated agents (kimi-cli, claude-cli) spend a turn reading
-# the file before answering. max_turns=1 cut them mid-tool-use with
-# error_max_turns (MSTRO-135) — tool-less endpoints (DeepSeek) were immune,
-# which is why calibration passed but --review did not.
-PERSONA_MAX_TURNS = 4
+# Personas get a real turn budget, not one: the prompts point at the
+# artifact on disk and the citation personas (fidelity, quote-context) are
+# multi-file auditors by design — fidelity opens 12+ cited files per its
+# prompt. max_turns=1 cut CLI seats mid-tool-use with error_max_turns
+# (MSTRO-135), and 4 still wasn't enough for a 56KB contract with ~25
+# citations (num_turns=5 on the failed run). 12 covers read+verify+answer
+# with headroom while still bounding a stuck agent.
+PERSONA_MAX_TURNS = 12
 
 
 def _seat_persona_runtime(

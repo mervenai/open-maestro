@@ -146,8 +146,10 @@ models:
   # prices (R1-class reasoning lives in V4 thinking mode; the legacy
   # deepseek-reasoner alias is retired and returns 400). Cheapest
   # reasoning seat; serves the adversarial panel's causal-auditor lens
-  # (MSTRO-133). Tool use is not exposed on this endpoint — the router
-  # only seats no-tool work here.
+  # (MSTRO-133). tool_use is true: proven live — the calibration harness
+  # executed read tools through this endpoint and caught all planted
+  # sentinels (MSTRO-136); the openai-sdk runtime offers tools regardless
+  # of this flag, which only gates routing.
   # Get a key at https://platform.deepseek.com and export DEEPSEEK_API_KEY.
   # OpenRouter alternative: base_url https://openrouter.ai/api/v1,
   # api_key_env OPENROUTER_API_KEY, identifier deepseek/deepseek-flash.
@@ -162,7 +164,7 @@ models:
       api_key_env: DEEPSEEK_API_KEY
     capabilities:
       tier: standard
-      tool_use: false
+      tool_use: true
       vision: false
       computer_use: false
       reasoning: deep
