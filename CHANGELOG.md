@@ -5,6 +5,27 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.5] - 2026-10-06
+
+### Fixed
+- **Deep-review personas seated on the unconfigured SDK default**
+  (MSTRO-132). `maestro --review <doc>` and the v2.1.0 auto deep-review
+  created persona runtimes via `create_runtime(None)` with an empty
+  `AgentConfig`; auto-detect lands on openai-sdk, whose SDK default is
+  gpt-4o — a model with no configured endpoint on most machines. Every
+  persona errored and the gate FAILed spuriously ("not run on this
+  version" for all five ledger profiles). Now `_seat_persona_runtime`
+  seats each persona through the capability router
+  (`select_runtime_for_task`) on configured models only, preferring a
+  DEEP-reasoning profile (hard bar — weak fast models are excluded) and
+  degrading to LIGHT when no deep model is configured. Personas rotate
+  across configured model families (models already used this pass are
+  excluded, reusing when only one qualifies); session-quota-exhausted
+  models are skipped, and a run that returns a `quota_exhausted` error
+  marks the model on the session circuit and re-seats once on the next
+  capable model. Caller-supplied `runtime_factory` (tests, calibration)
+  is honored verbatim. 5 regression tests added.
+
 ## [2.1.4] - 2026-10-06
 
 ### Fixed

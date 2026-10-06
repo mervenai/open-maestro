@@ -346,6 +346,58 @@ class DeepReviewResult:
         return "\n".join(lines)
 
 
+def _seat_persona_runtime(
+    used_models: set[str],
+    base_exclude: set[str] | None = None,
+) -> tuple[AgentRuntime, str]:
+    """Seat a review persona on the best *configured* model.
+
+    Without this, ``create_runtime(None)`` lands on the auto-detected
+    runtime's SDK default (gpt-4o), which has no endpoint in most setups
+    — every persona errors and the gate FAILs spuriously. Personas rotate
+    across the configured model families (models already used this review
+    are excluded, falling back to reuse when only one qualifies), and
+    session-quota-exhausted models are always skipped. Preference is a
+    deep-reasoning seat; the profile degrades to LIGHT so the gate still
+    runs when no deep-reasoning model is configured.
+    """
+    from open_maestro.config.capabilities import (
+        CodingStrength,
+        LatencyHint,
+        ReasoningLevel,
+        TaskProfile,
+    )
+    from open_maestro.runtime import quota as quota_mod
+    from open_maestro.runtime.factory import create_runtime, select_runtime_for_task
+
+    exclude = set(base_exclude or ()) | quota_mod.exhausted() | used_models
+    attempts = [
+        (ReasoningLevel.DEEP, exclude or None),
+        (ReasoningLevel.LIGHT, exclude or None),
+        (ReasoningLevel.LIGHT, None),
+    ]
+    last_exc: Exception | None = None
+    for reasoning, excl in attempts:
+        profile = TaskProfile(
+            needs_tools=False,
+            reasoning_depth=reasoning,
+            coding_strength=CodingStrength.LOW,
+            context_tokens_estimate=32000,
+            latency_preference=LatencyHint.MEDIUM,
+        )
+        try:
+            runtime_type, model = select_runtime_for_task(profile, exclude=excl)
+        except RuntimeError as exc:
+            last_exc = exc
+            continue
+        used_models.add(model)
+        logger.info("Seated review persona on %s via %s", model, runtime_type)
+        return create_runtime(runtime_type), model
+    raise RuntimeError(
+        f"no configured model available for review personas: {last_exc}"
+    )
+
+
 def _default_persona_kwargs(doc: Path, project_path: Path) -> dict[str, str]:
     """Sensible default substitutions for the gating personas."""
     docs_dir = project_path / "docs"
@@ -396,16 +448,24 @@ async def deep_review(
     runtime_factory: Callable[..., AgentRuntime] | None = None,
     ledger: GateLedger | None = None,
     extra_kwargs: dict[str, str] | None = None,
+    model_exclude: set[str] | None = None,
 ) -> DeepReviewResult:
     """Run the gating personas against *doc* as fresh, isolated agents.
 
     Each persona gets its own runtime instance (fresh context — the agent
     has not seen the author's reasoning or another audit's output).  RESULT
     lines are recorded to the gate ledger.
+
+    When *runtime_factory* is None (production), personas are seated on the
+    best configured models via the capability router — never the runtime
+    SDK default, which is usually unconfigured. Seats rotate across model
+    families, skip *model_exclude* and session-quota-exhausted models, and
+    re-seat once when a run comes back with a quota-exhausted error.
     """
     doc = Path(doc)
     project = Path(project_path) if project_path else doc.parent
-    if runtime_factory is None:
+    seat_models = runtime_factory is None
+    if seat_models:
         from open_maestro.runtime.factory import create_runtime
 
         runtime_factory = create_runtime
@@ -416,6 +476,7 @@ async def deep_review(
     kwargs.update(extra_kwargs or {})
 
     result = DeepReviewResult(doc=doc)
+    used_models: set[str] = set()
     for persona_id in personas:
         from open_maestro.review.personas import PERSONAS
 
@@ -423,16 +484,45 @@ async def deep_review(
             result.errors[persona_id] = "unknown persona"
             continue
         prompt = render(persona_id, **kwargs)
-        try:
-            runtime = runtime_factory(None)
-            cfg = AgentConfig(max_turns=1)
-            out = await runtime.run(prompt, config=cfg)
-            if out.is_error:
-                raise RuntimeError(out.text[:200])
-            report = out.text
-        except Exception as exc:
-            result.errors[persona_id] = str(exc)[:300]
-            logger.warning("persona %s failed on %s: %s", persona_id, doc, exc)
+        reseats = 0
+        while True:
+            seated_model: str | None = None
+            try:
+                if seat_models:
+                    # Production path: seat on a configured model, not the
+                    # runtime SDK default (gpt-4o) — see _seat_persona_runtime.
+                    runtime, seated_model = _seat_persona_runtime(
+                        used_models, model_exclude
+                    )
+                    cfg = AgentConfig(model=seated_model, max_turns=1)
+                else:
+                    # Test/caller-supplied factory: honor it verbatim.
+                    runtime = runtime_factory(None)
+                    cfg = AgentConfig(max_turns=1)
+                out = await runtime.run(prompt, config=cfg)
+                if out.is_error:
+                    quota_reason = out.metadata.get("quota_exhausted")
+                    if seated_model and quota_reason and reseats < 1:
+                        from open_maestro.runtime import quota as quota_mod
+
+                        quota_mod.mark_exhausted(seated_model)
+                        logger.warning(
+                            "persona %s: model %s quota exhausted (%s); "
+                            "re-seating on another model",
+                            persona_id,
+                            seated_model,
+                            quota_reason,
+                        )
+                        reseats += 1
+                        continue
+                    raise RuntimeError(out.text[:200])
+                report = out.text
+                break
+            except Exception as exc:
+                result.errors[persona_id] = str(exc)[:300]
+                logger.warning("persona %s failed on %s: %s", persona_id, doc, exc)
+                break
+        if persona_id in result.errors:
             continue
         result.persona_reports[persona_id] = report
         result.admissions[persona_id] = admission_summary(report)

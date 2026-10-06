@@ -28,6 +28,7 @@ class FakeRuntime(AgentRuntime):
         self.response_text = response_text
         self.is_error = is_error
         self.prompts: list[str] = []
+        self.configs: list[AgentConfig] = []
 
     @property
     def runtime_name(self) -> str:
@@ -35,6 +36,7 @@ class FakeRuntime(AgentRuntime):
 
     async def run(self, prompt: str, config: AgentConfig | None = None) -> AgentResult:
         self.prompts.append(prompt)
+        self.configs.append(config)
         return AgentResult(text=self.response_text, is_error=self.is_error)
 
     async def run_with_hooks(self, prompt, tool_guard=None, blocked_tools=None, config=None):
@@ -820,3 +822,157 @@ class TestNonGitChangeDetection:
         docs.mkdir()
         (docs / "blueprint-x.md").write_text("Version: 1.0\n")
         assert review_blueprint._is_new_file(tmp_path, "docs/blueprint-x.md")
+
+
+# ---------------------------------------------------------------------------
+# Persona seating on configured models (MSTRO-128)
+
+
+class TestPersonaSeating:
+    """deep_review must seat personas on configured models, never the SDK
+    default (gpt-4o) — which has no endpoint in most setups."""
+
+    # Persona-appropriate RESULT lines, in GATING_PERSONAS order.
+    REPORTS = (
+        "answers\nRESULT correct=10/10 reconciles=0 confusions=0 blocking=0",
+        "RESULT blockers=0 should_fix=0 contradictions=0 weakened=0",
+        "RESULT blockers=0 should_fix=0 framing=0",
+    )
+
+    def _patch_router(self, monkeypatch, seats):
+        """Route select_runtime_for_task through *seats* (one per call)."""
+        import open_maestro.runtime.factory as factory_mod
+
+        calls: list[dict] = []
+        state = {"i": 0}
+
+        def fake_select(profile, **kwargs):
+            calls.append({"reasoning": profile.reasoning_depth, **kwargs})
+            i = state["i"]
+            if i >= len(seats):
+                raise RuntimeError("no more seats")
+            state["i"] += 1
+            seat = seats[i]
+            if isinstance(seat, Exception):
+                raise seat
+            return seat
+
+        monkeypatch.setattr(factory_mod, "select_runtime_for_task", fake_select)
+        return calls
+
+    def _patch_create(self, monkeypatch, runtimes):
+        import open_maestro.runtime.factory as factory_mod
+
+        created: list[str] = []
+
+        def fake_create(runtime_type, config=None):
+            created.append(runtime_type)
+            return runtimes[len(created) - 1]
+
+        monkeypatch.setattr(factory_mod, "create_runtime", fake_create)
+        return created
+
+    async def test_seats_on_configured_model(self, tmp_path, monkeypatch):
+        doc = tmp_path / "blueprint.md"
+        doc.write_text("# doc\n")
+        runtimes = [FakeRuntime(t) for t in self.REPORTS]
+        self._patch_router(monkeypatch, [("kimi-cli", "kimi-code/k3")] * 3)
+        self._patch_create(monkeypatch, runtimes)
+
+        review = await deep_review(doc, project_path=tmp_path)
+
+        assert review.passed
+        assert [r.configs[0].model for r in runtimes] == ["kimi-code/k3"] * 3
+
+    async def test_personas_rotate_across_models(self, tmp_path, monkeypatch):
+        doc = tmp_path / "blueprint.md"
+        doc.write_text("# doc\n")
+        runtimes = [FakeRuntime(t) for t in self.REPORTS]
+        calls = self._patch_router(
+            monkeypatch,
+            [("kimi-cli", "kimi-code/k3"), ("openai-sdk", "glm-5-3-flash"),
+             ("claude-cli", "claude-sonnet")],
+        )
+        self._patch_create(monkeypatch, runtimes)
+
+        review = await deep_review(doc, project_path=tmp_path)
+
+        assert review.passed
+        assert [r.configs[0].model for r in runtimes] == [
+            "kimi-code/k3",
+            "glm-5-3-flash",
+            "claude-sonnet",
+        ]
+        # The second seat excludes the model the first persona used.
+        assert "kimi-code/k3" in (calls[1]["exclude"] or set())
+
+    async def test_quota_exhaustion_marks_and_reseats(
+        self, tmp_path, monkeypatch
+    ):
+        from open_maestro.runtime import quota as quota_mod
+
+        class QuotaRuntime(FakeRuntime):
+            async def run(self, prompt, config=None):
+                self.prompts.append(prompt)
+                self.configs.append(config)
+                return _quota_error()
+
+        quota_mod.clear()
+        doc = tmp_path / "blueprint.md"
+        doc.write_text("# doc\n")
+        dead = QuotaRuntime()
+        seats = [
+            ("openai-sdk", "glm-5-3-flash"),   # persona 1, attempt 1 (dies)
+            ("kimi-cli", "kimi-code/k3"),      # persona 1, re-seat
+            ("kimi-cli", "kimi-code/k3"),      # persona 2
+            ("kimi-cli", "kimi-code/k3"),      # persona 3
+        ]
+        runtimes = [dead] + [FakeRuntime(t) for t in self.REPORTS]
+        self._patch_router(monkeypatch, seats)
+        created = self._patch_create(monkeypatch, runtimes)
+
+        review = await deep_review(doc, project_path=tmp_path)
+
+        assert review.passed
+        assert created[:2] == ["openai-sdk", "kimi-cli"]
+        assert runtimes[1].configs[0].model == "kimi-code/k3"
+        assert quota_mod.is_exhausted("glm-5-3-flash")
+        quota_mod.clear()
+
+    async def test_falls_back_to_light_when_no_deep_model(
+        self, tmp_path, monkeypatch
+    ):
+        doc = tmp_path / "blueprint.md"
+        doc.write_text("# doc\n")
+        runtime = FakeRuntime(self.REPORTS[1])
+        calls = self._patch_router(
+            monkeypatch,
+            [RuntimeError("no deep model"), ("openai-sdk", "glm-5-3-flash")],
+        )
+        self._patch_create(monkeypatch, [runtime])
+
+        review = await deep_review(
+            doc, project_path=tmp_path, personas=("fidelity",)
+        )
+
+        assert review.passed
+        assert calls[0]["reasoning"] == "deep"
+        assert calls[1]["reasoning"] == "light"
+
+    def test_no_configured_model_errors_persona(self, tmp_path, monkeypatch):
+        """Zero usable models: persona records an error, gate degrades."""
+        import pytest
+
+        doc = tmp_path / "blueprint.md"
+        doc.write_text("# doc\n")
+        self._patch_router(monkeypatch, [])
+        with pytest.raises(RuntimeError, match="no configured model"):
+            review_blueprint._seat_persona_runtime(set())
+
+
+def _quota_error() -> AgentResult:
+    return AgentResult(
+        text="insufficient balance",
+        is_error=True,
+        metadata={"quota_exhausted": "insufficient balance"},
+    )
