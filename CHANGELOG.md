@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.open-maestro/reviews/.../blind-reader.md`". Write is best-effort: a
   filesystem failure logs a warning and never fails the review.
 
+### Fixed
+- **`maestro --version` reported a stale 2.1.3**. `__init__.py` carried a
+  hardcoded `__version__` that was never bumped alongside pyproject.toml
+  (nine releases out of date). `__version__` is now derived from the
+  installed package metadata — pyproject.toml is the single source of
+  truth — and the editable-install metadata was refreshed, so
+  `--version` reports 2.1.11.
+
 ## [2.1.10] - 2026-10-06
 
 ### Fixed
