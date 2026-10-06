@@ -601,6 +601,23 @@ class TestCalibrate:
         # Fake runtime never emits the sentinel, so nothing is caught.
         assert result.recall_rate == 0.0
 
+    async def test_default_path_seats_on_configured_model(self, tmp_path, monkeypatch):
+        """MSTRO-134: the bare create_runtime(None) default is gpt-4o, which
+        is unconfigured on most machines — calibrating nothing."""
+        doc = tmp_path / "bp.md"
+        doc.write_text("# Blueprint\n\nThe design is recommended. 3 findings remain.\n")
+        runtime = FakeRuntime(
+            "RESULT blockers=0 should_fix=0 contradictions=0 weakened=0"
+        )
+        monkeypatch.setattr(
+            review_blueprint,
+            "_seat_persona_runtime",
+            lambda used, base=None: (runtime, "kimi-code/k3"),
+        )
+        result = await calibrate.calibrate_persona(doc, "fidelity", project_path=tmp_path)
+        assert runtime.configs[0].model == "kimi-code/k3"
+        assert result.persona == "fidelity"
+
 
 # ---------------------------------------------------------------- auto deep review
 

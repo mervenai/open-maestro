@@ -220,7 +220,6 @@ async def calibrate_persona(
 ) -> CalibrationResult:
     """Run one persona against a defect-seeded copy of *doc*."""
     from open_maestro.review.blueprint import _default_persona_kwargs
-    from open_maestro.runtime.factory import create_runtime
 
     doc = Path(doc)
     seeded, planted = inject_defects(doc.read_text(), defect_types)
@@ -229,9 +228,18 @@ async def calibrate_persona(
     try:
         kwargs = _default_persona_kwargs(seeded_path, Path(project_path or doc.parent))
         prompt = render(persona, **kwargs)
-        factory = runtime_factory or create_runtime
-        runtime = factory(None)
-        out = await runtime.run(prompt, config=AgentConfig(max_turns=1))
+        if runtime_factory is not None:
+            runtime = runtime_factory(None)
+            cfg = AgentConfig(max_turns=1)
+        else:
+            # Seat on a configured model like deep_review does — the bare
+            # create_runtime(None) default (gpt-4o) is unconfigured on most
+            # machines and would calibrate nothing (same fix as MSTRO-132).
+            from open_maestro.review.blueprint import _seat_persona_runtime
+
+            runtime, model = _seat_persona_runtime(set())
+            cfg = AgentConfig(model=model, max_turns=1)
+        out = await runtime.run(prompt, config=cfg)
         report = "" if out.is_error else out.text
         if out.is_error:
             logger.warning("persona %s errored during calibration", persona)

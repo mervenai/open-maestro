@@ -5,6 +5,19 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.7] - 2026-10-06
+
+### Fixed
+- **Calibration harness seated on the unconfigured SDK default**
+  (MSTRO-134). `calibrate_persona` used `create_runtime(None)` with an
+  empty `AgentConfig` when no factory was passed — the same bug class
+  MSTRO-132 fixed in `deep_review` — so persona calibration silently
+  targeted gpt-4o (no endpoint on most machines) and measured nothing.
+  The default path now seats via `_seat_persona_runtime` (capability
+  router, configured models, quota-aware); explicit `runtime_factory`
+  (tests, targeted model runs like the DeepSeek seat calibration) is
+  honored verbatim. Regression test added.
+
 ## [2.1.6] - 2026-10-06
 
 ### Added
