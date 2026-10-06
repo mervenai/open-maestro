@@ -5,6 +5,21 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.11] - 2026-10-06
+
+### Added
+- **`maestro --review` persists full persona reports to disk**
+  (MSTRO-138). Previously only RESULT counts reached the gate ledger
+  (`.open-maestro/gates/<sha>.json`) and the register was printed to
+  stdout — the quoted findings (blocking confusions, citation mismatches)
+  lived only in terminal scrollback, so a later `--interactive` turn could
+  not act on them. Each persona report is now written to
+  `.open-maestro/reviews/<doc-stem>-<sha>/<persona>.md`, and the register
+  prints a `report:` path per persona. Example follow-up inside
+  `--interactive`: "resolve the blocking blind-reader findings in
+  `.open-maestro/reviews/.../blind-reader.md`". Write is best-effort: a
+  filesystem failure logs a warning and never fails the review.
+
 ## [2.1.10] - 2026-10-06
 
 ### Fixed

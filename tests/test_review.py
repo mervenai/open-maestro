@@ -914,6 +914,27 @@ class TestPersonaSeating:
         # cut them mid-tool-use (error_max_turns).
         assert runtimes[0].configs[0].max_turns == review_blueprint.PERSONA_MAX_TURNS
 
+    async def test_persona_reports_persisted(self, tmp_path, monkeypatch):
+        """MSTRO-138: full persona reports must land on disk (the ledger keeps
+        only counts), and the register must point at them so a later turn can
+        resolve the quoted findings."""
+        doc = tmp_path / "blueprint.md"
+        doc.write_text("# doc\n")
+        runtime = FakeRuntime(self.REPORTS[1])
+        self._patch_router(monkeypatch, [("kimi-cli", "kimi-code/k3")])
+        self._patch_create(monkeypatch, [runtime])
+
+        review = await deep_review(doc, project_path=tmp_path, personas=("fidelity",))
+
+        report_path = tmp_path / review.report_paths["fidelity"]
+        assert report_path.is_file()
+        assert report_path.read_text() == self.REPORTS[1]
+        # register points at the persisted report
+        assert "report:" in review.register_text()
+        assert review.report_paths["fidelity"] in review.register_text()
+        # stored under .open-maestro/reviews/<doc-stem>-<sha>/
+        assert ".open-maestro" in review.report_paths["fidelity"]
+
     async def test_personas_rotate_across_models(self, tmp_path, monkeypatch):
         doc = tmp_path / "blueprint.md"
         doc.write_text("# doc\n")

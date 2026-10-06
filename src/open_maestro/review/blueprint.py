@@ -321,6 +321,10 @@ class DeepReviewResult:
     persona_verdicts: dict[str, tuple[str, list[str]]] = field(default_factory=dict)
     admissions: dict[str, FindingSummary] = field(default_factory=dict)
     errors: dict[str, str] = field(default_factory=dict)
+    # Absolute paths of the persisted per-persona reports (empty when the
+    # write failed or nothing ran). The gate ledger keeps only counts; these
+    # files carry the quoted findings a later turn needs to act on.
+    report_paths: dict[str, str] = field(default_factory=dict)
 
     @property
     def passed(self) -> bool:
@@ -338,6 +342,9 @@ class DeepReviewResult:
                 lines.append(f"- {adm.summary}")
                 for ev in adm.admitted_evidence:
                     lines.append(f"  - {ev}")
+            path = self.report_paths.get(persona)
+            if path:
+                lines.append(f"- report: {path}")
             lines.append("")
         if self.errors:
             lines.append("## Errored personas")
@@ -549,7 +556,34 @@ async def deep_review(
             )
         except Exception as exc:
             result.errors[persona_id] = f"ledger: {exc}"
+    _persist_persona_reports(result, project)
     return result
+
+
+def _persist_persona_reports(
+    result: DeepReviewResult, project: Path
+) -> None:
+    """Write each full persona report under
+    ``.open-maestro/reviews/<doc-stem>-<sha>/<persona>.md``.
+
+    The gate ledger records only RESULT counts, so without this the quoted
+    findings (the blocking confusions, the citation mismatches) live only in
+    terminal scrollback and a later turn — interactive or otherwise — cannot
+    act on them. Best-effort: a write failure must not fail the review.
+    """
+    if not result.persona_reports:
+        return
+    from open_maestro.review.gate import sha as _sha
+
+    out_dir = project / ".open-maestro" / "reviews" / f"{result.doc.stem}-{_sha(result.doc)}"
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for persona_id, report_text in result.persona_reports.items():
+            report_path = out_dir / f"{persona_id}.md"
+            report_path.write_text(report_text)
+            result.report_paths[persona_id] = str(report_path)
+    except OSError as exc:
+        logger.warning("deep review: could not persist persona reports: %s", exc)
 
 
 def blueprint_gate(project_path: str | Path, profile: str = "review") -> list[str]:
