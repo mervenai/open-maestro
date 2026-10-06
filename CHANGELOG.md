@@ -5,6 +5,24 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.6] - 2026-10-06
+
+### Added
+- **DeepSeek V4.1 Flash joins the adversarial panel** (MSTRO-133). First
+  vendor added past the original MSTRO-115 no-new-signup constraint, from
+  the council seat evaluation: cheapest reasoning-capable seat available
+  (~$0.004–0.01 per panel voice), a non-US-lab training corpus for real
+  diversity, and the natural successor to the dead GLM balance as the
+  panel's cheap voice. New `deepseek-flash` registry entry (openai-sdk,
+  `https://api.deepseek.com/v1`, `DEEPSEEK_API_KEY`, reasoning deep,
+  `tool_use: false` — the endpoint exposes no tools, so the router only
+  seats no-tool work there; OpenRouter alternative documented in the
+  entry). Fourth panel seat takes the previously unassigned
+  `causal-auditor` lens. `CHAIRMAN_PREFERENCE` unchanged — DeepSeek
+  becomes chairman-eligible only after a calibration run proves ranking
+  stability, the same bar GLM failed. GLM seat retained (swap decision
+  deferred until the ZAI balance decision).
+
 ## [2.1.5] - 2026-10-06
 
 ### Fixed

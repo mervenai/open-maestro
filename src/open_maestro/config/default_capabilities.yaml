@@ -142,6 +142,39 @@ models:
       price_input_per_million: 0.15
       price_output_per_million: 0.50
 
+  # DeepSeek V4.1 Flash — reasoning-capable thinking model at fast-tier
+  # prices (R1-class reasoning lives in V4 thinking mode; the legacy
+  # deepseek-reasoner alias is retired and returns 400). Cheapest
+  # reasoning seat; serves the adversarial panel's causal-auditor lens
+  # (MSTRO-133). Tool use is not exposed on this endpoint — the router
+  # only seats no-tool work here.
+  # Get a key at https://platform.deepseek.com and export DEEPSEEK_API_KEY.
+  # OpenRouter alternative: base_url https://openrouter.ai/api/v1,
+  # api_key_env OPENROUTER_API_KEY, identifier deepseek/deepseek-flash.
+  deepseek-flash:
+    name: "DeepSeek V4.1 Flash"
+    provider: deepseek
+    identifiers:
+      openai-sdk: deepseek-flash
+    endpoint:
+      runtime: openai-sdk
+      base_url: https://api.deepseek.com/v1
+      api_key_env: DEEPSEEK_API_KEY
+    capabilities:
+      tier: standard
+      tool_use: false
+      vision: false
+      computer_use: false
+      reasoning: deep
+      coding_strength: high
+      max_context_tokens: 1000000
+      max_output_tokens: 8192
+      latency_hint: high
+      cost_level: low
+      relative_cost: 0.4
+      price_input_per_million: 0.30
+      price_output_per_million: 1.20
+
   openai-gpt4o-mini:
     name: "GPT-4o mini"
     provider: openai

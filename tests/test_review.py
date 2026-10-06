@@ -230,6 +230,7 @@ class TestPanel:
             "kimi-k3": "Falsifier finding one.\nFINDINGS n=2",
             "glm-flash": "Skeptic finding.\nFINDINGS n=1",
             "claude-sonnet": "Steel-man case.\nFINDINGS n=1",
+            "deepseek-flash": "Causal audit finding.\nFINDINGS n=1",
         }
         rt = _seat_responses(
             '{"claims": [{"text": "choose queue vs direct", "kind": "J"},'
@@ -240,10 +241,10 @@ class TestPanel:
         factory = lambda rt_type: rt("seat")  # replaced below
         made: list[rt] = []
         counter = {"i": 0}
-        ids = ["kimi-k3", "glm-flash", "claude-sonnet"]
+        ids = ["kimi-k3", "glm-flash", "claude-sonnet", "deepseek-flash"]
 
         def factory(rt_type):
-            inst = rt(ids[counter["i"] % 3])
+            inst = rt(ids[counter["i"] % len(ids)])
             counter["i"] += 1
             made.append(inst)
             return inst
@@ -300,6 +301,15 @@ class TestPanel:
         assert panel.choose_chairman(glm_only) is glm_only[0]  # degenerate fallback
         normal = panel.choose_chairman(panel.PANEL_SEATS)
         assert normal is not None and normal.id != "glm-flash"
+
+    def test_seat_integrity(self):
+        """MSTRO-133: unique seat ids, defined lenses, and the uncalibrated
+        DeepSeek voice is seated but not chairman-eligible."""
+        ids = [s.id for s in panel.PANEL_SEATS]
+        assert len(ids) == len(set(ids))
+        assert all(s.lens in panel.LENSES for s in panel.PANEL_SEATS)
+        assert "deepseek-flash" in ids
+        assert "deepseek-flash" not in panel.CHAIRMAN_PREFERENCE
 
     async def test_chairman_retries_transient_api_error(self, monkeypatch):
         """MSTRO-122: 'API Error: Connection closed mid-response' must retry."""

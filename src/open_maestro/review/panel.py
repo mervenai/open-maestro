@@ -1,9 +1,13 @@
 """Multi-model adversarial panel, seated with the models maestro already has.
 
-Constraint (MSTRO-115): no new vendor signups.  The panel seats one worker
-per model family already configured — Kimi k3 (kimi-cli), GLM-5.3-Flash
-(openai-sdk), Claude (claude-cli) — each with a distinct attack lens so they
-cannot all find the same easy flaw.
+History: the original constraint (MSTRO-115) was "no new vendor signups" —
+the panel launched with one worker per model family already configured
+(Kimi k3 via kimi-cli, GLM-5.3-Flash via openai-sdk, Claude via claude-cli).
+MSTRO-133 lifted that for DeepSeek V4.1 Flash: cheapest reasoning-capable
+seat available, genuinely different training corpus, and it replaces the
+dead GLM balance as the panel's cheap voice. GLM stays seated (still
+configured; when its balance dies it records as unreachable — silence is
+never consent).
 
 Discipline (from skill-share brainstorm.md + karpathy/llm-council):
 
@@ -55,6 +59,7 @@ PANEL_SEATS: tuple[PanelSeat, ...] = (
     PanelSeat("kimi-k3", "falsifier", "kimi-cli", "kimi-code/k3"),
     PanelSeat("glm-flash", "skeptic", "openai-sdk", "glm-5.3-flash"),
     PanelSeat("claude-sonnet", "steel-man", "claude-cli", "claude-sonnet-4-6"),
+    PanelSeat("deepseek-flash", "causal-auditor", "openai-sdk", "deepseek-flash"),
 )
 
 # Chairman preference order; GLM is deliberately absent.
