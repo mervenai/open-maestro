@@ -154,6 +154,11 @@ class SupabaseDashboardPublisher:
             metadata.update(extra_metadata)
         now = datetime.now(UTC).isoformat()
 
+        # ``dashboard_json`` carries the full client-safe snapshot, including a
+        # top-level ``design_tokens`` key (color palette + status->color map,
+        # see ``open_maestro.milestones.dashboard.design_tokens``). The Lovable
+        # app reads those tokens to theme the dashboard identically to the local
+        # HTML renderer; no separate token field is needed on the row.
         row = {
             "project_token": token,
             "dashboard_json": json.loads(export_dashboard_json(plan)),
