@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
+
 import pytest
 
 from open_maestro.runtime.base import AgentResult
@@ -106,6 +109,51 @@ class TestClaudeCLIParsing:
         assert result.text == "plain response"
 
 
+class TestClaudeStreamJsonParsing:
+    def test_parse_result_event_from_ndjson_stream(self):
+        stream = "\n".join(
+            [
+                '{"type":"system","subtype":"init","session_id":"s1"}',
+                '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"x.md"}}]}}',
+                '{"type":"assistant","message":{"content":[{"type":"text","text":"editing"}]}}',
+                '{"type":"result","subtype":"success","result":"all done","session_id":"s1",'
+                '"total_cost_usd":0.42,"num_turns":3,"is_error":false,'
+                '"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},'
+                '"uuid":"u1","stop_reason":"end_turn"}',
+            ]
+        )
+        result = ClaudeCLIRuntime._parse_stream_output(stream, duration_ms=99)
+        assert result.text == "all done"
+        assert result.session_id == "s1"
+        assert result.cost_usd == 0.42
+        assert result.num_turns == 3
+        assert result.tokens_used == 15
+        assert result.duration_ms == 99
+        assert not result.is_error
+        # stream-json extras stay out of metadata
+        assert "uuid" not in result.metadata
+        assert "stop_reason" not in result.metadata
+
+    def test_missing_result_event_recovers_assistant_text(self):
+        stream = (
+            '{"type":"assistant","message":{"content":[{"type":"text","text":"partial"}]}}\n'
+            "not json\n"
+        )
+        result = ClaudeCLIRuntime._parse_stream_output(stream)
+        assert result.text == "partial"
+
+    def test_empty_stream_falls_back_to_plain_parse(self):
+        result = ClaudeCLIRuntime._parse_stream_output("plain response")
+        assert result.text == "plain response"
+
+    def test_build_args_uses_stream_json_with_verbose(self):
+        runtime = ClaudeCLIRuntime()
+        args = runtime._build_args("hi")
+        assert "--output-format" in args
+        assert args[args.index("--output-format") + 1] == "stream-json"
+        assert "--verbose" in args
+
+
 class TestOpenAISDKRuntime:
     def test_available_with_base_url_no_api_key(self):
         from open_maestro.runtime.openai_sdk import OpenAISDKRuntime
@@ -113,11 +161,27 @@ class TestOpenAISDKRuntime:
         runtime = OpenAISDKRuntime(base_url="http://localhost:11434/v1")
         assert runtime.is_available() is True
 
-    def test_not_available_without_credentials_or_base_url(self):
+    def test_not_available_without_credentials_or_base_url(self, monkeypatch):
+        from open_maestro.runtime import openai_sdk
         from open_maestro.runtime.openai_sdk import OpenAISDKRuntime
 
+        # Clear generic *and* provider-specific endpoint credentials so the
+        # probe cannot find any configured cloud endpoint (a developer machine
+        # may legitimately export ZAI_API_KEY/DEEPSEEK_API_KEY, which otherwise
+        # makes the runtime available and leaks into this test).
+        for var in (
+            "OPENAI_API_KEY",
+            "OPENAI_BASE_URL",
+            "ZAI_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "DASHSCOPE_API_KEY",
+        ):
+            monkeypatch.delenv(var, raising=False)
+        # Neutralise local Ollama auto-detection so a server running on the
+        # developer's machine does not make the runtime look available.
+        monkeypatch.setattr(openai_sdk, "_ollama_api_base", lambda: None)
+
         runtime = OpenAISDKRuntime()
-        # This assumes OPENAI_API_KEY is not set in the test environment.
         assert runtime.is_available() is False
 
 
@@ -434,11 +498,21 @@ class TestRuntimeAutoDetection:
     def test_fallback_to_cli_when_openai_sdk_unavailable(self, monkeypatch):
         import shutil
 
-        from open_maestro.runtime import factory
+        from open_maestro.runtime import factory, openai_sdk
 
         monkeypatch.setattr(shutil, "which", lambda _bin: "/fake/bin")
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+        # Clear generic and provider-specific credentials, and neutralise local
+        # Ollama auto-detection, so the openai-sdk runtime is genuinely
+        # unavailable and the CLI fallback is exercised.
+        for var in (
+            "OPENAI_API_KEY",
+            "OPENAI_BASE_URL",
+            "ZAI_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "DASHSCOPE_API_KEY",
+        ):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setattr(openai_sdk, "_ollama_api_base", lambda: None)
 
         runtime = factory._auto_detect_runtime()
         assert runtime == "kimi-cli"
@@ -483,6 +557,13 @@ class TestRuntimeAutoDetection:
 
         monkeypatch.setattr(shutil, "which", lambda _bin: "/fake/bin")
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        # Only generic OpenAI credentials are configured. Clear provider-specific
+        # endpoint keys so cheaper LOW-cost models reachable only via their own
+        # endpoint (deepseek-flash/glm-5.3-flash, selectable only when
+        # DEEPSEEK_API_KEY/ZAI_API_KEY is set) are not available and leak in from
+        # the developer's environment.
+        for var in ("ZAI_API_KEY", "DEEPSEEK_API_KEY", "DASHSCOPE_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
         # Avoid picking a real local Ollama model if one happens to be running.
         monkeypatch.setattr(availability, "_ollama_models", lambda: set())
 
@@ -523,6 +604,72 @@ class TestRuntimeAutoDetection:
         assert model != "gpt-4o-mini"
 
 
+class TestRuntimePinning:
+    """OPEN_MAESTRO_RUNTIME and explicit model pins must steer the router."""
+
+    def test_select_honors_open_maestro_runtime_env(self, monkeypatch):
+        import shutil
+
+        from open_maestro.config.capabilities import CostLevel, TaskProfile
+        from open_maestro.runtime import factory
+
+        monkeypatch.setattr(shutil, "which", lambda _bin: "/fake/bin")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("OPEN_MAESTRO_RUNTIME", "claude-cli")
+
+        runtime, model = factory.select_runtime_for_task(
+            TaskProfile(), min_cost_level=CostLevel.LOW
+        )
+        assert runtime == "claude-cli"
+        assert model.startswith("claude-")
+
+    def test_select_unknown_env_runtime_raises(self, monkeypatch):
+        from open_maestro.config.capabilities import TaskProfile
+        from open_maestro.runtime import factory
+
+        monkeypatch.setenv("OPEN_MAESTRO_RUNTIME", "not-a-runtime")
+        with pytest.raises(RuntimeError, match="OPEN_MAESTRO_RUNTIME"):
+            factory.select_runtime_for_task(TaskProfile())
+
+    def test_runtime_for_model_vendor_shorthand(self, monkeypatch):
+        import shutil
+
+        from open_maestro.runtime import factory
+
+        monkeypatch.setattr(
+            shutil, "which", lambda b: "/fake/bin" if b == "claude" else None
+        )
+        assert factory.runtime_for_model("opus") == "claude-cli"
+        assert factory.runtime_for_model("claude-sonnet-4-6") == "claude-cli"
+
+    def test_runtime_for_model_id(self, monkeypatch):
+        import shutil
+
+        from open_maestro.runtime import factory
+
+        monkeypatch.setattr(
+            shutil, "which", lambda b: "/fake/bin" if b == "kimi" else None
+        )
+        assert factory.runtime_for_model("kimi-k3") == "kimi-cli"
+
+    def test_runtime_for_model_unknown_returns_none(self, monkeypatch):
+        from open_maestro.runtime import factory
+
+        assert factory.runtime_for_model("model-that-does-not-exist") is None
+
+    def test_runtime_for_model_claimed_runtime_when_unavailable(self, monkeypatch):
+        """A pin whose backend is missing still reports the runtime it needs,
+        so the caller fails loudly instead of misrouting the turn."""
+        import shutil
+
+        from open_maestro.runtime import factory
+
+        monkeypatch.setattr(
+            shutil, "which", lambda b: "/fake/bin" if b == "kimi" else None
+        )
+        assert factory.runtime_for_model("opus") == "claude-cli"
+
+
 class TestOpenAIFallbackAliases:
     def test_qwen_fallback_aliases_resolve(self):
         from open_maestro.config.models import ModelResolver
@@ -540,3 +687,88 @@ class TestOpenAIFallbackAliases:
         # glm-5-3-flash is the first openai-sdk entry with the "fast" alias.
         assert resolver.resolve("fast", "openai-sdk") == "glm-5.3-flash"
         assert resolver.resolve("reasoning", "openai-sdk") == "o3-mini"
+
+
+class TestCLISubprocessCleanup:
+    """A failed reader must not orphan the CLI child process.
+
+    Regression: a stream-reader exception used to propagate out of
+    ``_invoke`` without killing the subprocess, leaving it running the
+    task unattended — still calling the model and writing files with
+    nobody consuming its output.
+    """
+
+    @staticmethod
+    def _install_fake_cli(tmp_path, name: str, pid_file) -> None:
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir(exist_ok=True)
+        script = bin_dir / name
+        # Close the pipes right after startup so the parent's pipe transports
+        # see EOF and unwind during the test's live event loop; the long
+        # sleep still models a child the runtime must kill on reader failure.
+        script.write_text(
+            f'#!/bin/sh\nprintf "%s" "$$" > "{pid_file}"\n'
+            "exec 1>&- 2>&-\n"
+            "exec sleep 60\n"
+        )
+        script.chmod(0o755)
+
+    @staticmethod
+    def _pid_alive(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        return True
+
+    @staticmethod
+    def _flaky_reader(pid_file):
+        """First call waits for the child to start, then dies; later calls drain."""
+
+        async def reader(stream, printer):
+            if not calls["raised"]:
+                calls["raised"] = True
+                # Deterministic: only fail the reader once the child has
+                # actually started and recorded its PID (exec can take a
+                # few hundred ms under load).
+                for _ in range(100):
+                    if pid_file.exists():
+                        break
+                    await asyncio.sleep(0.05)
+                raise ValueError("stream reader died")
+            await stream.read()  # until EOF once the child is killed
+
+        calls = {"raised": False}
+        return reader
+
+    async def test_kimi_kills_child_when_reader_fails(self, tmp_path, monkeypatch):
+        from open_maestro.runtime import kimi_cli
+
+        pid_file = tmp_path / "kimi.pid"
+        self._install_fake_cli(tmp_path, "kimi", pid_file)
+        monkeypatch.setenv(
+            "PATH", f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}"
+        )
+        monkeypatch.setattr(kimi_cli, "pump_stream", self._flaky_reader(pid_file))
+
+        with pytest.raises(ValueError, match="stream reader died"):
+            await KimiCLIRuntime().run("hello")
+
+        pid = int(pid_file.read_text())
+        assert not self._pid_alive(pid)
+
+    async def test_claude_kills_child_when_reader_fails(self, tmp_path, monkeypatch):
+        from open_maestro.runtime import claude_cli
+
+        pid_file = tmp_path / "claude.pid"
+        self._install_fake_cli(tmp_path, "claude", pid_file)
+        monkeypatch.setenv(
+            "PATH", f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}"
+        )
+        monkeypatch.setattr(claude_cli, "pump_stream", self._flaky_reader(pid_file))
+
+        with pytest.raises(ValueError, match="stream reader died"):
+            await ClaudeCLIRuntime().run("hello")
+
+        pid = int(pid_file.read_text())
+        assert not self._pid_alive(pid)

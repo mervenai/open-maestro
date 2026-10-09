@@ -18,7 +18,7 @@ from open_maestro.config.capabilities import TaskProfile
 from open_maestro.config.models import ModelResolver
 from open_maestro.events.bus import EventBus
 from open_maestro.runtime.base import AgentConfig, AgentResult, AgentRuntime
-from open_maestro.runtime.stream_printer import create_printer
+from open_maestro.runtime.stream_printer import create_printer, pump_stream
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +142,7 @@ class ClaudeCLIRuntime(AgentRuntime):
         *,
         resume_session: str | None = None,
         fork: bool = False,
-        output_json: bool = True,
+        stream_json: bool = True,
         config: AgentConfig | None = None,
         temp_files: list[str] | None = None,
     ) -> list[str]:
@@ -151,8 +151,13 @@ class ClaudeCLIRuntime(AgentRuntime):
         # as a tool name and Claude will complain that no input was provided.
         args: list[str] = ["claude", "-p", prompt]
 
-        if output_json:
-            args.extend(["--output-format", "json"])
+        if stream_json:
+            # ``stream-json`` (which requires ``--verbose`` in -p mode) emits
+            # NDJSON events as they happen, so tool calls and file edits are
+            # visible live instead of one silent blob at the end; the final
+            # ``{"type": "result"}`` event carries the same payload the plain
+            # ``json`` format returns.
+            args.extend(["--output-format", "stream-json", "--verbose"])
 
         model = self._model
         if config is not None and config.model is not None:
@@ -266,21 +271,6 @@ class ClaudeCLIRuntime(AgentRuntime):
             logger.warning("Failed to write MCP config: %s", exc)
             return None
 
-    @staticmethod
-    async def _stream_pipe(
-        stream: asyncio.StreamReader | None,
-        printer: Any,
-    ) -> None:
-        """Read a subprocess stream line-by-line and print it via a StreamPrinter."""
-        if stream is None:
-            return
-        while True:
-            line_bytes = await stream.readline()
-            if not line_bytes:
-                break
-            line = line_bytes.decode(errors="replace")
-            printer.write(line)
-
     async def _invoke(
         self,
         prompt: str,
@@ -313,10 +303,10 @@ class ClaudeCLIRuntime(AgentRuntime):
             )
 
             stdout_task = asyncio.create_task(
-                self._stream_pipe(process.stdout, stdout_printer)
+                pump_stream(process.stdout, stdout_printer)
             )
             stderr_task = asyncio.create_task(
-                self._stream_pipe(process.stderr, stderr_printer)
+                pump_stream(process.stderr, stderr_printer)
             )
 
             try:
@@ -331,6 +321,26 @@ class ClaudeCLIRuntime(AgentRuntime):
                     is_error=True,
                     duration_ms=int((time.monotonic() - start) * 1000),
                 )
+            except BaseException:
+                # A reader task or process.wait() failed (stream error,
+                # cancellation, ...). Kill the child and let the pumps drain
+                # to EOF before propagating: an orphaned CLI process would
+                # keep working the task unattended — still calling the model
+                # and writing files with nobody consuming its output. The
+                # pumps must drain rather than be cancelled: a paused pipe
+                # transport with no reader never sees EOF and never closes.
+                process.kill()
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(
+                            stdout_task, stderr_task, process.wait(),
+                            return_exceptions=True,
+                        ),
+                        timeout=10,
+                    )
+                except BaseException:
+                    pass
+                raise
 
         finally:
             heartbeat.cancel()
@@ -352,7 +362,7 @@ class ClaudeCLIRuntime(AgentRuntime):
             # Claude writes structured errors to stdout as JSON; prefer that
             # over stderr when available.
             if stdout.strip():
-                parsed = self._parse_output(stdout, duration_ms=duration_ms)
+                parsed = self._parse_stream_output(stdout, duration_ms=duration_ms)
                 if parsed.is_error or parsed.text:
                     return parsed
             logger.error("Claude CLI failed (rc=%s): %s", process.returncode, stderr)
@@ -362,17 +372,14 @@ class ClaudeCLIRuntime(AgentRuntime):
                 duration_ms=duration_ms,
             )
 
-        return self._parse_output(stdout, duration_ms=duration_ms)
+        return self._parse_stream_output(stdout, duration_ms=duration_ms)
 
     @staticmethod
-    def _parse_output(raw: str, *, duration_ms: int | None = None) -> AgentResult:
-        """Parse Claude --output-format json output."""
-        try:
-            data: dict[str, Any] = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            return AgentResult(text=raw.strip(), duration_ms=duration_ms)
-
-        text = data.get("result", data.get("text", raw.strip()))
+    def _result_from_dict(
+        data: dict[str, Any], *, duration_ms: int | None = None
+    ) -> AgentResult:
+        """Build an AgentResult from a parsed result payload."""
+        text = data.get("result", data.get("text", ""))
         usage = data.get("usage") or {}
         return AgentResult(
             text=str(text),
@@ -397,9 +404,72 @@ class ClaudeCLIRuntime(AgentRuntime):
                     "num_turns",
                     "is_error",
                     "usage",
+                    # stream-json result-event extras
+                    "subtype",
+                    "uuid",
+                    "terminal_reason",
+                    "stop_reason",
+                    "modelUsage",
+                    "fast_mode_state",
+                    "permission_denials",
+                    "duration_api_ms",
+                    "time_to_request_ms",
+                    "ttft_ms",
+                    "ttft_stream_ms",
+                    "api_error_status",
                 }
             },
         )
+
+    @staticmethod
+    def _parse_stream_output(raw: str, *, duration_ms: int | None = None) -> AgentResult:
+        """Parse Claude ``--output-format stream-json`` (NDJSON) output.
+
+        The stream ends with a ``{"type": "result"}`` event carrying the same
+        payload the plain json format returns in whole; earlier lines are
+        assistant/user/system events that the stream printer has already
+        rendered live.
+        """
+        result_event: dict[str, Any] | None = None
+        texts: list[str] = []
+        for line in raw.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                event = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            etype = event.get("type")
+            if etype == "result":
+                result_event = event
+            elif etype == "assistant":
+                for block in event.get("message", {}).get("content") or []:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        texts.append(str(block.get("text", "")))
+        if result_event is not None:
+            data = dict(result_event)
+            data.pop("type", None)
+            return ClaudeCLIRuntime._result_from_dict(data, duration_ms=duration_ms)
+        if texts:
+            # No result event (truncated stream): recover the assistant text.
+            return AgentResult(
+                text="\n".join(t for t in texts if t).strip(), duration_ms=duration_ms
+            )
+        return ClaudeCLIRuntime._parse_output(raw, duration_ms=duration_ms)
+
+    @staticmethod
+    def _parse_output(raw: str, *, duration_ms: int | None = None) -> AgentResult:
+        """Parse Claude --output-format json output."""
+        try:
+            data: Any = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return AgentResult(text=raw.strip(), duration_ms=duration_ms)
+        if not isinstance(data, dict):
+            return AgentResult(text=raw.strip(), duration_ms=duration_ms)
+        return ClaudeCLIRuntime._result_from_dict(data, duration_ms=duration_ms)
 
     @staticmethod
     async def _working_heartbeat(

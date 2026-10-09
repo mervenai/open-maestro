@@ -96,14 +96,43 @@ class TestInteractiveProgressHandler:
         assert "running shell command" in captured.err
         assert "git status" in captured.err
 
-    async def test_runtime_working_event_prints_elapsed_time(self, capsys):
+    async def test_runtime_working_event_updates_spinner_elapsed_time(self):
+        """runtime.working updates the spinner message in place with elapsed seconds.
+
+        Why: The heartbeat must not spam a new stderr line every interval
+        (see progress.py comment); it refreshes the live spinner instead so
+        the user sees elapsed time without scrolling noise.
+        What: With an indicator attached, the handler calls set_message to
+        show the elapsed-seconds counter rather than printing a new line.
+        Test: Fire runtime.working with duration_ms=35000 and assert the
+        indicator's message was updated to include "35s".
+        """
+        from open_maestro.events.progress import (
+            InteractiveProgressHandler,
+            ProgressIndicator,
+        )
+
+        indicator = ProgressIndicator()
+        handler = InteractiveProgressHandler(indicator=indicator)
+        await handler("runtime.working", {"duration_ms": 35000})
+
+        assert "35s" in indicator._message
+        assert "Thinking" in indicator._message
+
+    async def test_runtime_working_event_without_indicator_is_silent(self, capsys):
+        """runtime.working emits nothing when no spinner indicator is attached.
+
+        Why: Without a live spinner to refresh, emitting a heartbeat line per
+        interval would flood stderr; the intended behavior is to stay quiet.
+        What: With no indicator, the handler returns None and prints nothing.
+        Test: Fire runtime.working with no indicator and assert stderr is empty.
+        """
         from open_maestro.events.progress import InteractiveProgressHandler
 
         handler = InteractiveProgressHandler()
         await handler("runtime.working", {"duration_ms": 35000})
         captured = capsys.readouterr()
-        assert "Still working" in captured.err
-        assert "35s" in captured.err
+        assert captured.err == ""
 
     async def test_swarm_started_event_prints_worker_count(self, capsys):
         from open_maestro.events.progress import InteractiveProgressHandler

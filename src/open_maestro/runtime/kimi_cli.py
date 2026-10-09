@@ -15,7 +15,7 @@ from open_maestro.config.capabilities import TaskProfile
 from open_maestro.config.models import ModelResolver
 from open_maestro.events.bus import EventBus
 from open_maestro.runtime.base import AgentConfig, AgentResult, AgentRuntime
-from open_maestro.runtime.stream_printer import create_printer
+from open_maestro.runtime.stream_printer import create_printer, pump_stream
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -210,21 +210,6 @@ class KimiCLIRuntime(AgentRuntime):
 
         return args
 
-    @staticmethod
-    async def _stream_pipe(
-        stream: asyncio.StreamReader | None,
-        printer: Any,
-    ) -> None:
-        """Read a subprocess stream line-by-line and print it via a StreamPrinter."""
-        if stream is None:
-            return
-        while True:
-            line_bytes = await stream.readline()
-            if not line_bytes:
-                break
-            line = line_bytes.decode(errors="replace")
-            printer.write(line)
-
     async def _invoke(
         self,
         prompt: str,
@@ -261,10 +246,10 @@ class KimiCLIRuntime(AgentRuntime):
             )
 
             stdout_task = asyncio.create_task(
-                self._stream_pipe(process.stdout, stdout_printer)
+                pump_stream(process.stdout, stdout_printer)
             )
             stderr_task = asyncio.create_task(
-                self._stream_pipe(process.stderr, stderr_printer)
+                pump_stream(process.stderr, stderr_printer)
             )
 
             try:
@@ -279,6 +264,26 @@ class KimiCLIRuntime(AgentRuntime):
                     is_error=True,
                     duration_ms=int((time.monotonic() - start) * 1000),
                 )
+            except BaseException:
+                # A reader task or process.wait() failed (stream error,
+                # cancellation, ...). Kill the child and let the pumps drain
+                # to EOF before propagating: an orphaned CLI process would
+                # keep working the task unattended — still calling the model
+                # and writing files with nobody consuming its output. The
+                # pumps must drain rather than be cancelled: a paused pipe
+                # transport with no reader never sees EOF and never closes.
+                process.kill()
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(
+                            stdout_task, stderr_task, process.wait(),
+                            return_exceptions=True,
+                        ),
+                        timeout=10,
+                    )
+                except BaseException:
+                    pass
+                raise
 
         finally:
             heartbeat.cancel()

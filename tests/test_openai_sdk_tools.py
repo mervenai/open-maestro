@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import types
 from dataclasses import dataclass
 from typing import Any
 from unittest.mock import MagicMock
@@ -52,12 +53,99 @@ class FakeResponse:
     usage: FakeUsage | None = None
 
 
+class _FakeStream:
+    """Async iterator of streaming chunks the runtime consumes via ``async for``."""
+
+    def __init__(self, chunks: list[Any]):
+        self._chunks = chunks
+
+    def __aiter__(self) -> "_FakeStream":
+        self._it = iter(self._chunks)
+        return self
+
+    async def __anext__(self) -> Any:
+        try:
+            return next(self._it)
+        except StopIteration:
+            raise StopAsyncIteration
+
+
+def _response_to_chunks(response: FakeResponse) -> list[Any]:
+    """Convert a (non-streaming-shaped) FakeResponse into streaming chunks.
+
+    The runtime issues ``stream=True`` requests and consumes ``delta`` chunks,
+    so a whole-message response is split into a content delta, any tool-call
+    deltas, and a final chunk carrying finish_reason + usage.
+    """
+    choice = response.choices[0]
+    message = choice.message
+    chunks: list[Any] = []
+
+    if message.content:
+        chunks.append(
+            types.SimpleNamespace(
+                usage=None,
+                choices=[
+                    types.SimpleNamespace(
+                        delta=types.SimpleNamespace(
+                            content=message.content, tool_calls=None
+                        ),
+                        finish_reason=None,
+                    )
+                ],
+            )
+        )
+
+    if message.tool_calls:
+        tool_call_deltas = [
+            types.SimpleNamespace(
+                index=i,
+                id=tc.id,
+                type=tc.type,
+                function=types.SimpleNamespace(
+                    name=tc.function.name, arguments=tc.function.arguments
+                ),
+            )
+            for i, tc in enumerate(message.tool_calls)
+        ]
+        chunks.append(
+            types.SimpleNamespace(
+                usage=None,
+                choices=[
+                    types.SimpleNamespace(
+                        delta=types.SimpleNamespace(
+                            content=None, tool_calls=tool_call_deltas
+                        ),
+                        finish_reason=None,
+                    )
+                ],
+            )
+        )
+
+    usage = response.usage or FakeUsage()
+    chunks.append(
+        types.SimpleNamespace(
+            usage=types.SimpleNamespace(
+                prompt_tokens=usage.prompt_tokens,
+                completion_tokens=usage.completion_tokens,
+            ),
+            choices=[
+                types.SimpleNamespace(
+                    delta=types.SimpleNamespace(content=None, tool_calls=None),
+                    finish_reason=choice.finish_reason,
+                )
+            ],
+        )
+    )
+    return chunks
+
+
 def _make_client(responses: list[FakeResponse]) -> Any:
-    """Return a mock AsyncOpenAI client that yields the given responses."""
+    """Return a mock AsyncOpenAI client that streams the given responses."""
     iterator = iter(responses)
 
     async def create(*, model, messages, **kwargs):
-        return next(iterator)
+        return _FakeStream(_response_to_chunks(next(iterator)))
 
     completions = MagicMock()
     completions.create = create
@@ -259,7 +347,11 @@ class TestOpenAISDKToolLoop:
 
         async def create(*, model, messages, **kwargs):
             called_with.append(model)
-            return FakeResponse([FakeChoice(FakeMessage("assistant", "ok"))])
+            return _FakeStream(
+                _response_to_chunks(
+                    FakeResponse([FakeChoice(FakeMessage("assistant", "ok"))])
+                )
+            )
 
         completions = MagicMock()
         completions.create = create

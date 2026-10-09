@@ -358,6 +358,13 @@ class OpenAISDKRuntime(AgentRuntime):
         API-key env var) get a dedicated client for that endpoint; everything
         else uses the default client built from config/env.
         """
+        # An explicitly configured/injected client (e.g. a test double, or a
+        # client built from config) takes precedence: the misconfiguration
+        # guard below exists only to stop a *default* client from silently
+        # autodetecting local Ollama for a cloud model, which cannot happen
+        # once a concrete client is already in hand.
+        if self._client is not None:
+            return self._client
         if self._registry is None:
             try:
                 self._registry = CapabilityRegistry.load()
