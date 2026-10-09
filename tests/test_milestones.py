@@ -157,10 +157,16 @@ class TestMilestoneStore:
         store = MilestoneStore(tmp_path)
         plan = store.load()
         plan.epics[0].milestones[0].status = MilestoneStatus.COMPLETED
-        store.update(plan)
+        # Persist without store.update(): update() auto-populates work epics once
+        # intake-discovery is complete (covered by TestEpicParser / _build_work_epic
+        # tests). This test isolates save/load persistence of a single-epic plan.
+        plan._recompute_summary()
+        store.save(plan)
 
         loaded = store.load()
         assert loaded.epics[0].milestones[0].status == MilestoneStatus.COMPLETED
+        # Default plan: 8 milestones, weights summing to 100; intake-discovery
+        # (weight 10) complete => 10/100 = 10%.
         assert loaded.summary.overall_completion == 10
 
     def test_export_dashboard(self, tmp_path):
@@ -168,7 +174,10 @@ class TestMilestoneStore:
         plan = store.load()
         plan.epics[0].milestones[0].status = MilestoneStatus.COMPLETED
         plan.epics[0].milestones[1].status = MilestoneStatus.IN_PROGRESS
-        store.update(plan)
+        # Persist without store.update(): update() would auto-populate work epics
+        # once intake-discovery is complete (that expansion is covered separately).
+        plan._recompute_summary()
+        store.save(plan)
 
         dashboard = store.export_dashboard(plan)
         assert dashboard["project_id"] == tmp_path.name
@@ -377,18 +386,26 @@ class TestDashboard:
         store = MilestoneStore(tmp_path)
         plan = store.load()
         plan.epics[0].milestones[0].status = MilestoneStatus.COMPLETED
-        store.update(plan)
+        # Persist without store.update() so the single default epic is not
+        # auto-populated into work epics (expansion covered by TestEpicParser).
+        plan._recompute_summary()
+        store.save(plan)
         data = json.loads(export_dashboard_json(plan))
         assert data["project_id"] == tmp_path.name
         assert data["overall_completion"] == 10
-        assert len(data["epics"]) == 1
-        assert len(data["epics"][0]["milestones"]) == 8
+        # The single default epic becomes the process_track; work epics (data["epics"])
+        # only appear after auto-population. The 8 lifecycle milestones live here.
+        assert data["epics"] == []
+        assert len(data["process_track"]["milestones"]) == 8
 
     def test_markdown_export(self, tmp_path):
         store = MilestoneStore(tmp_path)
         plan = store.load()
         plan.epics[0].milestones[0].status = MilestoneStatus.COMPLETED
-        store.update(plan)
+        # Persist without store.update() to keep the single-epic plan (no
+        # auto-populated work epics); intake-discovery complete => 10%.
+        plan._recompute_summary()
+        store.save(plan)
         md = export_dashboard_markdown(plan)
         assert "# Test" in md or "Project Dashboard" in md
         assert "Overall completion:** 10%" in md
@@ -526,7 +543,10 @@ class TestDashboardPublisher:
         store = MilestoneStore(tmp_path)
         plan = store.load()
         plan.epics[0].milestones[0].status = MilestoneStatus.COMPLETED
-        store.update(plan)
+        # Persist without store.update() to keep the single-epic plan; the
+        # published dashboard then reports intake-discovery complete => 10%.
+        plan._recompute_summary()
+        store.save(plan)
 
         received = {}
 

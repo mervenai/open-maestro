@@ -118,23 +118,23 @@ milestone_prompts:
         - For UI-facing values (enums, states, actions), take them from the highest-authority source available: a prototype/bundle/actual UI code beats the PRD; if PRD and prototype disagree, use the prototype and note the discrepancy.
 
     - id: design-002
-      title: Adversarially verify the drafted contract
+      title: Diagram the blueprint — journey, repos, open questions
       order: 2
-      agent_hint: researcher
-      tags: [verify, backend]
-      read_only: true
-      artifact_target: docs/adversarial-review.md
+      agent_hint: documentation
+      tags: [specify, diagrams]
+      artifact_target: docs/diagrams/blueprint-user-journey.md
       default_track_only: true
       after: design-001
       prompt: |
-        Adversarially review the contract artifact produced by the previous step (docs/blueprint-design-and-data-contract.md, or the actual contract file in the project). Do not trust the artifact.
-        Method:
-        1) Extract every file:line citation in the artifact.
-        2) Re-read each cited location in the actual code and confirm the cited code proves the claim it anchors; list every citation that is wrong, ambiguous, or matches-but-doesn't-prove the claim.
-        3) Check UI-facing enums/states/actions against the highest-authority source (prototype bundle/UI code beats PRD); list any value taken from a lower-authority source.
-        4) List every element presented as reusing an existing pattern that is actually net-new.
-        5) Check auth/permission claims by tracing the actual attribute/policy code, not by name similarity.
-        Output a findings list ordered by severity (P0/P1/P2), each finding with the exact quoted claim, the evidence, and the recommended fix. If a finding requires a design decision, mark it DECISION NEEDED.
+        Create a Mermaid diagram of the drafted blueprint for the {epic_name} epic that considers the user journey in the prototype and the repos impacted.
+        Requirements:
+        - Number each of the boxes so reviewers can cross-reference them in review and Jira; numbering must stay stable across revisions (never renumber, add at the end).
+        - Apply the User-Journey Blueprint Diagram Standard from the mermaid-diagrams skill: the canonical 7-class color palette (amber=open question, red dashed=parked, blue=net-new, green=verified existing, grey=user action, pink=external) rendered as an in-diagram legend subgraph; user-action nodes in grey; externals in pink.
+        - Label EVERY edge with its action or payload (e.g. `row click`, `GET /api/Activity`) and tag blocking decisions with their register IDs (e.g. `OPEN (R-07)`, `-.A-5 subscription.->`); state the solid vs dotted arrow semantics in the doc.
+        - Tag every node with the repo it lives in; group nodes into swim-lanes per system area (browser, gateway, external services, backend, admin) with a repos-impacted summary legend; parked / out-of-scope items go in a dashed-red lane carrying their disposition citation (DROPPED/EXCLUDED/REJECTED + source).
+        - Base every node and edge on the drafted contract and the prototype — do not invent components the sources do not describe.
+        - Follow the mermaid-diagrams skill: pick the narrowest diagram type for the content (flowchart for service/request flow), validate the syntax by rendering once before saving, and save a Markdown file whose body is a fenced mermaid block (docs/diagrams/<name>.md) plus a rendered PNG and SVG next to it (both rendered from the .md itself — regenerate from the source, never hand-edit).
+        - Under the diagram, include a short node-reference table (number → node → repo → status → anchor) and a hot-list of the open-question nodes with their owner and resolution path.
 
     - id: design-003
       title: Create UX/template spec
@@ -172,6 +172,35 @@ milestone_prompts:
         Review the data contract, UX spec, and Jira stories for {epic_name}.
         Identify inconsistencies, unresolved open questions, and risks.
         Produce a design sign-off checklist with open items that must close before build planning.
+
+    - id: design-006
+      title: Adversarially verify all drafted design artifacts
+      order: 6
+      agent_hint: researcher
+      tags: [verify, backend]
+      read_only: true
+      artifact_target: docs/adversarial-review.md
+      default_track_only: true
+      after: design-005
+      prompt: |
+        Adversarially review every artifact produced by this milestone for {epic_name}
+        (the data/API contract, the blueprint diagram, the UX/template spec, and the
+        Jira stories — or whichever of them exist in the project). Do not trust the artifacts.
+        Method:
+        1) Extract every file:line citation in each artifact.
+        2) Re-read each cited location in the actual code and confirm the cited code proves the
+           claim it anchors; list every citation that is wrong, ambiguous, or
+           matches-but-doesn't-prove the claim.
+        3) Check UI-facing enums/states/actions against the highest-authority source
+           (prototype bundle/UI code beats PRD); list any value taken from a lower-authority source.
+        4) List every element presented as reusing an existing pattern that is actually net-new.
+        5) Check auth/permission claims by tracing the actual attribute/policy code, not by name
+           similarity.
+        6) Cross-artifact consistency: flag any place where the contract, diagram, UX spec, and
+           Jira stories disagree with each other (counts, names, statuses, open questions).
+        Output a findings list ordered by severity (P0/P1/P2), each finding with the exact quoted
+        claim, the evidence, and the recommended fix. If a finding requires a design decision,
+        mark it DECISION NEEDED.
 
   build-planning:
     - id: build-001

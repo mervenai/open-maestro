@@ -59,6 +59,29 @@ class TestSkillRegistry:
         assert [skill.id for skill in skills] == ["python"]
 
 
+class TestBundledSkills:
+    def test_mermaid_diagrams_skill_loads(self):
+        """The bundled mermaid-diagrams skill must parse and carry the
+        .md/.png output guidance agents rely on."""
+        skills_dir = Path(__file__).resolve().parent.parent / "skills"
+        registry = SkillRegistry.from_directory(skills_dir)
+        skill = registry.get("mermaid-diagrams")
+        assert skill is not None
+        assert "mermaid" in skill.tags
+        for needle in ("```mermaid", ".png", "mermaid-cli", "erDiagram"):
+            assert needle in skill.content
+
+    def test_engineer_agent_wires_mermaid_skill(self):
+        """The bundled engineer declares mermaid-diagrams and the loader
+        resolves it into the agent's instructions (missing skills are skipped
+        silently, so this also guards the declaration)."""
+        repo = Path(__file__).resolve().parent.parent
+        registry = AgentLoader.load_tiered_dirs(None, None, repo / "agents")
+        engineer = registry.get("engineer")
+        assert engineer is not None
+        assert "Mermaid Diagrams from Blueprints" in engineer.instructions
+
+
 class TestAgentSkillResolution:
     def test_skill_content_appended_to_instructions(self, tmp_path: Path):
         agents_dir = tmp_path / "agents"
