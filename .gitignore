@@ -9,3 +9,7 @@ __pycache__/
 dist/
 data/
 installpackage/*.whl
+
+# local agent tooling
+.claude/
+.claude-mpm/

@@ -5,6 +5,73 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-10-08
+
+### Added
+- **Mermaid diagram skill** (`mermaid-diagrams`, bundled). Agents asked to
+  diagram a blueprint/design doc carry a codified procedure: narrowest
+  diagram type per content, syntax-pitfall rules, validate-by-rendering
+  before saving, and both output formats (`.md` with a fenced mermaid block
+  plus a rendered `.png` via mermaid-cli or the Kroki fallback). Wired into
+  the engineer, data-engineer, and documentation agents.
+- **Playbook: Design Blueprint milestones draft a diagram, then verify**
+  (`software-consulting.yaml`). New `design-002` (order 2, after the contract
+  draft) produces the numbered, repo-tagged, open-question-highlighted
+  blueprint diagram; the original adversarial-verification prompt returns as
+  `design-006` (order 6), generalized to cross-check every milestone artifact
+  (contract, diagram, UX spec, Jira stories) with a consistency pass.
+- **Read-only MCP vetting for auditor seats** (`mcp.policy`). Agent-declared
+  tool allowlists (e.g. the code-critic's Read/Grep/Bash) previously locked
+  review seats out of semantic search entirely — 72 agent protocols reference
+  the `mcp__mcp-vector-search__*` tools, and restricted seats reported them
+  as "not exposed in this runtime". `_execute_agent` now unions a vetted
+  read-only tool set (search/analyze/kg-query, 19 tools) into active
+  allowlists when an MCP config is loaded; mutating tools (`index_project`,
+  `save_report`, `review_*`, `kg_build`, …) stay excluded.
+- **Persona turn-cap retry** (`deep_review`). A seat cut off by
+  `error_max_turns` retries once on the same seat at 2x
+  `PERSONA_MAX_TURNS` (24) instead of landing in "Errored personas" with no
+  report. Bounded: one retry, production seats only.
+- **Model pins imply their runtime** (`runtime_for_model`). `/model opus`
+  and `--model opus` now resolve the pinned model's runtime through the
+  registry (id → alias → identifier → fallback-alias table) and seat the
+  turn there; previously the router picked any runtime and the alias
+  resolved against the wrong backend or not at all. Vendor shorthand
+  (`opus`, `sonnet`, `haiku`) added to the fallback alias table.
+- **`OPEN_MAESTRO_RUNTIME` honored by the model router**. The env var
+  previously only pinned `create_runtime(None)`; every router call site
+  passed `runtime_type=None`, so model selection ignored it. Now it narrows
+  candidates exactly like the runtime pin, with a clear error for unknown
+  values.
+
+### Fixed
+- **Fidelity persona burned its turn budget on serial exploration**
+  (follow-up to MSTRO-135/136, seen live as session `40f5aa61` dying at
+  `maxTurns: 12` with no report). The fidelity prompt now instructs a
+  budget-aware audit: extract citations first, batch independent reads in
+  parallel turns, verify line-specific claims with grep/sed instead of
+  whole-file reads, cap evidence-gathering at half the budget (stragglers
+  become "unverified citation" nits), and always end with the RESULT line —
+  a partial verdict beats a report cut off before it.
+- **Documentation agent hard-depended on vector-search tools** that most
+  runtimes don't expose. The protocol now gates on the tools actually
+  appearing in the seat's tool list (the runtime name alone does not
+  determine it) and promotes grep-based discovery to a mandatory first-class
+  fallback.
+- **MCP config-loading tests saw the developer machine's real
+  `~/.open-maestro/mcp.json`**; `TestMCPConfigLoading` isolates `HOME` now.
+- **Test-suite hermeticity and stale expectations.** `test_runtime.py`
+  availability/selection tests now clear provider-specific endpoint keys
+  (`ZAI_API_KEY`/`DEEPSEEK_API_KEY`/`DASHSCOPE_API_KEY`) and neutralize local
+  Ollama auto-detection so they no longer leak the developer environment;
+  `test_openai_sdk_tools.py` doubles emit streaming delta chunks to match the
+  runtime's `stream=True` loop; `_client_for_model` now honors an
+  already-configured client before the endpointless-cloud-model guard;
+  milestone, interactive, pm critic-gate, and events-heartbeat tests were
+  updated to the intended current behavior (expanded default plan,
+  3-tuple `_resolve_suggested_prompt`, artifact-critic gate, in-place spinner
+  elapsed-time refresh).
+
 ## [2.1.11] - 2026-10-06
 
 ### Added
