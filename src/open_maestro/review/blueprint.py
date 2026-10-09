@@ -359,8 +359,24 @@ class DeepReviewResult:
 # prompt. max_turns=1 cut CLI seats mid-tool-use with error_max_turns
 # (MSTRO-135), and 4 still wasn't enough for a 56KB contract with ~25
 # citations (num_turns=5 on the failed run). 12 covers read+verify+answer
-# with headroom while still bounding a stuck agent.
+# with headroom while still bounding a stuck agent. A seat that still hits
+# the cap retries once at 2x budget on the same seat (see deep_review)
+# instead of being recorded as errored.
 PERSONA_MAX_TURNS = 12
+
+
+def _is_max_turns_error(text: str | None) -> bool:
+    """True when an error string means the seat was cut off by its turn cap."""
+    t = (text or "").lower()
+    return any(
+        marker in t
+        for marker in (
+            "error_max_turns",
+            "max_turns_reached",
+            "max turns",
+            "maximum number of turns",
+        )
+    )
 
 
 def _seat_persona_runtime(
@@ -483,8 +499,10 @@ async def deep_review(
     When *runtime_factory* is None (production), personas are seated on the
     best configured models via the capability router — never the runtime
     SDK default, which is usually unconfigured. Seats rotate across model
-    families, skip *model_exclude* and session-quota-exhausted models, and
-    re-seat once when a run comes back with a quota-exhausted error.
+    families, skip *model_exclude* and session-quota-exhausted models,
+    re-seat once when a run comes back with a quota-exhausted error, and
+    retry once at double the turn budget when a seat is cut off by its
+    turn cap.
     """
     doc = Path(doc)
     project = Path(project_path) if project_path else doc.parent
@@ -509,6 +527,7 @@ async def deep_review(
             continue
         prompt = render(persona_id, **kwargs)
         reseats = 0
+        budget_retries = 0
         while True:
             seated_model: str | None = None
             try:
@@ -539,7 +558,31 @@ async def deep_review(
                         )
                         reseats += 1
                         continue
-                    raise RuntimeError(out.text[:200])
+                    if (
+                        seat_models
+                        and seated_model
+                        and budget_retries < 1
+                        and _is_max_turns_error(out.text)
+                    ):
+                        # MSTRO-135 follow-up: the seat was cut off mid-audit
+                        # by its turn cap. The prompts instruct a budget-aware
+                        # audit, so one bigger-budget attempt on the same seat
+                        # often completes; without the retry the persona is
+                        # recorded as errored and its report is lost.
+                        budget_retries += 1
+                        logger.warning(
+                            "persona %s hit the turn cap on %s; retrying with "
+                            "%d turns",
+                            persona_id,
+                            doc,
+                            PERSONA_MAX_TURNS * 2,
+                        )
+                        cfg = AgentConfig(
+                            model=seated_model, max_turns=PERSONA_MAX_TURNS * 2
+                        )
+                        out = await runtime.run(prompt, config=cfg)
+                    if out.is_error:
+                        raise RuntimeError(out.text[:200])
                 report = out.text
                 break
             except Exception as exc:

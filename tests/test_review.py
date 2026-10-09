@@ -77,6 +77,23 @@ class TestPersonas:
         out = render("fidelity", doc="/tmp/d.md")
         assert "/tmp/d.md" in out
 
+    def test_fidelity_prompt_enforces_turn_budget(self):
+        # Regression: a fidelity seat burned its 12-turn budget on serial
+        # one-file-at-a-time exploration and returned no report (MSTRO-135
+        # follow-up). The prompt must force batched reads, cheap line-level
+        # citation checks, an exploration cap, and an unconditional RESULT line.
+        body = PERSONAS["fidelity"].template.template
+        assert "turn budget" in body
+        assert "parallel" in body
+        assert "grep" in body
+        assert "unverified citation" in body
+        assert "RESULT line" in body
+        # The RESULT contract itself is unchanged.
+        assert (
+            "RESULT blockers=<n> should_fix=<n> contradictions=<n> weakened=<n>"
+            in body
+        )
+
     def test_reader_roles_enum(self):
         assert set(READER_ROLES) == {"owner", "product", "leadership"}
 
@@ -913,6 +930,67 @@ class TestPersonaSeating:
         # MSTRO-135: CLI seats read the artifact before answering — one turn
         # cut them mid-tool-use (error_max_turns).
         assert runtimes[0].configs[0].max_turns == review_blueprint.PERSONA_MAX_TURNS
+
+    async def test_persona_retries_once_with_double_budget_on_turn_cap(
+        self, tmp_path, monkeypatch
+    ):
+        """A seat cut off by the turn cap (error_max_turns) is retried once at
+        2x budget on the same seat; the review passes when the retry lands."""
+        doc = tmp_path / "blueprint.md"
+        doc.write_text("# doc\n")
+
+        class CapRuntime(FakeRuntime):
+            async def run(self, prompt, config=None):
+                self.prompts.append(prompt)
+                self.configs.append(config)
+                if config.max_turns == review_blueprint.PERSONA_MAX_TURNS:
+                    return AgentResult(
+                        text="error_max_turns: exceeded", is_error=True
+                    )
+                return AgentResult(
+                    text="RESULT blockers=0 should_fix=0 contradictions=0 weakened=0"
+                )
+
+        runtime = CapRuntime()
+        monkeypatch.setattr(
+            review_blueprint,
+            "_seat_persona_runtime",
+            lambda used, excl: (runtime, "claude-opus-4-7"),
+        )
+
+        review = await deep_review(doc, project_path=tmp_path, personas=("fidelity",))
+
+        assert review.passed
+        assert [c.max_turns for c in runtime.configs] == [
+            review_blueprint.PERSONA_MAX_TURNS,
+            review_blueprint.PERSONA_MAX_TURNS * 2,
+        ]
+
+    async def test_persona_turn_cap_retry_gives_up_after_one(
+        self, tmp_path, monkeypatch
+    ):
+        """A seat that still fails at 2x budget is recorded as errored after
+        exactly two attempts — the retry is bounded."""
+        doc = tmp_path / "blueprint.md"
+        doc.write_text("# doc\n")
+
+        class AlwaysCapRuntime(FakeRuntime):
+            async def run(self, prompt, config=None):
+                self.prompts.append(prompt)
+                self.configs.append(config)
+                return AgentResult(text="error_max_turns: exceeded", is_error=True)
+
+        runtime = AlwaysCapRuntime()
+        monkeypatch.setattr(
+            review_blueprint,
+            "_seat_persona_runtime",
+            lambda used, excl: (runtime, "claude-opus-4-7"),
+        )
+
+        review = await deep_review(doc, project_path=tmp_path, personas=("fidelity",))
+
+        assert "fidelity" in review.errors
+        assert len(runtime.configs) == 2
 
     async def test_persona_reports_persisted(self, tmp_path, monkeypatch):
         """MSTRO-138: full persona reports must land on disk (the ledger keeps
