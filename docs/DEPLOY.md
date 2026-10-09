@@ -5,19 +5,36 @@ workstations for a team of engineers.
 
 ## Current state (read this first)
 
-Open Maestro **1.13.0** is a functional multi-agent orchestration layer with:
+Open Maestro **2.2.0** is a multi-agent orchestration layer with
+orchestrator-enforced, machine-checked quality gates:
 
-- Vendor-agnostic agent routing across Claude, Kimi, and OpenAI-compatible models
-- Model arbitration that picks the cheapest capable backend for a task
+- Vendor-agnostic agent routing across Claude, Kimi, and OpenAI-compatible
+  models (including DeepSeek); model arbitration picks the cheapest capable
+  backend per task, with `OPEN_MAESTRO_RUNTIME`/`--runtime`/`/model` pins
+  honored end-to-end
 - Research, planning, documentation, and code-change workflows
 - Milestone-guided project lifecycle with client-facing dashboard
   - **v1.2.4+ taxonomy:** projects contain **epics** (workstreams/features); each epic contains the 8 standard lifecycle **milestones**
+- **Adversarial review layer** (v2.0.0): seven fresh-agent audit personas, a
+  sha-keyed gate ledger with carry/delta, a multi-model adversarial panel
+  (Kimi k3 / GLM / Claude / DeepSeek seats, anonymized cross-ranking, never
+  GLM chairman), and blueprint deep review with an admission bar. `maestro
+  --review <doc>` runs the gating personas; `/complete` refuses to close a
+  milestone whose blueprint artifacts fail the gate
+- **Auto deep review** (v2.1.0): milestone-significant blueprint edits (new
+  artifact, ≥150 changed lines, or version-marker change) trigger the
+  3-persona audit automatically after the turn; full persona reports persist
+  to `.open-maestro/reviews/` (v2.1.11)
 - Persistent project memory via kuzu-memory
-- Semantic code search via mcp-vector-search
+- Semantic code search via mcp-vector-search — exposed to agent seats
+  through MCP (v2.2.0), with a vetted read-only tool set for restricted
+  auditor agents; per-project indexing, gitignored code snapshots
+  re-includable via `force_include_paths`
 - Live activity monitor (`--monitor`) showing current agent, runtime, model, and state
-- Orchestrator-enforced quality gates: automatic code-critic review pass after
-  implementation turns (v1.13.0) and a security scan gate prompt — gitleaks,
-  semgrep, dependency audit, SBOM — at the end of implementation (v1.12.0)
+- Per-turn quality gates: automatic code-critic review pass after
+  implementation turns, an artifact-critic citation tripwire for design
+  docs, and a security scan gate prompt (gitleaks, semgrep, dependency
+  audit, SBOM) at the end of implementation
 
 CLI runtimes (`claude-cli`, `kimi-cli`) spawn a subprocess and parse the final
 output, so they cannot intercept individual tool calls. For full tool-call
@@ -41,23 +58,23 @@ Build the wheel once and share it with the team:
 ```bash
 cd /Users/jj/dev/open-maestro
 python -m build --wheel
-# Share dist/open_maestro-1.13.0-py3-none-any.whl
+# Share dist/open_maestro-<version>-py3-none-any.whl
 ```
 
 Each engineer runs the install script:
 
 ```bash
-./install-ubuntu.sh /path/to/open_maestro-1.13.0-py3-none-any.whl
+./install-ubuntu.sh /path/to/open_maestro-<version>-py3-none-any.whl
 ```
 
 To also install SDK runtimes and their Python dependencies:
 
 ```bash
 # openai-sdk runtime (cloud OpenAI, Azure, Ollama, vLLM, DashScope, etc.)
-OPENAI=1 ./install-ubuntu.sh /path/to/open_maestro-1.13.0-py3-none-any.whl
+OPENAI=1 ./install-ubuntu.sh /path/to/open_maestro-<version>-py3-none-any.whl
 
 # All SDK runtimes
-OPENAI=1 CLAUDE_SDK=1 KIMI_ACP=1 ./install-ubuntu.sh /path/to/open_maestro-1.13.0-py3-none-any.whl
+OPENAI=1 CLAUDE_SDK=1 KIMI_ACP=1 ./install-ubuntu.sh /path/to/open_maestro-<version>-py3-none-any.whl
 ```
 
 The `OPENAI=1` flag installs the `openai` package, which is required for the
@@ -431,8 +448,15 @@ is grouped by agent. Chains are capped at 5 steps.
 For persistent project memory:
 
 ```bash
-pip install kuzu-memory
+pip install kuzu-memory==1.12.11
 ```
+
+> **Pinned version: `kuzu-memory==1.12.11`.** Maestro shells out to the
+> `kuzu-memory` CLI (see `src/open_maestro/memory/kuzu_client.py`); it is not a
+> declared Python dependency. Pin to 1.12.11 to avoid a `store`/`--project-root`
+> regression in later releases (upstream issue bobmatnyc/kuzu-memory#56). If
+> installed via pipx (`pipx install kuzu-memory==1.12.11`), it will not
+> auto-upgrade unless `pipx upgrade[-all]` is run.
 
 Then run Maestro with `--memory`:
 
@@ -454,6 +478,18 @@ Then run Maestro with `--search`:
 maestro --search --interactive
 ```
 
+Each project indexes itself on first use (the documentation agent checks
+`get_project_status` and calls `index_project`). If code search later returns
+nothing useful for *code* — only docs — the likely cause is a gitignored code
+snapshot: the indexer honors `.gitignore` and silently skips it. Re-include it
+via `force_include_paths` in `.mcp-vector-search/config.json`:
+
+```json
+{"force_include_paths": ["M3CodeRepo/"]}
+```
+
+then re-run `mcp-vector-search index` in the project.
+
 ### MCP servers
 
 Create `~/.open-maestro/mcp.json` or `./.open-maestro/mcp.json`:
@@ -468,6 +504,26 @@ Create `~/.open-maestro/mcp.json` or `./.open-maestro/mcp.json`:
   }
 }
 ```
+
+To expose semantic search to agent seats, register the installed server
+there — use the absolute path; a bare `mcp-vector-search` command fails when
+the venv is not on PATH, and the project-level `.mcp.json` that
+`mcp-vector-search init` generates triggers per-folder trust prompts:
+
+```json
+{
+  "mcpServers": {
+    "mcp-vector-search": {
+      "command": "/abs/path/to/venv/bin/mcp-vector-search-mcp"
+    }
+  }
+}
+```
+
+Runtime support: **claude-cli** and **openai-sdk** seats receive this config
+(`--mcp-config` / stdio). **kimi-cli seats never do** — Kimi Code reads only
+its own settings; kimi users must add the same server block to
+`~/.kimi-code/mcp.json` and restart the CLI.
 
 ## Milestone dashboards
 
