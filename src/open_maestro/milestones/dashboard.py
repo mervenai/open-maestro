@@ -6,8 +6,7 @@ import json
 from datetime import date, datetime
 from typing import Any
 
-from open_maestro.milestones.models import Epic, Milestone, MilestonePlan, MilestoneStatus
-
+from open_maestro.milestones.models import Epic, MilestonePlan, MilestoneStatus
 
 # Merven.ai design tokens extracted from https://merven.ai
 _MERVEN_COLORS = {
@@ -25,25 +24,102 @@ _MERVEN_COLORS = {
     "shadow": "0 4px 24px -4px rgba(0,0,0,0.4)",
 }
 
+# Single source of truth for status -> (solid color, translucent background).
+# Both the inline CSS in ``export_dashboard_html`` (via ``_status_bar_css``) and
+# the exported design tokens (via ``design_tokens``) are derived from this map,
+# so the local HTML renderer and the remote Lovable renderer cannot drift.
+#
+# Keys are the raw underscored ``MilestoneStatus`` values (e.g. ``in_progress``)
+# plus the derived epic status ``planning`` emitted by ``_derive_epic_status``.
+# ``not_started``/``skipped``/``planning`` map to the muted token so they are
+# intentionally neutral rather than a silent fallback.
+_MUTED = _MERVEN_COLORS["muted_foreground"]  # "#79818d"
+_STATUS_COLOR_MAP: dict[str, tuple[str, str]] = {
+    MilestoneStatus.COMPLETED.value: ("#00bfaf", "rgba(0, 191, 175, 0.15)"),
+    MilestoneStatus.IN_PROGRESS.value: ("#3b82f6", "rgba(59, 130, 246, 0.15)"),
+    MilestoneStatus.BLOCKED.value: ("#ef4444", "rgba(239, 68, 68, 0.15)"),
+    MilestoneStatus.NOT_STARTED.value: (_MUTED, "rgba(121, 129, 141, 0.15)"),
+    MilestoneStatus.SKIPPED.value: (_MUTED, "rgba(121, 129, 141, 0.15)"),
+    "planning": (_MUTED, "rgba(121, 129, 141, 0.15)"),
+}
+_DEFAULT_STATUS_COLOR = (_MUTED, "rgba(121, 129, 141, 0.15)")
+
 
 def _status_color(status: str) -> str:
-    """Return a status color matching the Merven palette."""
-    return {
-        MilestoneStatus.COMPLETED.value: "#00bfaf",
-        MilestoneStatus.IN_PROGRESS.value: "#3b82f6",
-        MilestoneStatus.BLOCKED.value: "#ef4444",
-        MilestoneStatus.SKIPPED.value: "#79818d",
-    }.get(status, "#79818d")
+    """Return the solid status color matching the Merven palette.
+
+    Why: milestone bars and epic swimlanes need a hex color for any status,
+    including the derived epic status ``planning``.
+    What: looks ``status`` up in ``_STATUS_COLOR_MAP``, defaulting to muted.
+    Test: assert ``completed`` -> ``#00bfaf``, ``in_progress`` -> ``#3b82f6``,
+    and an unknown status -> ``#79818d`` (muted foreground).
+    """
+    return _STATUS_COLOR_MAP.get(status, _DEFAULT_STATUS_COLOR)[0]
 
 
 def _status_bg(status: str) -> str:
-    """Return a translucent background color for status badges/bars."""
+    """Return a translucent background color for status badges/bars.
+
+    Why: badges/bars need a faint tinted background keyed to the same status map
+    as ``_status_color`` so colors stay in sync.
+    What: looks ``status`` up in ``_STATUS_COLOR_MAP``, defaulting to muted tint.
+    Test: assert ``blocked`` -> ``rgba(239, 68, 68, 0.15)`` and an unknown status
+    -> the muted tint ``rgba(121, 129, 141, 0.15)``.
+    """
+    return _STATUS_COLOR_MAP.get(status, _DEFAULT_STATUS_COLOR)[1]
+
+
+def _status_bar_css() -> str:
+    """Return the ``.milestone-bar.<status>::before`` fill-color CSS rules.
+
+    Why: the milestone-bar fill color must have a rule for every status value
+    ``_milestone_bar`` can emit; previously ``in-progress``/``not-started`` fell
+    back silently to muted because the class was hyphenated but the selectors
+    were underscored. Generating the rules from ``_STATUS_COLOR_MAP`` guarantees
+    one rule per status and a single source of truth with the tokens.
+    What: emits one ``.milestone-bar.<status>::before {{ --fill-color: <hex>; }}``
+    line per ``MilestoneStatus`` value (underscored, matching the emitted class).
+    Test: assert the output contains ``.milestone-bar.in_progress::before`` and
+    ``.milestone-bar.not_started::before`` and no hyphenated status selectors.
+    """
+    statuses = [s.value for s in MilestoneStatus]
+    lines = [
+        f"    .milestone-bar.{status}::before {{ --fill-color: "
+        f"{_STATUS_COLOR_MAP.get(status, _DEFAULT_STATUS_COLOR)[0]}; }}"
+        for status in statuses
+    ]
+    return "\n".join(lines)
+
+
+def design_tokens() -> dict[str, Any]:
+    """Return the shared design-token schema for the published dashboard JSON.
+
+    Why: the remote Lovable renderer (merven.ai) must theme the dashboard
+    identically to the local HTML. Exporting the Python color constants (rather
+    than re-hardcoding hex values on the frontend) means the two renderers
+    cannot drift. See ``export_dashboard_json``'s ``design_tokens`` key.
+    What: returns a stable, versioned dict::
+
+        {
+          "version": 1,
+          "colors": { <_MERVEN_COLORS palette> },
+          "status_colors": {            # per-status solid + translucent bg
+            "<status>": {"color": "#rrggbb", "background": "rgba(...)"},
+            ...  # completed, in_progress, blocked, not_started, skipped, planning
+          }
+        }
+
+    Test: assert ``design_tokens()["colors"]["primary"] == "#00bfaf"`` and
+    ``design_tokens()["status_colors"]["in_progress"]["color"] == "#3b82f6"``.
+    """
     return {
-        MilestoneStatus.COMPLETED.value: "rgba(0, 191, 175, 0.15)",
-        MilestoneStatus.IN_PROGRESS.value: "rgba(59, 130, 246, 0.15)",
-        MilestoneStatus.BLOCKED.value: "rgba(239, 68, 68, 0.15)",
-        MilestoneStatus.SKIPPED.value: "rgba(121, 129, 141, 0.15)",
-    }.get(status, "rgba(121, 129, 141, 0.15)")
+        "version": 1,
+        "colors": dict(_MERVEN_COLORS),
+        "status_colors": {
+            status: {"color": color, "background": background}
+            for status, (color, background) in _STATUS_COLOR_MAP.items()
+        },
+    }
 
 
 def export_dashboard_json_from_data(data: dict[str, Any]) -> str:
@@ -234,9 +310,7 @@ def export_dashboard_html_from_data(data: dict[str, Any]) -> str:
       opacity: 0.25;
       transition: width 0.5s ease;
     }}
-    .milestone-bar.completed::before {{ --fill-color: var(--primary); }}
-    .milestone-bar.in_progress::before {{ --fill-color: #3b82f6; }}
-    .milestone-bar.blocked::before {{ --fill-color: #ef4444; }}
+{_status_bar_css()}
     .milestone-content {{
       position: relative;
       z-index: 1;
@@ -444,6 +518,10 @@ def _dashboard_data(plan: MilestonePlan) -> dict[str, Any]:
         "process_track": _process_track_from_epic(process_epic) if process_epic else None,
         "epics": [_work_epic(epic) for epic in work_epics],
         "recent_deliverables": _recent_deliverables(plan),
+        # Shared theme tokens so the remote Lovable renderer themes the dashboard
+        # identically to the local HTML. Sourced from the Python color constants
+        # (see ``design_tokens``) so the two renderers cannot drift.
+        "design_tokens": design_tokens(),
     }
 
 
@@ -485,10 +563,22 @@ def _epic_swimlane(epic: dict[str, Any]) -> str:
 
 
 def _milestone_bar(m: dict[str, Any]) -> str:
-    status = m["status"].replace("_", "-")
-    status_label = m["status"].replace("_", " ")
-    status_fg = _status_color(m["status"])
-    status_bg = _status_bg(m["status"])
+    """Render one milestone bar whose CSS class matches the generated selectors.
+
+    Why: the status CSS class must use the underscored status value (e.g.
+    ``in_progress``, ``not_started``) so it matches the
+    ``.milestone-bar.<status>::before`` selectors produced by
+    ``_status_bar_css``; the old ``replace("_", "-")`` emitted hyphenated
+    classes that no selector matched, silently defaulting to the muted fill.
+    What: emits ``class="milestone-bar <status>"`` using the raw underscored
+    status, plus an inline ``--fill``/``--status-bg``/``--status-fg``.
+    Test: assert the rendered class for an in-progress milestone contains
+    ``milestone-bar in_progress`` (underscored) and matches a CSS selector.
+    """
+    status = m["status"]
+    status_label = status.replace("_", " ")
+    status_fg = _status_color(status)
+    status_bg = _status_bg(status)
     return f"""<div class="milestone-bar {status}" style="--fill: {m['completion']}%; --status-bg: {status_bg}; --status-fg: {status_fg};">
       <div class="milestone-content">
         <div class="milestone-name">{_escape(m['name'])}</div>

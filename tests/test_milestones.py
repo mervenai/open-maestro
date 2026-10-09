@@ -430,6 +430,73 @@ class TestDashboard:
         assert "<script>" not in html
         assert "&lt;script&gt;" in html
 
+    def test_milestone_bar_class_matches_css_selectors(self, tmp_path):
+        """Every emitted milestone-bar status class must have a CSS ::before rule.
+
+        Regression guard for the class/selector mismatch where the bar class was
+        hyphenated (``in-progress``) but the selectors were underscored
+        (``.in_progress``), so in-progress/not-started bars silently fell back to
+        the muted color. The emitted class and the selector must use the same
+        (underscored) convention, and every status must have a rule.
+        """
+        store = MilestoneStore(tmp_path)
+        plan = store.load()
+        # Exercise multiple statuses in the process track so several bar classes
+        # are emitted (in_progress, blocked, completed alongside not_started).
+        plan.epics[0].milestones[0].status = MilestoneStatus.COMPLETED
+        plan.epics[0].milestones[1].status = MilestoneStatus.IN_PROGRESS
+        plan.epics[0].milestones[2].status = MilestoneStatus.BLOCKED
+        plan._recompute_summary()
+        html = export_dashboard_html(plan)
+
+        # Underscored classes are emitted, never hyphenated ones.
+        assert 'class="milestone-bar in_progress"' in html
+        assert 'class="milestone-bar not_started"' in html
+        assert "milestone-bar in-progress" not in html
+        assert "milestone-bar not-started" not in html
+
+        # Every status value has a matching ::before selector (no silent fallback).
+        for status in MilestoneStatus:
+            selector = f".milestone-bar.{status.value}::before"
+            assert selector in html, f"missing CSS rule for {selector}"
+
+        # The previously-missing not_started rule exists and is intentional (muted).
+        assert ".milestone-bar.not_started::before { --fill-color: #79818d; }" in html
+        # in_progress keeps its blue fill via a correctly-matched selector.
+        assert ".milestone-bar.in_progress::before { --fill-color: #3b82f6; }" in html
+
+    def test_json_export_includes_design_tokens(self, tmp_path):
+        """export_dashboard_json must carry the shared theme/design tokens.
+
+        The remote Lovable renderer themes the dashboard from these tokens, so
+        the color palette and status->color map must be present and sourced from
+        the Python constants (not re-hardcoded on the frontend).
+        """
+        store = MilestoneStore(tmp_path)
+        plan = store.load()
+        data = json.loads(export_dashboard_json(plan))
+
+        tokens = data["design_tokens"]
+        assert tokens["version"] == 1
+
+        # Palette is the Merven color map.
+        assert tokens["colors"]["primary"] == "#00bfaf"
+        assert tokens["colors"]["background"] == "#02040b"
+        assert tokens["colors"]["muted_foreground"] == "#79818d"
+
+        # Status -> color mapping covers every MilestoneStatus plus derived
+        # "planning", each with a solid color and translucent background.
+        status_colors = tokens["status_colors"]
+        for status in MilestoneStatus:
+            assert status.value in status_colors
+            entry = status_colors[status.value]
+            assert entry["color"].startswith("#")
+            assert entry["background"].startswith("rgba(")
+        assert status_colors["in_progress"]["color"] == "#3b82f6"
+        assert status_colors["completed"]["color"] == "#00bfaf"
+        assert status_colors["not_started"]["color"] == "#79818d"
+        assert "planning" in status_colors
+
 
 class TestDashboardServer:
     def test_server_serves_html_and_json(self, tmp_path):
