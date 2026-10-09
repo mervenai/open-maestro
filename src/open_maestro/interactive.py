@@ -61,7 +61,11 @@ from open_maestro.orchestrator.pm import ProjectManager
 from open_maestro.orchestrator.router import LLMTaskRouter
 from open_maestro.runtime import quota as quota_mod
 from open_maestro.runtime.base import AgentConfig
-from open_maestro.runtime.factory import create_runtime, select_runtime_for_task
+from open_maestro.runtime.factory import (
+    create_runtime,
+    runtime_for_model,
+    select_runtime_for_task,
+)
 from open_maestro.search.vector_client import VectorSearchClient
 from open_maestro.session.store import SessionRecord, SessionStore
 from open_maestro.sources.config import SourceRegistry
@@ -515,6 +519,12 @@ async def _handle_command(
         if not args:
             return "Usage: /model <model-alias>"
         state.model = args[0]
+        rt = runtime_for_model(state.model)
+        if rt:
+            return (
+                f"Model override set to '{state.model}' "
+                f"(runtime {rt}) for this session."
+            )
         return f"Model override set to '{state.model}' for this session."
 
     if cmd == "remember":
@@ -2342,6 +2352,12 @@ async def run_interactive(args: Any) -> int:
         turn_runtime = args.runtime
         turn_model = state.model
         prefer_local = state.prefer_local or args.prefer_local
+        if turn_runtime is None and turn_model is not None:
+            # A pinned model implies its runtime: without this the router
+            # picked any runtime and the alias resolved against the wrong
+            # backend (or failed there). Unknown pins fall through to the
+            # router unchanged.
+            turn_runtime = runtime_for_model(turn_model)
         if turn_runtime is None:
             try:
                 selected_runtime, selected_model = select_runtime_for_task(

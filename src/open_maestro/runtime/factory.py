@@ -178,7 +178,10 @@ def select_runtime_for_task(
 
     Args:
         profile: Task requirements and preferences.
-        runtime_type: If provided, only consider this runtime.
+        runtime_type: If provided, only consider this runtime. When None,
+            ``OPEN_MAESTRO_RUNTIME`` (if set) narrows selection the same way
+            it pins ``create_runtime(None)``; otherwise every available
+            runtime is considered.
         latency_tolerance: Maximum allowed latency ratio vs. the fastest model
             (default 1.2, i.e. up to 20% slower).
         max_cost_level: If provided, exclude models more expensive than this.
@@ -256,6 +259,48 @@ def select_runtime_for_task(
     return selected_runtime, selected_model
 
 
+def runtime_for_model(model: str) -> str | None:
+    """Runtime that can serve *model* (model id, alias, or runtime identifier).
+
+    Prefers a runtime whose backend is available right now; falls back to the
+    model's first claimed runtime so the caller surfaces a "runtime not
+    available" error instead of silently routing the pin elsewhere. Used to
+    honor explicit model pins (``/model``, ``--model``): a pinned model
+    implies its runtime, so the router must not seat it on another backend.
+    """
+    from open_maestro.config.capabilities import CapabilityRegistry
+    from open_maestro.config.models import ModelResolver
+
+    registry = CapabilityRegistry.load()
+    runtimes = list_runtimes()
+    resolver = ModelResolver(registry=registry)
+
+    entry = registry.models.get(model)
+    if entry is None:
+        matches = registry.models_for_alias(model)
+        entry = matches[0] if matches else None
+    if entry is None:
+        for rt in runtimes:
+            entry = registry.model_for_identifier(rt, model)
+            if entry is not None:
+                break
+    if entry is not None:
+        for rt in entry.identifiers:
+            if runtimes.get(rt):
+                return rt
+        return next(iter(entry.identifiers), None)
+
+    # Last chance: vendor shorthand the registry has no entry for ("opus",
+    # "sonnet") still implies a runtime via the fallback alias table. The
+    # resolver passes unknown strings through unchanged, so a resolution that
+    # differs from the pin means some runtime claimed it.
+    for rt in runtimes:
+        resolved = resolver.resolve(model, rt)
+        if resolved and resolved != model:
+            return rt
+    return None
+
+
 def _build_candidates(
     profile: TaskProfile,
     *,
@@ -282,6 +327,19 @@ def _build_candidates(
     )
     cli_runtimes = {"kimi-cli", "claude-cli"}
     local_providers = {"ollama", "local"}
+
+    # Environment pin: OPEN_MAESTRO_RUNTIME narrows candidate runtimes the
+    # same way it pins create_runtime(None) — without this the router ignored
+    # the pin and could still seat work on another runtime.
+    if runtime_type is None:
+        env_runtime = os.environ.get("OPEN_MAESTRO_RUNTIME", "").strip().lower()
+        if env_runtime:
+            if env_runtime not in _RUNTIMES:
+                raise RuntimeError(
+                    f"Unknown runtime type from OPEN_MAESTRO_RUNTIME: "
+                    f"{env_runtime!r}. Available: {', '.join(_RUNTIMES)}"
+                )
+            runtime_type = env_runtime
 
     candidates: list[tuple[float, int, int, float, bool, str, str]] = []
 

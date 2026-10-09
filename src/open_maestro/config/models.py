@@ -35,6 +35,12 @@ _FALLBACK_ALIASES: dict[str, dict[str, str]] = {
         "fast": "claude-3-5-haiku-20241022",
         "smart": "claude-sonnet-4-6",
         "reasoning": "claude-opus-4-7",
+        # Vendor shorthand users type after /model or --model: the registry
+        # has no entries under these names, so without the fallback they
+        # passed through raw to the CLI.
+        "opus": "claude-opus-4-7",
+        "sonnet": "claude-sonnet-4-6",
+        "haiku": "claude-haiku-4-5-20251001",
     },
     "openai-sdk": {
         "default": "gpt-4o",

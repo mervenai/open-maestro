@@ -45,6 +45,7 @@ from open_maestro.runtime.base import AgentConfig
 from open_maestro.runtime.factory import (
     create_runtime,
     list_runtimes,
+    runtime_for_model,
     select_runtime_for_task,
 )
 from open_maestro.search.vector_client import VectorSearchClient
@@ -767,7 +768,11 @@ async def main_async() -> int:
     )
 
     # When no runtime is explicitly requested, pick the cheapest available
-    # runtime + model that satisfies the task profile.
+    # runtime + model that satisfies the task profile. A pinned --model
+    # implies its runtime (same rule as interactive /model): seating the pin
+    # on a router-picked runtime resolved the alias against the wrong backend.
+    if args.runtime is None and args.model is not None:
+        args.runtime = runtime_for_model(args.model)
     if args.runtime is None:
         # Default to a medium cost floor so cheap/local models are not selected
         # for general work. --fast, --prefer-local, or --cost-preference low

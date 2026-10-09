@@ -208,24 +208,30 @@ def test_looks_like_decision() -> None:
 
 
 def test_resolve_suggested_prompt_selects_by_number() -> None:
-    prompts = [("First", "prompt one"), ("Second", "prompt two")]
-    resolved, title = _resolve_suggested_prompt("1", prompts)
+    prompts = [
+        ("id-1", "First", "prompt one"),
+        ("id-2", "Second", "prompt two"),
+    ]
+    resolved, title, prompt_id = _resolve_suggested_prompt("1", prompts)
     assert resolved == "prompt one"
     assert title == "First"
+    assert prompt_id == "id-1"
 
 
 def test_resolve_suggested_prompt_invalid_number() -> None:
-    prompts = [("First", "prompt one")]
-    resolved, title = _resolve_suggested_prompt("5", prompts)
+    prompts = [("id-1", "First", "prompt one")]
+    resolved, title, prompt_id = _resolve_suggested_prompt("5", prompts)
     assert resolved == "5"
     assert title is None
+    assert prompt_id is None
 
 
 def test_resolve_suggested_prompt_non_number() -> None:
-    prompts = [("First", "prompt one")]
-    resolved, title = _resolve_suggested_prompt("hello", prompts)
+    prompts = [("id-1", "First", "prompt one")]
+    resolved, title, prompt_id = _resolve_suggested_prompt("hello", prompts)
     assert resolved == "hello"
     assert title is None
+    assert prompt_id is None
 
 
 def _session_store_for(tmp_path, monkeypatch) -> SessionStore:
