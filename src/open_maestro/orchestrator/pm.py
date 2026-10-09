@@ -1099,6 +1099,17 @@ class ProjectManager:
         allowed = set(agent_config.get("allowed_tools") or set())
         if allowed_tools:
             allowed.update(allowed_tools)
+        if allowed and mcp_servers:
+            # Read-only auditor seats (agent-declared allowlists like the
+            # code-critic's Read/Grep/Bash) must not lose semantic search:
+            # union in the vetted read-only MCP tools so both the guard text
+            # and the tool interception admit them. Mutating MCP tools
+            # (index_project, save_report, review_*, kg_build, ...) stay
+            # excluded — a read-only critic must not reach them.
+            from open_maestro.mcp.policy import readonly_mcp_tool_names
+
+            allowed.update(readonly_mcp_tool_names(mcp_servers))
+        if allowed:
             agent_config["allowed_tools"] = sorted(allowed)
 
         config = AgentConfig(

@@ -293,6 +293,65 @@ class TestProjectManagerGuardrails:
         allowed = await runtime.last_tool_guard("Read", {"path": "x"})
         assert allowed is True
 
+    async def test_readonly_mcp_tools_admitted_to_allowlisted_agent(self):
+        """Auditor seats (agent-declared tool allowlist) gain the vetted
+        read-only vector-search tools — and only those — when an MCP config
+        is loaded. Regression: the code-critic reported the protocol-referenced
+        MCP tools as 'not exposed in this runtime' and fell back to grep."""
+        runtime = FakeRuntime()
+        agent = AgentDefinition(
+            id="code-critic",
+            name="Code Critic",
+            role="qa",
+            tools=["Read", "Grep", "Bash"],
+            blocked_tools=["Write", "Edit"],
+        )
+        registry = AgentRegistry({"code-critic": agent})
+        pm = ProjectManager(runtime=runtime, registry=registry)
+        mcp_servers = {"mcpServers": {"mcp-vector-search": {"command": "mvs"}}}
+
+        await pm.handle(
+            "review the parser",
+            agent_id="code-critic",
+            mcp_servers=mcp_servers,
+        )
+
+        config = runtime.last_config
+        assert config is not None
+        allowed = config.allowed_tools or []
+        assert "mcp__mcp-vector-search__search_code" in allowed
+        assert "mcp__mcp-vector-search__kg_query" in allowed
+        # Mutating/agentic MCP tools stay out of a read-only seat.
+        assert "mcp__mcp-vector-search__index_project" not in allowed
+        assert "mcp__mcp-vector-search__save_report" not in allowed
+        # Interception admits vetted tools, rejects the rest.
+        assert runtime.last_tool_guard is not None
+        ok = await runtime.last_tool_guard(
+            "mcp__mcp-vector-search__search_code", {"query": "x"}
+        )
+        assert ok is True
+        ok = await runtime.last_tool_guard(
+            "mcp__mcp-vector-search__save_report", {"content": "x"}
+        )
+        assert ok is False
+
+    async def test_no_mcp_config_leaves_allowlist_unchanged(self):
+        runtime = FakeRuntime()
+        agent = AgentDefinition(
+            id="code-critic",
+            name="Code Critic",
+            role="qa",
+            tools=["Read", "Grep", "Bash"],
+        )
+        registry = AgentRegistry({"code-critic": agent})
+        pm = ProjectManager(runtime=runtime, registry=registry)
+
+        await pm.handle("review the parser", agent_id="code-critic")
+
+        config = runtime.last_config
+        assert config is not None
+        assert config.allowed_tools == ["Bash", "Grep", "Read"]
+
 
 class TestProjectManagerSession:
     async def test_resume_calls_runtime_resume(self, tmp_path):
@@ -643,6 +702,10 @@ class TestCriticGate:
         monkeypatch.setattr(
             critic_mod, "detect_source_changes", lambda p, ref: [("src/app.py", 60)]
         )
+        # Isolate the source-critic gate from the artifact gate (9.6): stub
+        # artifact detection to [] so the repo's own uncommitted docs/*.md
+        # changes don't leak in and fire an extra artifact-critic pass.
+        monkeypatch.setattr(critic_mod, "detect_artifact_changes", lambda p, ref: [])
         runtime = CriticFakeRuntime()
         pm = ProjectManager(runtime=runtime, registry=_critic_registry())
 
@@ -728,6 +791,9 @@ class TestCriticGate:
         monkeypatch.setenv("MAESTRO_CRITIC_GATE", "on")
         monkeypatch.setattr(critic_mod, "snapshot_head", lambda p: "abc123")
         monkeypatch.setattr(critic_mod, "detect_source_changes", lambda p, ref: [])
+        # Isolate from the artifact gate (9.6): the repo's own uncommitted
+        # docs/*.md changes would otherwise fire an extra artifact-critic pass.
+        monkeypatch.setattr(critic_mod, "detect_artifact_changes", lambda p, ref: [])
         runtime = CriticFakeRuntime()
         pm = ProjectManager(runtime=runtime, registry=_critic_registry())
 

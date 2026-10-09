@@ -12,6 +12,11 @@ from open_maestro.mcp.tools import mcp_schema_to_json_schema, mcp_tool_to_open_m
 
 
 class TestMCPConfigLoading:
+    @pytest.fixture(autouse=True)
+    def _isolated_home(self, tmp_path: Path, monkeypatch):
+        """Discovery must not see the developer machine's real ~/.open-maestro/mcp.json."""
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
     def test_load_flat_config(self, tmp_path: Path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         (tmp_path / ".mcp.json").write_text(
@@ -84,3 +89,48 @@ class TestMCPToolConversion:
         assert tool.name == "remember"
         assert result == "ok"
         assert calls == [("memory-server", "remember", {"note": "hello"})]
+
+
+class TestReadOnlyMCPPolicy:
+    def test_names_cover_vetted_suffixes_per_server(self):
+        from open_maestro.mcp.policy import (
+            READONLY_MCP_TOOL_SUFFIXES,
+            readonly_mcp_tool_names,
+        )
+
+        names = readonly_mcp_tool_names(
+            {"mcpServers": {"mcp-vector-search": {"command": "mvs"}}}
+        )
+        assert len(names) == len(READONLY_MCP_TOOL_SUFFIXES)
+        assert "mcp__mcp-vector-search__search_code" in names
+        assert "mcp__mcp-vector-search__kg_query" in names
+
+    def test_mutating_tools_are_not_vetted(self):
+        from open_maestro.mcp.policy import readonly_mcp_tool_names
+
+        names = readonly_mcp_tool_names(
+            {"mcpServers": {"mcp-vector-search": {"command": "mvs"}}}
+        )
+        for mutating in (
+            "index_project",
+            "embed_chunks",
+            "save_report",
+            "review_repository",
+            "review_pull_request",
+            "code_review",
+            "wiki_generate",
+            "kg_build",
+            "story_generate",
+        ):
+            assert f"mcp__mcp-vector-search__{mutating}" not in names
+
+    def test_flat_mapping_and_absent_config(self):
+        from open_maestro.mcp.policy import readonly_mcp_tool_names
+
+        flat = readonly_mcp_tool_names(
+            {"srv-a": {"command": "x"}, "srv-b": {"command": "y"}}
+        )
+        assert any(n.startswith("mcp__srv-a__") for n in flat)
+        assert any(n.startswith("mcp__srv-b__") for n in flat)
+        assert readonly_mcp_tool_names(None) == []
+        assert readonly_mcp_tool_names({}) == []
