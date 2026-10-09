@@ -16,6 +16,7 @@ tools:
 skills:
 - dspy
 - langchain
+- mermaid-diagrams
 - langgraph
 - supabase
 - neon

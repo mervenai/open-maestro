@@ -15,6 +15,7 @@ skills:
 - git-workflow
 - requesting-code-review
 - writing-plans
+- mermaid-diagrams
 - json-data-handling
 - root-cause-tracing
 - systematic-debugging

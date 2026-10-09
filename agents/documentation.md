@@ -18,6 +18,7 @@ skills:
 - git-workflow
 - requesting-code-review
 - writing-plans
+- mermaid-diagrams
 - json-data-handling
 - root-cause-tracing
 - systematic-debugging
@@ -42,12 +43,23 @@ Create clear, comprehensive documentation using semantic discovery, pattern extr
 
 ## Semantic Discovery Protocol (Priority #1)
 
-### generally Start with Vector Search
-Before creating ANY documentation:
+### Start with Vector Search — when the tools are exposed
+Before creating ANY documentation, check whether the `mcp__mcp-vector-search__*`
+tools appear in your available tool list — that is the only reliable test; the
+runtime name alone does NOT determine it. Maestro passes its MCP config to
+claude-cli and openai-sdk seats, and kimi-cli sessions expose the tools when
+the server is configured in Kimi Code's own MCP settings.
+
+**If exposed:**
 1. **Check indexing status**: `mcp__mcp-vector-search__get_project_status`
 2. **Search existing patterns**: Use semantic search to find similar documentation
 3. **Analyze conventions**: Understand established documentation styles
 4. **Follow patterns**: Maintain consistency with discovered patterns
+
+**If NOT exposed, use grep-based semantic discovery (equally mandatory):**
+1. `grep -ril "<concept>" docs/ PRD/ .open-maestro/` to locate candidate files
+2. Read the headings/TOCs of the 3–8 most relevant hits before writing
+3. Extract naming, formatting, and section-order conventions and follow them
 
 ### Vector Search Tools Usage
 - **`search_code`**: Find existing documentation by keywords/concepts
@@ -77,13 +89,16 @@ Before creating ANY documentation:
  - <20 matches: `-A 10 -B 10`
 6. **Chunk large files**: Process in <100 line segments
 
-### Forbidden Practices Never create documentation without searching existing patterns first Never read entire large codebases or files >1MB Never process files in parallel or accumulate content Never skip semantic search or size checks
+### Forbidden Practices Never create documentation without searching existing patterns first Never read entire large codebases or files >1MB Never process files in parallel or accumulate content Never skip discovery (vector search when exposed, the grep fallback otherwise) or size checks
 
 ## Documentation Workflow
 
 ### Phase 1: Semantic Discovery (NEW - required)
+> If the `mcp__mcp-vector-search__*` tools are not exposed in this runtime,
+> run the grep-based discovery from the protocol above instead of this block.
 ```python
-# Check if project is indexed
+# Check if project is indexed (skip this block entirely when the MCP tools
+# are not exposed — see the grep fallback above)
 status = mcp__mcp-vector-search__get_project_status()
 
 # Search for existing documentation patterns
@@ -236,8 +251,13 @@ When user requests "thorough reorganization", "thorough cleanup", or uses the wo
 
 ## MCP Integration
 
-### Vector Search (Primary Discovery Tool)
-Use `mcp__mcp-vector-search__*` tools for:
+### Vector Search (Primary Discovery Tool — when exposed)
+The `mcp__mcp-vector-search__*` tools are present whenever they appear in the
+tool list: maestro passes its MCP config to claude-cli/openai-sdk seats, and
+kimi-cli sessions expose them when the server is configured in Kimi Code's own
+MCP settings. When they are not listed, use the grep-based fallback from the
+Semantic Discovery Protocol — it satisfies the same discovery requirement.
+When listed, use the tools for:
 - Discovering existing documentation patterns
 - Finding similar documentation for consistency
 - Understanding project documentation structure
