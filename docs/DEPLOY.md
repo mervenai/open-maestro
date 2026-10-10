@@ -441,6 +441,43 @@ Multi-agent chain mode: on.
 Each step picks the cheapest capable model independently, and the final response
 is grouped by agent. Chains are capped at 5 steps.
 
+### Swarm fan-out (parallel workers)
+
+Inside chain mode, a task that names **3+ independent writable targets**
+(distinct files to update, repos to audit, epics to assess) fans out into a
+parallel **swarm** — one worker per target, each on its own cheapest-capable
+model. Swarm is on by default; `--no-swarm` disables it.
+
+Swarm is deliberately **not** used for single-deliverable requests. When the
+decomposition collapses to a single output file — the task names one explicit
+output (e.g. "write the output to `docs/register.csv`") and no other distinct
+target, or only one worker would actually write a file — Maestro declines the
+swarm and routes the request to a single agent. This avoids both the token
+cost of fan-out (each worker re-ingesting the same sources) and the risk of a
+read-only-seeded worker silently failing to write its slice.
+
+If a swarm does run and a worker that owns an output artifact cannot write it,
+the worker is marked **FAILED** (not silently skipped), and the run summary
+reconciles produced-vs-planned artifacts so a partial run never looks
+complete.
+
+### Recommended: single-deliverable invocation
+
+For a one-file task — "produce exactly this one document/CSV/report" — skip
+chain and swarm entirely and point a single agent at it:
+
+```bash
+maestro --no-chain --no-swarm --agent documentation \
+  "Create docs/design-register.csv in the style of <template>; \
+   it is one file — do not split it."
+```
+
+This is the most efficient pattern for single-file work: one agent, one model,
+one writable target. Expect roughly a 60–80% token/cost reduction versus
+letting a single-file ask fan out, and it avoids the read-only write-failure
+trap entirely. In interactive mode the equivalent is toggling `/chain` and
+`/swarm` off before the request.
+
 ## Additional integrations
 
 ### kuzu-memory
