@@ -7,6 +7,8 @@ from unittest.mock import patch
 
 import pytest
 
+from pathlib import Path
+
 from open_maestro.agents.definition import AgentDefinition
 from open_maestro.agents.registry import AgentRegistry
 from open_maestro.orchestrator.swarm import (
@@ -15,9 +17,11 @@ from open_maestro.orchestrator.swarm import (
     SwarmPlanner,
     SwarmPlan,
     SwarmWorker,
+    _artifact_exists,
     _current_task_text,
+    _write_blocked,
 )
-from open_maestro.runtime.base import AgentResult
+from open_maestro.runtime.base import AgentConfig, AgentResult, AgentRuntime
 
 from test_chain import EchoRuntime, FakeRuntime
 
@@ -595,6 +599,42 @@ class TestProjectManagerSwarmIntegration:
         assert result.metadata.get("swarm") is not True
         assert result.metadata.get("chain") is True
 
+    async def test_single_deliverable_request_routes_to_chain_not_swarm(
+        self, swarm_registry, tmp_path, monkeypatch
+    ):
+        """Issue #2 end-to-end: a single-output request, even though the LLM
+        planner proposes fragment workers, must NOT run as a swarm — it falls
+        through to the (single-deliverable) chain path."""
+        from open_maestro.orchestrator.pm import ProjectManager
+
+        monkeypatch.chdir(tmp_path)
+        # The swarm planner LLM proposes three fragment workers...
+        payload = json.dumps(
+            {
+                "workers": [
+                    {"agent_id": "researcher", "purpose": "from docs",
+                     "target_file": "docs/_frag/a.md"},
+                    {"agent_id": "engineer", "purpose": "from code",
+                     "target_file": "docs/_frag/b.md"},
+                    {"agent_id": "documentation", "purpose": "from proto",
+                     "target_file": "docs/_frag/c.md"},
+                ],
+            }
+        )
+        runtime = FakeRuntime(payload)
+        pm = ProjectManager(runtime=runtime, registry=swarm_registry)
+        result = await pm.handle(
+            "Create a single design register. Write the output to "
+            "docs/design-register.csv. Do not split it.",
+            agent_id="documentation",
+            chain=True,
+            swarm=True,
+            dry_run=True,
+        )
+        # Declined as a swarm → chain path owns the dry-run plan.
+        assert result.metadata.get("swarm") is not True
+        assert result.metadata.get("chain") is True
+
 def _resilience_plan(workers, **kwargs):
     return SwarmPlan(
         workers=workers,
@@ -750,9 +790,14 @@ class TestExplicitOutputRespect:
             is None
         )
 
-    async def test_llm_plan_appends_merge_worker(self, swarm_registry, tmp_path, monkeypatch):
-        """MSTRO-126: fragment layout is fine, but the explicit output file
-        must still be produced — via an appended merge worker."""
+    async def test_single_explicit_output_declines_swarm(
+        self, swarm_registry, tmp_path, monkeypatch
+    ):
+        """Issue #2 (supersedes MSTRO-126 for the pure single-output case):
+        a task naming exactly one output file, decomposed only into planner-
+        invented fragments, is a single deliverable — decline the swarm so it
+        routes to a single agent instead of fanning out and (under read-only
+        seeding) silently losing the fragments."""
         monkeypatch.chdir(tmp_path)
         payload = json.dumps(
             {
@@ -773,17 +818,13 @@ class TestExplicitOutputRespect:
             "Draft the data contract. Write the output to "
             "docs/blueprint-design-and-data-contract.md."
         )
-        assert plan is not None
-        merge = [
-            w
-            for w in plan.workers
-            if w.target_file == "docs/blueprint-design-and-data-contract.md"
-        ]
-        assert len(merge) == 1
-        assert "merge" in merge[0].purpose.lower()
+        assert plan is None
 
-    async def test_llm_plan_respects_direct_target(self, swarm_registry, tmp_path, monkeypatch):
-        """A worker already targeting the explicit file: nothing appended."""
+    async def test_single_explicit_output_direct_target_declines_swarm(
+        self, swarm_registry, tmp_path, monkeypatch
+    ):
+        """Even when a worker already targets the one explicit output directly,
+        a single named deliverable is not a swarm (issue #2)."""
         monkeypatch.chdir(tmp_path)
         payload = json.dumps(
             {
@@ -800,8 +841,7 @@ class TestExplicitOutputRespect:
             "Draft the contract. Write the output to "
             "docs/blueprint-design-and-data-contract.md."
         )
-        assert plan is not None
-        assert len(plan.workers) == 3
+        assert plan is None
 
     async def test_heuristic_plan_appends_merge_worker(self, swarm_registry, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -819,3 +859,282 @@ class TestExplicitOutputRespect:
         assert plan is not None
         targets = [w.target_file for w in plan.workers]
         assert "build/combined.md" in targets
+
+
+class TestSingleDeliverableCollapse:
+    """Issue #2 fix 3: single-deliverable requests do not fan out."""
+
+    def test_helper_write_blocked(self):
+        assert _write_blocked(["Grep", "Read"]) is False
+        assert _write_blocked(["Grep", "Write"]) is True
+        assert _write_blocked(["Edit"]) is True
+        assert _write_blocked(None) is False
+
+    async def test_one_target_is_not_a_swarm(self, swarm_registry, tmp_path, monkeypatch):
+        """Three workers but only one declares a write target → one deliverable."""
+        monkeypatch.chdir(tmp_path)
+        payload = json.dumps(
+            {
+                "workers": [
+                    {"agent_id": "researcher", "purpose": "gather from docs"},
+                    {"agent_id": "engineer", "purpose": "gather from code"},
+                    {"agent_id": "documentation", "purpose": "write register",
+                     "target_file": "docs/register.csv"},
+                ],
+            }
+        )
+        planner = SwarmPlanner(runtime=FakeRuntime(payload), registry=swarm_registry)
+        plan = await planner.plan("Build a single register.csv from all sources")
+        assert plan is None
+
+    async def test_genuine_multi_target_still_swarms(
+        self, swarm_registry, tmp_path, monkeypatch
+    ):
+        """Distinct, independently-named outputs remain a swarm (no regression)."""
+        monkeypatch.chdir(tmp_path)
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        for name in ("a.md", "b.md", "c.md"):
+            (docs / name).write_text("# doc\n")
+        planner = SwarmPlanner(
+            runtime=FakeRuntime("not json"), registry=swarm_registry
+        )
+        plan = await planner.plan("Update docs/a.md, docs/b.md, and docs/c.md")
+        assert plan is not None
+        assert len(plan.workers) == 3
+
+    def test_collapses_helper_explicit_single_output(self):
+        plan = SwarmPlan(
+            workers=[
+                SwarmWorker("r", "frag", target_file="docs/_frag/a.md"),
+                SwarmWorker("e", "frag", target_file="docs/_frag/b.md"),
+                SwarmWorker("d", "merge", target_file="docs/out.md"),
+            ],
+            original_prompt="x",
+        )
+        assert SwarmExecutor  # keep import used
+        assert SwarmPlanner._collapses_to_single_deliverable(
+            plan, "Draft the thing. Write the output to docs/out.md."
+        )
+
+    def test_collapses_helper_multi_target_prompt(self):
+        plan = SwarmPlan(
+            workers=[
+                SwarmWorker("r", "a", target_file="docs/a.md"),
+                SwarmWorker("e", "b", target_file="docs/b.md"),
+                SwarmWorker("d", "merge", target_file="docs/out.md"),
+            ],
+            original_prompt="x",
+        )
+        # The prompt itself names docs/a.md and docs/b.md besides the output.
+        assert not SwarmPlanner._collapses_to_single_deliverable(
+            plan,
+            "Update docs/a.md and docs/b.md. Write the output to docs/out.md.",
+        )
+
+
+class _WriteRuntime(AgentRuntime):
+    """Records blocked_tools and (optionally) writes declared artifacts.
+
+    ``write_targets`` names paths (relative to cwd) this runtime creates when
+    it is *allowed* to write: a path is created only when no mutating tool is
+    in the ``blocked_tools`` handed to the worker. This models the real
+    behavior — a read-only-seeded worker produces prose but no file, while a
+    worker granted write access lands its artifact.
+    """
+
+    def __init__(self, write_targets: set[str] | None = None):
+        self.write_targets = write_targets or set()
+        self.blocked_seen: list[set[str]] = []
+
+    @property
+    def runtime_name(self) -> str:
+        return "writer"
+
+    def _maybe_write(self, blocked_tools) -> None:
+        blocked = set(blocked_tools or ())
+        self.blocked_seen.append(blocked)
+        can_write = not (blocked & {"Write", "Edit"})
+        if not can_write:
+            return
+        for target in self.write_targets:
+            path = Path(target)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("# produced\n")
+
+    async def run(self, prompt: str, config: AgentConfig | None = None) -> AgentResult:
+        # No blocking path: writes are allowed.
+        self._maybe_write(None)
+        return AgentResult(text="done", cost_usd=0.01, tokens_used=10)
+
+    async def run_with_hooks(
+        self,
+        prompt: str,
+        tool_guard=None,
+        blocked_tools=None,
+        config: AgentConfig | None = None,
+    ) -> AgentResult:
+        self._maybe_write(blocked_tools)
+        return AgentResult(text="done", cost_usd=0.01, tokens_used=10)
+
+    async def resume(
+        self, session_id: str, prompt: str, config: AgentConfig | None = None
+    ) -> AgentResult:
+        return await self.run(prompt, config)
+
+
+def _exec_plan(workers, **kwargs):
+    return SwarmPlan(
+        workers=workers,
+        original_prompt="produce the analysis artifacts",
+        **kwargs,
+    )
+
+
+class TestArtifactWritability:
+    """Issue #2 fixes 1+2: artifact owners are writable; misses fail loud."""
+
+    async def test_artifact_owner_granted_write_under_readonly(
+        self, swarm_registry, tmp_path, monkeypatch
+    ):
+        """A worker that owns a target is handed a blocked set with the write
+        tools removed, even when the turn is seeded read-only."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "docs").mkdir()
+        plan = _exec_plan(
+            [
+                SwarmWorker("researcher", "analyze only"),
+                SwarmWorker("engineer", "analyze only"),
+                SwarmWorker(
+                    "documentation", "write register",
+                    target_file="docs/register.csv",
+                ),
+            ]
+        )
+        executor = SwarmExecutor(registry=swarm_registry, critic_gate=False)
+        runtime = _WriteRuntime(write_targets={"docs/register.csv"})
+
+        with patch(
+            "open_maestro.runtime.factory.select_runtime_for_task",
+            return_value=("writer", "model-x"),
+        ), patch(
+            "open_maestro.runtime.factory.create_runtime",
+            return_value=runtime,
+        ):
+            result = await executor.execute(
+                plan,
+                original_prompt="produce the register",
+                blocked_tools=["Write", "Edit", "Bash", "Grep"],
+            )
+
+        # The artifact owner's blocked set must NOT contain Write/Edit.
+        owner_blocked = [
+            b for b in runtime.blocked_seen if "Bash" in b and "Grep" in b
+        ]
+        assert owner_blocked, "expected the worker to receive a blocked set"
+        # At least one worker (the owner) got write tools back.
+        assert any(not (b & {"Write", "Edit"}) for b in runtime.blocked_seen)
+        # The declared artifact landed on disk and the run is not degraded.
+        assert (tmp_path / "docs" / "register.csv").is_file()
+        assert "swarm_artifacts_missing" not in result.metadata
+
+    async def test_missing_artifact_fails_loud(
+        self, swarm_registry, tmp_path, monkeypatch
+    ):
+        """A worker that declares an output but writes no file is marked FAILED
+        rather than reported as success (issue #2 fix 1)."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "docs").mkdir()
+        plan = _exec_plan(
+            [
+                SwarmWorker("researcher", "analyze"),
+                SwarmWorker("engineer", "analyze"),
+                SwarmWorker(
+                    "documentation", "write register",
+                    target_file="docs/register.csv",
+                ),
+            ]
+        )
+        executor = SwarmExecutor(registry=swarm_registry, critic_gate=False)
+        # Runtime writes nothing, ever.
+        runtime = _WriteRuntime(write_targets=set())
+
+        with patch(
+            "open_maestro.runtime.factory.select_runtime_for_task",
+            return_value=("writer", "model-x"),
+        ), patch(
+            "open_maestro.runtime.factory.create_runtime",
+            return_value=runtime,
+        ):
+            result = await executor.execute(
+                plan, original_prompt="produce the register"
+            )
+
+        by_agent = {w["agent_id"]: w for w in result.metadata["workers"]}
+        assert by_agent["documentation"]["is_error"] is True
+        assert result.metadata["swarm_degraded"] is True
+        assert "docs/register.csv" in result.metadata["swarm_artifacts_missing"]
+        assert "ARTIFACTS MISSING" in result.text
+        assert "Artifact not written" in result.text
+
+    async def test_reconciliation_reports_produced_vs_planned(
+        self, swarm_registry, tmp_path, monkeypatch
+    ):
+        """Reconciliation lists exactly which planned files landed (fix 4)."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "docs").mkdir()
+        plan = _exec_plan(
+            [
+                SwarmWorker("engineer", "write a", target_file="docs/a.md"),
+                SwarmWorker("documentation", "write b", target_file="docs/b.md"),
+                SwarmWorker("researcher", "write c", target_file="docs/c.md"),
+            ]
+        )
+        executor = SwarmExecutor(registry=swarm_registry, critic_gate=False)
+        # Only a.md and c.md get produced; b.md is lost.
+        runtime = _WriteRuntime(write_targets={"docs/a.md", "docs/c.md"})
+
+        with patch(
+            "open_maestro.runtime.factory.select_runtime_for_task",
+            return_value=("writer", "model-x"),
+        ), patch(
+            "open_maestro.runtime.factory.create_runtime",
+            return_value=runtime,
+        ):
+            result = await executor.execute(
+                plan, original_prompt="produce the three docs"
+            )
+
+        assert sorted(result.metadata["swarm_artifacts_planned"]) == [
+            "docs/a.md",
+            "docs/b.md",
+            "docs/c.md",
+        ]
+        assert sorted(result.metadata["swarm_artifacts_produced"]) == [
+            "docs/a.md",
+            "docs/c.md",
+        ]
+        assert result.metadata["swarm_artifacts_missing"] == ["docs/b.md"]
+
+    def test_reconcile_helper(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "a.md").write_text("x")
+        plan = _exec_plan(
+            [
+                SwarmWorker("engineer", "a", target_file="docs/a.md"),
+                SwarmWorker("documentation", "b", target_file="docs/b.md"),
+                SwarmWorker("researcher", "analyze"),  # no target
+            ]
+        )
+        recon = SwarmExecutor._reconcile_artifacts(plan)
+        assert recon["planned"] == ["docs/a.md", "docs/b.md"]
+        assert recon["produced"] == ["docs/a.md"]
+        assert recon["missing"] == ["docs/b.md"]
+
+    def test_artifact_exists_helper(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        assert _artifact_exists(None) is False
+        assert _artifact_exists("docs/nope.md") is False
+        (tmp_path / "x.md").write_text("y")
+        assert _artifact_exists("x.md") is True
