@@ -38,6 +38,7 @@ from open_maestro.config.capabilities import (
     TaskProfile,
     TaskProfiler,
 )
+from open_maestro.security.policy import _MUTATING_TOOLS
 from open_maestro.orchestrator import critic as critic_mod
 from open_maestro.orchestrator.chain import (
     ChainExecutor,
@@ -55,6 +56,42 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 MAX_SWARM_WORKERS = 6
+
+# The minimal write capability an artifact-owning worker needs back when the
+# turn is seeded read-only (issue #2). Edit alone can't create a new file, so
+# Write is included; both are granted so the worker can create or amend.
+_ARTIFACT_WRITE_TOOLS = ("Write", "Edit")
+
+
+def _write_blocked(blocked_tools: list[str] | None) -> bool:
+    """True when the seeded tool policy blocks file writes (issue #2).
+
+    Swarm workers inherit the turn's ``blocked_tools``; during read-only
+    (pre-implementation) phases that set contains the mutating tools, so a
+    worker told to produce a file cannot actually write it. Detecting this up
+    front lets the executor grant the artifact owner write access and lets
+    reconciliation explain why a missing artifact was missing.
+    """
+    return bool(set(blocked_tools or ()) & _MUTATING_TOOLS)
+
+
+def _artifact_exists(target_file: str | None) -> bool:
+    """True when a worker's declared output artifact is present on disk.
+
+    Relative targets resolve against the current working directory (the
+    project root a turn runs in). Used by the executor to fail loud when a
+    worker claimed a write target but produced nothing (issue #2).
+    """
+    if not target_file:
+        return False
+    path = Path(target_file)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    try:
+        return path.is_file()
+    except OSError:
+        return False
+
 
 _FILE_PATH_RE = re.compile(r"[\w./-]+\.(?:md|py|ts|tsx|js|jsx|yaml|yml|json)")
 
@@ -256,7 +293,58 @@ class SwarmPlanner:
         if planned is None:
             return None
         self._ensure_explicit_output(planned, prompt)
+        # Issue #2: a decomposition that collapses to a single output file is
+        # not a swarm — fanning out fragment-workers that all feed one merged
+        # artifact just multiplies token spend (each re-ingests the same
+        # sources) and, under read-only seeding, silently loses the fragments.
+        # Route these to a single agent instead.
+        if self._collapses_to_single_deliverable(planned, prompt):
+            logger.info(
+                "Swarm declined: decomposition collapses to a single output "
+                "deliverable; routing to a single agent (issue #2)"
+            )
+            return None
         return planned
+
+    @staticmethod
+    def _collapses_to_single_deliverable(plan: SwarmPlan, prompt: str) -> bool:
+        """True when the request's real output is a single file (issue #2).
+
+        Two shapes qualify:
+
+        1. The task explicitly names exactly one output file ("Write the
+           output to ``X``", "Save the report as ``Y``") and the prompt does
+           *not* itself name any other distinct file to produce/update. ``X``
+           is then the lone user-visible deliverable; any per-topic fragments
+           the planner invented to feed a merge step are overhead, not
+           independent deliverables. A single agent writing the one file is
+           cheaper and sidesteps the read-only fragment-loss trap, so decline
+           the swarm. (When the prompt also names other targets — e.g. "update
+           a.md, b.md, c.md; write the combined output to out.md" — those are
+           genuine independent deliverables and the swarm stands.)
+        2. At most one worker in the whole plan declares a write target. With
+           zero or one real artifact there is nothing to parallelize across
+           distinct files; a swarm only adds fan-out cost.
+
+        Genuine multi-target swarms ("update docs/a.md, docs/b.md, docs/c.md",
+        "audit repos A/B/C") name 2+ distinct files in the prompt, so they are
+        left untouched.
+        """
+        task = _current_task_text(prompt)
+        explicit = detect_explicit_output(task)
+        if explicit:
+            # Other distinct file paths the *prompt itself* names (not planner-
+            # invented fragments) are independent deliverables that justify a
+            # swarm even when a combined output is also requested.
+            prompt_named = {
+                p for p in _FILE_PATH_RE.findall(task) if p != explicit
+            }
+            if not prompt_named:
+                return True
+        distinct_targets = {
+            w.target_file for w in plan.workers if w.target_file
+        }
+        return len(distinct_targets) <= 1
 
     def _ensure_explicit_output(self, plan: SwarmPlan, prompt: str) -> None:
         """Guarantee the task's explicit output file is a write target (MSTRO-126).
@@ -579,6 +667,25 @@ class SwarmExecutor(ChainExecutor):
         max_concurrent = max(1, int(os.environ.get("MAESTRO_SWARM_MAX_WORKERS", "4")))
         semaphore = asyncio.Semaphore(max_concurrent)
 
+        # Issue #2: when the turn is seeded read-only, a worker that owns an
+        # output artifact would be unable to write it and fail silently. Grant
+        # the write tools back to artifact-owning workers only — fragment-less
+        # analysis workers stay read-only, preserving clone-guard for everyone
+        # else.
+        writes_blocked = _write_blocked(blocked_tools)
+
+        def _worker_blocked_tools(worker: SwarmWorker) -> list[str] | None:
+            if not writes_blocked or not worker.target_file:
+                return blocked_tools
+            unblocked = sorted(set(blocked_tools or ()) - set(_ARTIFACT_WRITE_TOOLS))
+            logger.info(
+                "Swarm worker (%s) owns artifact %s; granting write access "
+                "under an otherwise read-only policy (issue #2)",
+                worker.agent_id,
+                worker.target_file,
+            )
+            return unblocked
+
         async def _run_one(
             idx: int, worker: SwarmWorker, attempt: int = 1
         ) -> StepResult:
@@ -612,7 +719,7 @@ class SwarmExecutor(ChainExecutor):
                             prompt,
                             idx=idx,
                             profile=profile,
-                            blocked_tools=blocked_tools,
+                            blocked_tools=_worker_blocked_tools(worker),
                             allowed_tools=allowed_tools,
                             permission_mode=permission_mode,
                             deny_dangerous=deny_dangerous,
@@ -631,6 +738,41 @@ class SwarmExecutor(ChainExecutor):
                     agent = None
                     result = AgentResult(text=f"Worker failed: {exc}", is_error=True)
                     runtime_name, config = "unknown", AgentConfig()
+
+                # Issue #2 — fail loud: a worker that declared an output
+                # artifact but left no file on disk did NOT do its job, even if
+                # the model returned prose. Mark it an error so re-seating and
+                # the degraded-run signalling treat it as a real failure
+                # instead of silent success.
+                if (
+                    not result.is_error
+                    and worker.target_file
+                    and not _artifact_exists(worker.target_file)
+                ):
+                    logger.warning(
+                        "Swarm worker %s (%s) declared artifact %s but wrote "
+                        "no file; marking FAILED (issue #2)",
+                        idx,
+                        worker.agent_id,
+                        worker.target_file,
+                    )
+                    result = replace(
+                        result,
+                        is_error=True,
+                        text=(
+                            f"Artifact not written — declared output "
+                            f"`{worker.target_file}` is absent after the worker "
+                            "ran. The run did not produce this deliverable "
+                            "(likely a read-only tool policy or a model that "
+                            "narrated instead of writing).\n\n"
+                            "--- worker output follows ---\n"
+                            f"{result.text}"
+                        ),
+                        metadata={
+                            **result.metadata,
+                            "artifact_missing": worker.target_file,
+                        },
+                    )
 
                 await self._emit("swarm.worker_completed", {
                     "worker": idx,
@@ -944,6 +1086,25 @@ class SwarmExecutor(ChainExecutor):
         return "\n".join(parts)
 
     @staticmethod
+    def _reconcile_artifacts(plan: SwarmPlan) -> dict[str, list[str]]:
+        """Compare planned output artifacts against what exists on disk.
+
+        Returns ``{"planned": [...], "produced": [...], "missing": [...]}``
+        using the distinct ``target_file`` of every worker (issue #2). A
+        planned artifact counts as produced only when a file is actually
+        present at its path; everything else is missing. The lists drive both
+        the user-facing summary and the run metadata so a partial run can
+        never masquerade as complete.
+        """
+        planned: list[str] = []
+        for worker in plan.workers:
+            if worker.target_file and worker.target_file not in planned:
+                planned.append(worker.target_file)
+        produced = [p for p in planned if _artifact_exists(p)]
+        missing = [p for p in planned if p not in produced]
+        return {"planned": planned, "produced": produced, "missing": missing}
+
+    @staticmethod
     def _synthesize(
         plan: SwarmPlan,
         step_results: list[StepResult],
@@ -963,11 +1124,25 @@ class SwarmExecutor(ChainExecutor):
         consistency_failed = any(
             "not consistent" in (extra or "").lower() for extra in extras or []
         )
+        # Issue #2 — post-run reconciliation of planned vs produced artifacts.
+        recon = SwarmExecutor._reconcile_artifacts(plan)
 
         lines: list[str] = [
             f"# Swarm result ({len(step_results)} workers)",
             "",
         ]
+        if recon["missing"]:
+            lines.append(
+                "⚠️ ARTIFACTS MISSING: "
+                f"{len(recon['produced'])} of {len(recon['planned'])} planned "
+                "output files were written. Missing: "
+                + ", ".join(f"`{p}`" for p in recon["missing"])
+                + ". A planned deliverable did not land — the run is NOT "
+                "complete. Re-run the owning worker(s) with write access, or "
+                "invoke a single agent: `maestro --no-chain --no-swarm "
+                "--agent <id> \"...one file; do not split it...\"`."
+            )
+            lines.append("")
         if degraded:
             lines.append(
                 f"⚠️ SWARM DEGRADED: {failed_count} of {len(step_results)} "
@@ -1042,6 +1217,13 @@ class SwarmExecutor(ChainExecutor):
             ]
         if consistency_failed:
             metadata["swarm_consistency"] = "failed"
+        # Issue #2: expose the reconciliation so dashboards/logs can show
+        # produced-vs-planned without re-deriving it.
+        if recon["planned"]:
+            metadata["swarm_artifacts_planned"] = recon["planned"]
+            metadata["swarm_artifacts_produced"] = recon["produced"]
+            if recon["missing"]:
+                metadata["swarm_artifacts_missing"] = recon["missing"]
         # Propagate quota exhaustion from any failing worker (not only
         # when the whole swarm died) so pm.handle can fall back instead of
         # dead-ending the turn — and so later selections skip the seat.
