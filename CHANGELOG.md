@@ -5,6 +5,43 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-10-11
+
+### Changed
+- **Swarm reliability — fail loud when a worker can't write its declared
+  artifact; ensure artifact-owning workers are writable; skip swarm fan-out
+  for single-deliverable requests; post-run artifact reconciliation summary**
+  (`orchestrator.swarm`, fixes #2). Interactive mode defaults chain+swarm ON,
+  which let a single-file request fan out into a multi-worker swarm whose
+  read-only-seeded workers silently failed to write their declared artifacts
+  — burning tokens/cost while producing only a fraction of the planned files
+  and still reporting success-ish output. The swarm path now:
+  - **Fails loud, not silent.** A worker that declares an output artifact but
+    leaves no file on disk after running is marked FAILED (not success), so
+    re-seating and the degraded-run signalling treat it as a real failure and
+    the run summary reflects it.
+  - **Grants write to artifact owners before fan-out.** When a turn is seeded
+    read-only (clone-guard / pre-implementation phase), workers that own an
+    output `target_file` get the `Write`/`Edit` tools back — a worker
+    responsible for producing a file can always write it, while fragment-less
+    analysis workers stay read-only.
+  - **Skips fan-out for single-deliverable requests.** When the decomposition
+    collapses to a single output file — the task names one explicit output
+    and the prompt itself names no other distinct target, or at most one
+    worker declares a write target — the swarm is declined and the request
+    routes to a single agent instead of fanning out. Genuine multi-target
+    swarms ("update docs/a.md, docs/b.md, docs/c.md", "audit repos A/B/C")
+    are unaffected. (Supersedes the MSTRO-126 fan-out-then-merge behavior for
+    the pure single-output case.)
+  - **Reconciles produced vs planned artifacts.** The run summary and
+    metadata now list which planned output files were and were not written
+    (`swarm_artifacts_planned` / `_produced` / `_missing`), so a partial run
+    can never masquerade as complete.
+- **Docs: single-deliverable invocation** (`docs/DEPLOY.md`). Documented the
+  recommended efficient pattern for one-file tasks:
+  `maestro --no-chain --no-swarm --agent <id> "...one file; do not split
+  it..."`.
+
 ## [2.2.1] - 2026-10-10
 
 ### Fixed
