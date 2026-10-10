@@ -141,10 +141,20 @@ def _format_missing(milestone: Milestone, suggestion: Any) -> str:
 
 
 def gate_advisory(project_path: Path) -> str:
-    """Non-blocking review-gate advisory for in-progress milestones."""
-    from open_maestro.review.blueprint import gate_advisory as _advisory
+    """Non-blocking advisories for in-progress milestones.
 
-    return _advisory(project_path)
+    Why: surface the review-gate state *and* the diagram decision-in-graph
+    smell (#4) in the same non-blocking advisory block, so an agent sees both
+    without either blocking milestone exit.
+    What: concatenates the blueprint review-gate advisory with the diagram
+    linter advisory (``docs/diagrams/*.md``); either may be empty.
+    Test: a project with a passing gate but a parked-node diagram returns a
+    string naming the diagram; a fully clean project returns ``""``.
+    """
+    from open_maestro.review.blueprint import gate_advisory as _advisory
+    from open_maestro.review.diagram_lint import diagram_advisory as _diagram
+
+    return _advisory(project_path) + _diagram(project_path)
 
 
 def handle_next_command(project_path: Path, include_prompts: bool = True) -> str:
