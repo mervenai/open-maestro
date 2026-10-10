@@ -73,8 +73,7 @@ re-learning; extend it only by editing this standard.
 ### Canonical color classes (fixed semantics, fixed hex values)
 
 ```mermaid
-classDef open     fill:#fff3cd,stroke:#e0a800,stroke-width:3px,color:#000   %% amber  — open question / blocking decision
-classDef parked   fill:#f8d7da,stroke:#b02a37,stroke-width:2px,color:#000,stroke-dasharray:5 4  %% red dashed — parked / out of scope (with disposition citation)
+classDef open     fill:#fff3cd,stroke:#e0a800,stroke-width:3px,color:#000   %% amber  — inline tag on the component an OPEN decision gates (never a standalone node)
 classDef netnew   fill:#cfe2ff,stroke:#084298,stroke-width:1px,color:#000   %% blue   — net-new, introduced by this contract (also resolved items still to be built)
 classDef existing fill:#d1e7dd,stroke:#0a3622,stroke-width:1px,color:#000   %% green  — verified existing pattern / anchor, cited to the codebase
 classDef user     fill:#e2e3e5,stroke:#495057,stroke-width:1px,color:#000   %% grey   — human action in the user journey
@@ -97,18 +96,16 @@ flowchart TB
     U1["1 · <title><br/><evidence · FR-nn / §x.y><br/><i>repo</i>"]:::user
   end
   subgraph GATEWAY["Gateway · <repo>"] ... end
-  subgraph BACKEND["Backend · <repos>"] ... end
+  subgraph BACKEND["Backend · <repos>"]
+    direction TB
+    B1["3 · <title> — OPEN (R-07)<br/><evidence · FR-nn / §x.y><br/><i>repo</i>"]:::open
+  end
   subgraph EXTSVC["External services"] ... end
   subgraph ADMIN["Admin / settings"] ... end
-  subgraph PARKED["Parked / out of scope"]
-    direction LR
-    P1["P1 · <item> (<DISPOSITION> <citation>)"]:::parked
-  end
   subgraph REPOS["Repos impacted — summary legend"] ... end
   subgraph LEGEND["Legend — node colors"]
     direction LR
-    L_open["OPEN — blocking decision owed"]:::open
-    L_parked["PARKED — out of scope"]:::parked
+    L_open["OPEN — blocking decision owed (inline tag)"]:::open
     L_netnew["Net-new — this contract"]:::netnew
     L_existing["Existing — verified pattern"]:::existing
     L_user["User action"]:::user
@@ -119,17 +116,36 @@ flowchart TB
 
 Node label format: `number · Title<br/>evidence · FR-nn / §x.y<br/><i>repo</i>`
 — number, then what it is, then the traceable evidence, then the repo in
-italics. Numbering is stable across revisions: never renumber, add at the end
-(or use `P#` for parked items).
+italics. Numbering is stable across revisions: never renumber, add at the end.
+
+**Decisions never become graph nodes or edges.** Parked / out-of-scope AND
+resolved / closed decisions live in the companion tables only — never as graph
+nodes or edges. The graph shows live journey/architecture nodes plus
+currently-open gates. There is no parked subgraph and no parked node; `B1`
+above is a *live* backend component that happens to carry an open gate.
+
+**Open decisions are inline tags, not standalone nodes.** Represent an open
+decision by tagging the component it gates inline (e.g. `OPEN (R-07)` in the
+node's own label) with `:::open` — as `B1` does above. Do NOT create a
+standalone amber node for the question and attach it with a dotted edge; that
+produces attachment-edge spaghetti. One gated component = one inline-tagged
+node, no extra node, no attachment edge.
+
+Decision history (open / closed / superseded) is maintained as tables / CSV per
+the `decision-register` skill
+(`skills/universal/process/decision-register/SKILL.md`); the diagram references
+decision IDs (`R-07`) but never stores decision prose.
 
 ### Edge rules (the number-one readability lever)
 
 - **Label every edge** — `-->|action or payload|`. A reader should follow the
   flow without opening node boxes. Name the action/data (`row click`,
   `GET /api/Activity`, `OAuth2 bearer`), never repeat the node's own title.
-- **Tag blocking decisions** with their register ID on the edge or the target
-  node (`-.A-5 subscription.->`, `OPEN (R-07)`), so the diagram cross-references
-  the blueprint's decision list and Jira.
+- **Tag blocking decisions inline** on the component they gate, using their
+  register ID in that node's own label (`OPEN (R-07)`), so the diagram
+  cross-references the blueprint's decision list and Jira. Never spawn a
+  separate open-question node and wire it in with a dotted attachment edge —
+  the open gate rides on the live node it blocks.
 - **Solid arrows** carry data/control flow. **Dotted arrows** carry
   references, dependencies, loops, or guard-rails (including explicit "NO HTTP"
   edges). State the semantics once in the "How to read" section.
@@ -141,18 +157,25 @@ italics. Numbering is stable across revisions: never renumber, add at the end
 3. `## Diagram` — the fenced mermaid block; the rendered `.png` and `.svg`
    are regenerated from this file, never hand-edited.
 4. **Node reference** — table per swim-lane: `# | Node | Repo | Status | Anchor`.
-5. **Open-question hot-list** — amber nodes with owner → resolution path;
-   resolved nodes kept visible with strikethrough + resolution version.
-6. **Bottom line / Next steps**.
+5. **Open-question hot-list** — table of open gates (register ID, the node they
+   tag, owner → resolution path). These are the inline `:::open` tags in the
+   graph, reconciled here; resolved rows kept visible with strikethrough +
+   resolution version.
+6. **Parked / out-of-scope table** — `ID | Item | Disposition (DROPPED /
+   EXCLUDED / REJECTED) | Citation`. Parked and resolved/closed decisions live
+   here (and in the `decision-register` CSV), never as graph nodes or edges.
+7. **Bottom line / Next steps**.
 
 ### Consistency checklist (run before saving)
 
-- [ ] All 7 classDefs present with the exact hex values above; legend subgraph rendered in-diagram.
-- [ ] Every edge labeled; every blocking decision carries its register ID; solid/dotted convention stated.
+- [ ] All 6 classDefs present with the exact hex values above; legend subgraph rendered in-diagram.
+- [ ] Every edge labeled; every blocking decision carries its register ID *inline on the node it gates*; solid/dotted convention stated.
 - [ ] Every node numbered and repo-tagged; user actions grey; externals pink.
-- [ ] Swim-lanes: Browser, Gateway, Backend, External, Admin (+ Parked when any); `lane` style applied.
-- [ ] Repos-impacted summary legend present; parked items carry disposition + citation.
-- [ ] Node reference table + open-question hot-list present; numbering stable vs. the previous revision.
+- [ ] Swim-lanes: Browser, Gateway, Backend, External, Admin; `lane` style applied. No parked lane/subgraph; no parked (`:::parked`) nodes in the graph.
+- [ ] No standalone open-decision nodes attached by dotted edges — open gates are inline `:::open` tags on the components they block.
+- [ ] Parked / resolved / closed decisions appear only in the parked table and the `decision-register` CSV, never as graph nodes or edges.
+- [ ] Repos-impacted summary legend present.
+- [ ] Node reference table + open-question hot-list + parked table present; numbering stable vs. the previous revision.
 - [ ] All three artifacts saved from one source: `.md` (fenced block) + `.png` + `.svg`, renders produced by mermaid-cli (or Kroki) from the `.md`, not hand-edited.
 
 ## Syntax Rules (frequent parse failures)

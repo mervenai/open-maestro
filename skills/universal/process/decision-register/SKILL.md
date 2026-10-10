@@ -85,6 +85,16 @@ Rules:
 - **Priority:** mark the critical-path items (longest-lead delivery items and new gates opened by the latest answers) P0; the rest P1. If the project has a numbered freeze-exit list, map each open row to it so answers translate directly into milestone closures.
 - Name it `docs/decision-register-vX.Y.csv` next to the decision docs.
 
+## Relationship to the diagram standard
+
+Decisions belong in this register (tables / CSV), **not** in the blueprint
+diagram. Per the `mermaid-diagrams` skill's User-Journey Blueprint Diagram
+Standard (`skills/universal/diagrams/mermaid/SKILL.md`): parked / resolved /
+closed decisions never appear as graph nodes or edges, and an open decision is
+an inline `:::open` tag on the component it gates (not a standalone node). The
+diagram references decision IDs (e.g. `R-07`); the decision *prose* — question,
+options, disposition, history — lives here. Keep the two in sync by ID.
+
 ## Guardrail
 
 Recommend the concrete blocker changes (remove/update/add list) and show them **before writing** when the closures are based on external stakeholder input the user just pasted — one confirmation prevents a misread answer from deleting a real gate. Pure formatting/verification fixes (summary-list resync, stale note sentences, dashboard regen) need no confirmation.
