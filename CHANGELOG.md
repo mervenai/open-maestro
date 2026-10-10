@@ -5,6 +5,18 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.1] - 2026-10-10
+
+### Fixed
+- **Dashboard status classes consistency** (`milestone.status_class()`).
+  Consolidated duplicate status-class logic and ensured consistent CSS
+  class names for milestone status colors across the dashboard renderer.
+- **Dashboard design tokens export** (`design_tokens()`). The dashboard
+  JSON now exports shared design tokens (`_STATUS_COLOR_MAP`, color
+  definitions) so remote renderers (Lovable, etc.) can inherit the
+  canonical color scheme without duplication. Enables cross-platform
+  dashboard consistency for the merged remote dashboard work.
+
 ## [2.2.0] - 2026-10-08
 
 ### Added
