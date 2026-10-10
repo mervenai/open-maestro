@@ -5,6 +5,36 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-10-11
+
+### Changed
+- **feat(diagrams): keep decisions out of mermaid graphs** — parked/resolved
+  decisions in tables only, open gates as inline tags; cross-link
+  decision-register skill; add advisory diagram linter for in-graph parked
+  nodes and dotted open-decision attachments (fixes #4).
+  - **Skill / playbook.** The user-journey blueprint diagram standard
+    (`skills/universal/diagrams/mermaid/SKILL.md`) no longer bakes a PARKED
+    subgraph with `:::parked` nodes into the copy-paste skeleton or checklist:
+    parked/out-of-scope **and** resolved/closed decisions live in the
+    companion parked/node-reference tables (and the decision-register CSV)
+    only — never as graph nodes or edges. Open decisions are now inline
+    `:::open` tags on the component they gate, not standalone amber nodes
+    wired in with dotted attachment edges. The `design-002` playbook task
+    (`milestones/playbooks/software-consulting.yaml`) is rewritten to match
+    (no dashed-red parked lane). The `decision-register` skill gains a
+    "Relationship to the diagram standard" cross-link: decisions belong in
+    tables; the diagram only references decision IDs.
+  - **Advisory diagram linter** (`review.diagram_lint`). A non-blocking
+    Mermaid linter for `docs/diagrams/*.md` artifacts flags exactly two
+    anti-patterns — (a) in-graph parked (`:::parked`) nodes, and (b)
+    standalone open-decision nodes attached by dotted edges — and advises
+    moving them to the companion tables. It mirrors the existing
+    advise-don't-block gate pattern (`review.blueprint.gate_advisory`) with an
+    env kill-switch (`MAESTRO_DIAGRAM_LINT=off`), and is surfaced through the
+    in-progress-milestone advisory (`milestones.commands.gate_advisory`). It
+    deliberately does **not** check node counts, label length, or header size
+    (out of scope per #4).
+
 ## [2.3.0] - 2026-10-11
 
 ### Changed
