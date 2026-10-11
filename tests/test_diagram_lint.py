@@ -1,8 +1,11 @@
-"""Tests for the advisory Mermaid diagram linter (fixes #4).
+"""Tests for the advisory Mermaid diagram linter (fixes #4, #6).
 
-The linter advises (never blocks) exactly two anti-patterns: in-graph parked
-(`:::parked`) nodes, and standalone open-decision nodes attached by dotted
-edges. It must NOT flag node counts, label length, or header size.
+The linter advises (never blocks) three anti-patterns: in-graph parked
+(`:::parked`) nodes; *standalone* open-decision nodes attached by dotted edges
+(a real component carrying an inline `OPEN (id)` tag on a dotted dependency
+edge is exempt — #6 bug 1); and inline resolved/closed decision prose in node
+or edge labels (#6 bug 2). It must NOT flag node counts, label length, or
+header size.
 """
 
 from __future__ import annotations
@@ -10,6 +13,7 @@ from __future__ import annotations
 from open_maestro.review.diagram_lint import (
     OPEN_ATTACHMENT_CODE,
     PARKED_CODE,
+    RESOLVED_PROSE_CODE,
     diagram_advisory,
     diagram_lint_enabled,
     find_diagram_artifacts,
@@ -174,3 +178,107 @@ class TestAdvisoryWiring:
         monkeypatch.setenv("MAESTRO_DIAGRAM_LINT", "off")
         assert not diagram_lint_enabled()
         assert diagram_advisory(tmp_path) == ""
+
+
+# --- #6 Bug 1: dotted edge to a REAL gated component is NOT the anti-pattern --
+
+# A dotted DEPENDENCY edge whose open endpoints (N17, N54) are REAL components
+# that merely carry a correct inline `OPEN (id)` tag alongside component text
+# (the prescribed pattern). This must NOT raise OPEN_ATTACHMENT — regression
+# guard for the false positive reported in #6.
+REAL_COMPONENT_DOTTED_BLOCK = """flowchart TB
+  classDef open fill:#fff3cd,stroke:#e0a800
+  classDef netnew fill:#cfe2ff,stroke:#084298
+  N59["59 · Reach brokering service<br/>FR-30<br/><i>api</i>"]:::netnew
+  N37["37 · Okta provisioning<br/>FR-31<br/><i>api</i>"]:::netnew
+  N17["12 · Export API — OPEN (R-08)<br/>FR-20<br/><i>api</i>"]:::open
+  N54["54 · Databricks ingestion job — OPEN (R-12)<br/>FR-9<br/><i>dna</i>"]:::open
+  N59 -.A-8 brokered reach Databricks read API.-> N17
+  N37 -.ingests Okta into Databricks notebook stack.-> N54
+"""
+
+
+class TestRealComponentDottedEdgeExempt:
+    def test_dotted_edge_to_real_gated_component_is_clean(self):
+        # #6 bug 1: a dotted dependency edge to a real component that carries an
+        # inline `OPEN (id)` tag must NOT raise OPEN_ATTACHMENT.
+        codes = {a.code for a in lint_mermaid_source(REAL_COMPONENT_DOTTED_BLOCK)}
+        assert OPEN_ATTACHMENT_CODE not in codes
+
+    def test_standalone_open_node_still_flagged(self):
+        # Preserve the real detection: a genuine standalone open-decision bubble
+        # (label leads with the OPEN marker, no component identity) on a dotted
+        # edge STILL raises OPEN_ATTACHMENT.
+        codes = {a.code for a in lint_mermaid_source(OPEN_ATTACHMENT_BLOCK)}
+        assert OPEN_ATTACHMENT_CODE in codes
+
+
+# --- #6 Bug 2: inline resolved/closed decision prose in node / edge labels ----
+
+# A live node whose label embeds closed-decision prose (disposition verbs next
+# to decision IDs + a vX.Y stamp). The IDs + dispositions belong in the Closed
+# table; the node should keep only live text (plus an optional inline OPEN tag).
+RESOLVED_PROSE_NODE_BLOCK = """flowchart TB
+  classDef netnew fill:#cfe2ff,stroke:#084298
+  N10["10 · Pricing — D-5 RATIFIED; D-6 DECIDED property-local v3.7<br/>FR-5"]:::netnew
+"""
+
+# An edge label carrying resolved-decision prose. Note mermaid forbids a dot in
+# an edge label, so the version stamp is written `v3 7` (space) in the wild.
+RESOLVED_PROSE_EDGE_BLOCK = """flowchart TB
+  classDef netnew fill:#cfe2ff,stroke:#084298
+  N13["13 · Sync job<br/>FR-13<br/><i>api</i>"]:::netnew
+  N12["12 · Store<br/>FR-12<br/><i>api</i>"]:::netnew
+  N13 -.A-1 sync D-2 ratified v3 7.-> N12
+"""
+
+# Clean: a live node with only architecture text plus a legitimate inline OPEN
+# gate tag. The bare `OPEN (R-07)` tag must NOT trip the resolved-prose rule.
+CLEAN_OPEN_TAG_BLOCK = """flowchart TB
+  classDef open fill:#fff3cd,stroke:#e0a800
+  B1["3 · Subscription check — OPEN (R-07)<br/>FR-12<br/><i>api</i>"]:::open
+  B2["4 · Importer<br/>FR-13<br/><i>api</i>"]:::netnew
+  B1 -->|GET /api/sub| B2
+"""
+
+# Tricky case: a UI state-chip label that uses the noun "Resolved" as an app
+# state name, with NO decision ID and NO vX.Y stamp. Must NOT false-positive.
+UI_STATE_CHIP_BLOCK = """flowchart TB
+  classDef netnew fill:#cfe2ff,stroke:#084298
+  N1["1 · Alert lifecycle: New / Under review / Escalated / Resolved<br/>FR-1"]:::netnew
+"""
+
+
+class TestResolvedProseInLabels:
+    def test_node_label_with_disposition_and_version_stamp(self):
+        advisories = lint_mermaid_source(RESOLVED_PROSE_NODE_BLOCK)
+        codes = {a.code for a in advisories}
+        assert RESOLVED_PROSE_CODE in codes
+        adv = next(a for a in advisories if a.code == RESOLVED_PROSE_CODE)
+        assert "N10" in adv.message
+
+    def test_edge_label_with_disposition_and_version_stamp(self):
+        advisories = lint_mermaid_source(RESOLVED_PROSE_EDGE_BLOCK)
+        codes = {a.code for a in advisories}
+        assert RESOLVED_PROSE_CODE in codes
+        adv = next(a for a in advisories if a.code == RESOLVED_PROSE_CODE)
+        # The offending edge label is named in the advisory.
+        assert "ratified" in adv.message.lower()
+
+    def test_clean_node_with_inline_open_tag_no_advisory(self):
+        # A legitimate inline `OPEN (R-07)` tag is the prescribed pattern and
+        # must NOT be flagged as resolved-decision prose.
+        codes = {a.code for a in lint_mermaid_source(CLEAN_OPEN_TAG_BLOCK)}
+        assert RESOLVED_PROSE_CODE not in codes
+
+    def test_ui_state_chip_resolved_is_not_flagged(self):
+        # The state-chip noun "Resolved" (no decision ID, no vX.Y) must not be a
+        # false positive — the tricky case called out in #6.
+        codes = {a.code for a in lint_mermaid_source(UI_STATE_CHIP_BLOCK)}
+        assert RESOLVED_PROSE_CODE not in codes
+
+    def test_resolved_prose_advisory_is_non_blocking_wording(self):
+        advisories = lint_mermaid_source(RESOLVED_PROSE_NODE_BLOCK)
+        adv = next(a for a in advisories if a.code == RESOLVED_PROSE_CODE)
+        # Advises relocating to the Closed / decision-register tables.
+        assert "decision-register" in adv.message or "Closed" in adv.message
