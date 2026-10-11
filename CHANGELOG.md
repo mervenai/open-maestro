@@ -5,6 +5,40 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.1] - 2026-10-11
+
+### Fixed
+- **fix(diagrams): diagram linter no longer false-positives on gated real
+  components with dotted dependency edges; add advisory for inline
+  resolved/closed decision prose (disposition verbs + vX.Y stamps) in
+  node/edge labels; tighten mermaid skill to forbid inline closed-decision
+  prose (fixes #6).**
+  - **Bug 1 — false positive fixed.** The `open-decision-attachment-edge`
+    advisory (`review.diagram_lint`) now fires only for *standalone*
+    open-decision/question bubbles reached by a dotted edge. A real
+    architecture component that merely carries a correct inline `OPEN (R-nn)`
+    tag alongside substantive component text (e.g. an export API or ingestion
+    job on a legitimate dotted dependency edge) is exempt — the linter no
+    longer penalizes the exact pattern the skill prescribes. The standalone vs.
+    real-component call is positional: component identity must appear *before*
+    the inline open marker.
+  - **Bug 2 — new advisory.** A new `resolved-decision-prose-in-label`
+    advisory scans both node and edge labels for resolved/closed decision
+    prose — a disposition verb (RATIFIED/DECIDED/RESOLVED/CLOSED/DESCOPED/
+    SUPERSEDED/DEMOTED/DROPPED/EXCLUDED/REJECTED/ACCEPTED/VERIFIED/RESEARCHED/
+    DEPRECATED/REVISED) adjacent to a decision ID, or a `vX.Y` (incl. the
+    `vX Y` edge-label spelling) decision stamp — and advises moving the ID +
+    disposition to the Closed / decision-register tables. A bare inline
+    `OPEN (id)` gate tag and UI state-chip nouns (a "Resolved" app state with
+    no decision ID / stamp) are intentionally not flagged. Still advisory-only,
+    still honoring `MAESTRO_DIAGRAM_LINT=off` and `docs/diagrams/*.md` scoping;
+    still no node-count / label-length / header budgets.
+  - **Skill.** `skills/universal/diagrams/mermaid/SKILL.md` gains a concrete
+    negative example (ID + disposition in a label is wrong; node keeps only
+    live text + optional inline `OPEN (id)`), a checklist line forbidding
+    disposition verbs / `vX.Y` stamps in labels, and softened framing so
+    closures are recorded in the tables, never carried inside node labels.
+
 ## [2.4.0] - 2026-10-11
 
 ### Changed

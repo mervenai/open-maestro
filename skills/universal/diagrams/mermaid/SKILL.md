@@ -74,7 +74,7 @@ re-learning; extend it only by editing this standard.
 
 ```mermaid
 classDef open     fill:#fff3cd,stroke:#e0a800,stroke-width:3px,color:#000   %% amber  — inline tag on the component an OPEN decision gates (never a standalone node)
-classDef netnew   fill:#cfe2ff,stroke:#084298,stroke-width:1px,color:#000   %% blue   — net-new, introduced by this contract (also resolved items still to be built)
+classDef netnew   fill:#cfe2ff,stroke:#084298,stroke-width:1px,color:#000   %% blue   — net-new live component introduced by this contract (label holds live text only — the decision that greenlit it lives in the tables, not here)
 classDef existing fill:#d1e7dd,stroke:#0a3622,stroke-width:1px,color:#000   %% green  — verified existing pattern / anchor, cited to the codebase
 classDef user     fill:#e2e3e5,stroke:#495057,stroke-width:1px,color:#000   %% grey   — human action in the user journey
 classDef external fill:#fde2e4,stroke:#6a040f,stroke-width:1px,color:#000   %% pink   — outside the M3 repos (3rd-party / DnA)
@@ -134,7 +134,31 @@ node, no extra node, no attachment edge.
 Decision history (open / closed / superseded) is maintained as tables / CSV per
 the `decision-register` skill
 (`skills/universal/process/decision-register/SKILL.md`); the diagram references
-decision IDs (`R-07`) but never stores decision prose.
+decision IDs (`R-07`) but never stores decision prose. A node's label holds
+**only live-architecture text** plus, if gated, a single inline `OPEN (id)` tag
+— it never carries a closed decision's disposition. Closures are *recorded in
+the tables*, not *carried in the nodes*: regenerating the diagram re-derives
+live nodes from the doc, it does not accumulate decision history inside labels.
+
+❌ **Never embed a resolved/closed decision in a label.** A node label like
+
+```
+N10["10 · Pricing engine — D-5 RATIFIED; D-6 DECIDED property-local v3.7"]
+```
+
+is wrong: the decision IDs (`D-5`, `D-6`), their dispositions (`RATIFIED`,
+`DECIDED`) and the resolution stamp (`v3.7`) belong in the **Closed table /
+decision-register CSV**, not the graph. The same applies to edge labels
+(`N13 -. D-2 ratified v3 7 .-> N12` is wrong). ✅ The corrected node keeps only
+live text and, if it is still gated, an inline `OPEN (id)` tag:
+
+```
+N10["10 · Pricing engine<br/>FR-5<br/><i>api</i>"]:::netnew
+%% or, if still gated:  N10["10 · Pricing engine — OPEN (R-14)<br/>FR-5<br/><i>api</i>"]:::open
+```
+
+A bare inline `OPEN (R-nn)` tag is the *only* decision marker allowed in a
+label; a resolved-disposition verb or a `vX.Y` decision stamp never is.
 
 ### Edge rules (the number-one readability lever)
 
@@ -159,8 +183,10 @@ decision IDs (`R-07`) but never stores decision prose.
 4. **Node reference** — table per swim-lane: `# | Node | Repo | Status | Anchor`.
 5. **Open-question hot-list** — table of open gates (register ID, the node they
    tag, owner → resolution path). These are the inline `:::open` tags in the
-   graph, reconciled here; resolved rows kept visible with strikethrough +
-   resolution version.
+   graph, reconciled here. When a gate resolves, drop its inline tag from the
+   node (the node keeps only live text) and move the row — with its disposition
+   and resolution version — to the Closed table / decision-register CSV; the
+   closure lives in the tables, never back in the node label.
 6. **Parked / out-of-scope table** — `ID | Item | Disposition (DROPPED /
    EXCLUDED / REJECTED) | Citation`. Parked and resolved/closed decisions live
    here (and in the `decision-register` CSV), never as graph nodes or edges.
@@ -172,7 +198,8 @@ decision IDs (`R-07`) but never stores decision prose.
 - [ ] Every edge labeled; every blocking decision carries its register ID *inline on the node it gates*; solid/dotted convention stated.
 - [ ] Every node numbered and repo-tagged; user actions grey; externals pink.
 - [ ] Swim-lanes: Browser, Gateway, Backend, External, Admin; `lane` style applied. No parked lane/subgraph; no parked (`:::parked`) nodes in the graph.
-- [ ] No standalone open-decision nodes attached by dotted edges — open gates are inline `:::open` tags on the components they block.
+- [ ] No standalone open-decision nodes attached by dotted edges — open gates are inline `:::open` tags on the components they block. (A real component that merely carries an inline `OPEN (id)` tag may still sit on a dotted dependency edge — that is correct, not an attachment-edge smell.)
+- [ ] No node/edge label contains a resolved-disposition verb (RATIFIED/DECIDED/RESOLVED/CLOSED/DESCOPED/SUPERSEDED/REJECTED/ACCEPTED/VERIFIED/RESEARCHED/DEPRECATED/REVISED) or a vX.Y decision stamp — only a bare inline `OPEN (id)` tag is allowed as a decision marker in a label.
 - [ ] Parked / resolved / closed decisions appear only in the parked table and the `decision-register` CSV, never as graph nodes or edges.
 - [ ] Repos-impacted summary legend present.
 - [ ] Node reference table + open-question hot-list + parked table present; numbering stable vs. the previous revision.
