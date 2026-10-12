@@ -717,6 +717,142 @@ models:
   `staging.merven.ai`; Maestro ships the publishing client only. The
   recommended Supabase/Lovable publishing path is self-contained in Maestro.
 
+## Aggregating docs across multiple projects
+
+Open Maestro generates docs **in-place** inside each project's working tree
+(`<project>/docs`, plus a `PRD/` or `Requirements/` tree). That is fine for a
+single project, but when you run a **portfolio or engagement of several
+projects in parallel**, you usually want to read, cross-reference, and hand off
+all of their docs as one coherent whole. This section describes the pattern we
+built for the **M3 RFP** engagement.
+
+### The pattern ("Option A"): one aggregation repo that mirrors each project
+
+Rather than one docs repo per project, maintain **one private aggregation repo**
+that **mirrors** each project's generated docs into a per-project folder. Docs
+are still authored in-place in each source project tree; a sync step copies them
+into the aggregation repo, which is then committed and published.
+
+**When one aggregation repo wins:**
+
+- A single engagement with shared conventions (e.g. one decision-register CSV
+  schema, one diagram standard).
+- Cross-project references (shared decisions, a combined glossary).
+- A single client handoff — the whole engagement reads as one repo.
+
+**When to prefer separate repos instead:**
+
+- Per-project access boundaries (different clients/teams must not see each
+  other's docs).
+- Independent publishing cadences or release processes per project.
+
+The concrete worked example below is
+`/Users/jj/projects/M3RFP/m3rfp-docs`, published to the private GitHub repo
+**`mervenai/m3rfp-docs`**, aggregating three projects: **ActivityMonitor**,
+**IntelInvoiceCoding**, and **PMS2DR**.
+
+### Repo structure
+
+```
+aggregation-repo/
+  README.md
+  _shared/            # glossary, cross-project-decisions, decision-register-index,
+                      # conventions/ — authored DIRECTLY here, no upstream source
+  <project-a>/        # mirror of project-a's docs + PRD — do NOT edit here
+  <project-b>/        # mirror of project-b's docs + PRD — do NOT edit here
+  ...
+  scripts/            # sync-docs.sh, publish.sh, watch-and-publish.sh,
+                      # install-watcher.sh, uninstall-watcher.sh, launchd plist
+```
+
+For the M3 RFP example the mirror folders are `activity-monitor/`,
+`intel-invoice-coding/`, and `pms-to-daily-report/`, each mirrored from the
+matching source tree (`ActivityMonitor/`, `IntelInvoiceCoding/`, `PMS2DR/`).
+
+### Sync and publish
+
+`scripts/sync-docs.sh` is an idempotent mirror. For each project it runs
+`rsync -a --delete` from the source `<project>/docs` and `PRD`|`Requirements`
+trees into the matching per-project folder in the aggregation repo, so removals
+in the source propagate (a true mirror). It **excludes tooling state and cruft**
+— `.open-maestro/`, `.claude-mpm/`, `.claude/`, `.git/`, `dashboard.html`,
+`.DS_Store`, `*.bak*`, `node_modules/`, `__pycache__/` (and the equivalents for
+other memory/search tooling) — even when those appear nested inside a `docs/`
+tree. It only **reads** the source trees and **never touches `_shared/`**.
+
+`scripts/publish.sh [msg]` collapses the whole flow into one re-runnable
+command: it runs the sync, `git add -A`, commits **only if something changed**
+(a clean no-op with exit 0 when nothing did — no empty commits), then
+`git push` to the current branch's upstream.
+
+```bash
+cd /Users/jj/projects/M3RFP/m3rfp-docs && ./scripts/publish.sh
+# or with a custom message:
+./scripts/publish.sh "chore(sync): post-blueprint-v3.8"
+```
+
+The manual one-liner equivalent:
+
+```bash
+./scripts/sync-docs.sh && git add -A \
+  && git commit -m "chore(sync): refresh mirrored project docs" && git push
+```
+
+### Git setup
+
+The aggregation repo is its **own private git repo** with an `origin` remote and
+a `main` branch. Create and wire it up in one step:
+
+```bash
+cd /Users/jj/projects/M3RFP/m3rfp-docs
+gh repo create mervenai/m3rfp-docs --private --source . --remote origin --push
+```
+
+Commit-directly-to-`main` is the **intended flow** for this mirror repo — it is
+not a PR-based codebase. `publish.sh` pushes straight to `main`.
+
+### The watcher (tool-agnostic auto-publish)
+
+So edits land in the mirror without anyone remembering to run `publish.sh`, a
+file watcher runs the publish flow automatically on change. It is
+**tool-agnostic**: it watches **only the mapped SOURCE doc dirs**
+(`<project>/docs`, `<project>/PRD`, `PMS2DR/Requirements`) — **not** the project
+roots, which would fire constantly on `.open-maestro/` and other tooling churn.
+Because it watches the source doc dirs, it catches edits from **any** tool
+(Open Maestro, claude-mpm, kimi, or a plain text editor) equally.
+
+- **Dependency:** `fswatch` (`brew install fswatch`). Install the watcher with
+  `./scripts/install-watcher.sh` (it checks for `fswatch` and installs it via
+  Homebrew if missing); remove it with `./scripts/uninstall-watcher.sh`.
+- **Debounce:** change bursts are collapsed via `fswatch -o --latency <N>`
+  (default **10s**, overridable with the `WATCH_LATENCY` env var). Because
+  `publish.sh` is idempotent, extra triggers are harmless, and a single-writer
+  read loop guarantees two publishes never overlap.
+- **launchd LaunchAgent:** installed as label **`com.merven.m3rfp-docs-watch`**
+  with `RunAtLoad` + `KeepAlive` (runs at login, restarts if it dies). Logs go
+  to `~/Library/Logs/m3rfp-docs-watch.log` (and `...-watch.err.log`). The plist
+  sets a Homebrew-first `PATH` so `fswatch`/`git` resolve under launchd.
+
+> **SSH-under-launchd caveat (important).** launchd agents often lack
+> `SSH_AUTH_SOCK`, so a `git push` over SSH can fail even though the local commit
+> succeeds. The watcher does **not** crash on this — it logs a clear, actionable
+> message and keeps running. Fix it with a keychain-backed key: set
+> `UseKeychain yes` / `AddKeysToKeychain yes` for `github.com` in `~/.ssh/config`
+> and run `ssh-add --apple-use-keychain`, then run `./scripts/publish.sh` once in
+> a terminal to push any backlog.
+
+This watcher implementation is macOS-specific (`fswatch` + launchd), but the
+pattern generalizes — on Linux you would use `inotifywait`/`inotify` plus a
+`systemd` user service for the same debounce-and-publish loop.
+
+### Editing rules
+
+- Edit project docs in the **SOURCE project trees** (where Open Maestro and you
+  write them).
+- Edit `_shared/` **directly** in the aggregation repo.
+- **NEVER** edit the mirrored `<project>/…` folders in the aggregation repo —
+  the next `rsync --delete` will clobber them.
+
 ## Getting help
 
 - `maestro --help`
