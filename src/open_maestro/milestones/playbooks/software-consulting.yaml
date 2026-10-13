@@ -103,7 +103,9 @@ milestone_prompts:
       artifact_target: docs/blueprint-design-and-data-contract.md
       default_track_only: true
       prompt: |
-        Draft a frozen data and API contract for the {epic_name} epic.
+        Draft the data and API contract for the {epic_name} epic.
+        Label the document as draft (e.g. v1.0-draft); this step drafts —
+        the contract is frozen by design-005 sign-off, never by this step.
         Include:
         - Request/response DTOs with field types and validation rules
         - Idempotency, auth, and error-handling rules
@@ -115,7 +117,13 @@ milestone_prompts:
         - Record the commit SHA (or HEAD date) of each repo checked in a short 'Sources checked' note at the end.
         - Label each contract element with an explicit 'Anchor' notation: [existing] if it truly reuses a codebase pattern, or [net-new] if this contract introduces it; never present a net-new element as an existing pattern.
         - Flag mechanism mismatches: if a cited pattern's underlying mechanism differs from what the contract assumes (e.g., a MongoDB document pattern cited for a SQL Server feature, a test double cited as production evidence), say so explicitly instead of citing it as-is.
-        - For UI-facing values (enums, states, actions), take them from the highest-authority source available: a prototype/bundle/actual UI code beats the PRD; if PRD and prototype disagree, use the prototype and note the discrepancy.
+        - For UI-facing values (enums, states, actions), take them from the highest-authority source available: a ratified client/stakeholder decision beats a prototype/bundle/actual UI code, which beats the PRD; if PRD and prototype disagree and neither is ratified, use the prototype and note the discrepancy.
+        Give every open question a stable register ID (DT-n / OQ-n / RR-n,
+        never renumbered) in an open design tasks table with owner and
+        blocking status. Before finishing, mirror every blocking open item
+        into .open-maestro/milestones.yaml (design-blueprint blockers plus a
+        dated notes entry) — the dashboard and later design steps read the
+        milestone file, not this document.
 
     - id: design-002
       title: Diagram the blueprint — journey, repos, open questions

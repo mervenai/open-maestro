@@ -5,6 +5,14 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-10-14
+
+### Added
+- **New skill: `blueprint-contract`** (`skills/universal/process/blueprint-contract/`) — canonical protocol for creating `docs/blueprint-design-and-data-contract.md` (maestro `design-001`). Encodes: draft-not-frozen framing (freezing is claimed by design-005/006, never the drafting step), the document header convention (version/date/status/supersedes/changelog), the canonical 9-section contract skeleton, citation discipline ([existing]/[net-new] anchors, mechanism-mismatch flags), the UI-value authority ladder (ratified client decision > prototype/UI code > PRD > inference), stable open-item register IDs (DT/OQ/RR) shared across all milestone artifacts, and the mandatory final step of mirroring blocking open items back into `.open-maestro/milestones.yaml`.
+
+### Changed
+- **Playbook `design-001` prompt** (`software-consulting.yaml`): "Draft a frozen data and API contract" → "Draft the data and API contract" — the document is labeled draft and frozen only by design-005 sign-off, eliminating the premature "frozen / ready for sign-off" language in drafting-step output. The UI-authority rule gains a "ratified client/stakeholder decision" tier above prototype/PRD. New closing requirements: stable register IDs (DT/OQ-n/RR-n) for every open question, and mirroring every blocking open item into `.open-maestro/milestones.yaml` before finishing.
+
 ## [2.4.1] - 2026-10-11
 
 ### Fixed
