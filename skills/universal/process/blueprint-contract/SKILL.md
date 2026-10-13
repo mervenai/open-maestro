@@ -57,14 +57,13 @@ Bump the version on every material revision; archive the prior version to `docs/
 - Each row: ID | question | owner (named team/person) | blocking (yes/no) | what unblocks it. Blocking items are the freeze gates; non-blocking items still get IDs so downstream artifacts can reference them.
 - The same IDs are reused by design-002 (diagram inline tags), design-004 (Jira stories), design-005/006 (review targets), and the decision-register CSV. IDs are the join key across all milestone artifacts.
 
-## Mirror state back into milestones.yaml (mandatory last step)
+## Propagate the decision trail (mandatory last step)
 
-The dashboard, decision register, and later prompts read `.open-maestro/milestones.yaml` — **not** this document. Before finishing:
+A new contract version changes the project's decision state. The dashboard, later prompts, and the client read the trail — **not** this document. Before finishing, update all three trail artifacts:
 
-- Add (or update) a `blockers:` entry under the design-blueprint milestone for each **blocking** open item, using its register ID and one-line description.
-- Add a dated `notes:` entry summarizing the draft: version, headline decisions, closed/added gates.
-- Set artifact detection inputs truthfully (the contract file exists → the milestone can detect `docs/*contract*.md`).
-- Follow the decision-register skill's two-list invariant and validation rules when editing `milestones.yaml`.
+1. **`.open-maestro/milestones.yaml`** — add/update a `blockers:` entry under design-blueprint for each **blocking** open item (register ID + one-line description), add a dated `notes:` entry (version, headline decisions, gates closed/opened), and follow the decision-register skill's two-list invariant and validation rules (per-milestone lists AND `summary.active_blockers`, asserted identical).
+2. **`docs/design-decisions.md`** — append a dated entry to the Revision Log (create the section if the doc doesn't have one: prior ADR docs end at a "Freeze gate summary" — add `## Revision Log` above it or at the end), and update the Freeze Gate Summary table: every ID this contract opens, closes, or changes gets its Status/Conditions row revised. Never leave the freeze-gate table describing a pre-contract state.
+3. **`docs/decision-register-vX.Y.csv`** — create it if absent, else add rows, following the decision-register skill: one row per decision, stable register IDs, status vocabulary (Open/Decided/Resolved/Ratified/Accepted/Superseded/Withdrawn/Absorbed), open rows first with client-facing questions, closed rows with date + decider. This CSV is the client-feedback artifact; it only exists if a step produces it.
 
 ## Definition of done
 
@@ -73,5 +72,6 @@ The dashboard, decision register, and later prompts read `.open-maestro/mileston
 - [ ] Every load-bearing claim has a re-verified `file:line` citation; mismatch flags in place
 - [ ] UI-facing values follow the authority ladder; discrepancies recorded
 - [ ] Open-items register: stable IDs, owners, blocking flags
-- [ ] `milestones.yaml` updated (blockers + notes), YAML validates, both blocker lists consistent
+- [ ] Decision trail propagated: milestones.yaml (both blocker lists) + design-decisions.md revision log & freeze-gate rows + decision-register CSV
+- [ ] `milestones.yaml` YAML validates, both blocker lists consistent
 - [ ] Sources-checked table records every file read with mtime/SHA

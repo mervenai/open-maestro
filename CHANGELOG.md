@@ -5,6 +5,12 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.1] - 2026-10-14
+
+### Changed
+- **`blueprint-contract` skill:** the "mirror into milestones.yaml" final step becomes "propagate the decision trail" with three mandatory targets — `milestones.yaml` (both blocker lists), `docs/design-decisions.md` (dated Revision Log entry, created if absent, plus Freeze Gate Summary rows updated for every ID the contract opens/closes), and `docs/decision-register-vX.Y.csv` (created/extended per the decision-register skill). Definition-of-done checklist updated to match.
+- **Playbook `design-001` prompt:** closing requirements now point at both skills by name (house precedent: design-002 → mermaid-diagrams) so the design-decisions.md revision log, freeze-gate rows, and decision-register CSV are maintained on every contract draft — closing the gap where a drafted contract left the decision trail stale.
+
 ## [2.5.0] - 2026-10-14
 
 ### Added

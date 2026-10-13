@@ -123,7 +123,13 @@ milestone_prompts:
         blocking status. Before finishing, mirror every blocking open item
         into .open-maestro/milestones.yaml (design-blueprint blockers plus a
         dated notes entry) — the dashboard and later design steps read the
-        milestone file, not this document.
+        milestone file, not this document. Follow the blueprint-contract
+        skill for the document shape and citation discipline, and the
+        decision-register skill for the decision trail: append a dated entry
+        to the design-decisions.md revision log (create the section if
+        absent), update its freeze-gate summary rows for every ID this
+        contract opens or closes, and create/update the
+        docs/decision-register-vX.Y.csv (open + closed rows).
 
     - id: design-002
       title: Diagram the blueprint — journey, repos, open questions
