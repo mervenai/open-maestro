@@ -37,7 +37,13 @@ class PromptTemplate:
     # MSTRO-109: prompt must not mutate cloned code repos (analysis/pre-dev
     # turns). Docs/artifact writes under the project stay allowed.
     read_only: bool = False
-    after: str | None = None  # id of the prompt that must have run first
+    # Prompt(s) that must have effectively run before this one is offered by
+    # /next. A single id keeps sequential semantics; a list uses ANY semantics
+    # — the prompt ungates once at least one listed prerequisite has run
+    # (used by the end-of-milestone adversarial review so it appears after
+    # whichever artifact-producing step ran, even when review/sign-off steps
+    # were skipped).
+    after: str | list[str] | None = None
 
     def __post_init__(self) -> None:
         if self.tags is None:

@@ -5,6 +5,14 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.2] - 2026-10-15
+
+### Fixed
+- **Design-006 adversarial step permanently hidden in organically-evolving projects.** The final "Adversarially verify all drafted design artifacts" step was gated on `after: design-005` (design review and sign-off), which projects like ActivityMonitor never run — their real adversarial passes happened ad hoc, satisfying neither the prompt-history check nor the `docs/design-signoff.md` artifact fallback. The step could never appear in `/next`. `after:` now accepts a list with **ANY semantics**: the gated prompt ungates once at least one listed prerequisite has effectively run (single-string `after` behavior is unchanged). design-006 now gates on `[design-001, design-002, design-003, design-004]` — it appears as soon as any artifact-producing design step has run, matching the prompt's own "whichever of them exist" wording. Still user-invoked only: nothing auto-runs.
+
+### Changed
+- **Artifact-critic passes now persist their full review to disk.** The auto artifact-critic gate (fires when a `docs/*.md` file changes by >50 lines in a turn) previously left no durable output — findings were appended to the turn text and a one-word verdict to session metadata, despite the critic agent being write-blocked by design. Each pass now writes `docs/reviews/artifact-critic-<YYYYMMDD-HHMMSS>.md` (verdict, agent, artifacts, trigger excerpt, complete critic output), the turn output points to the file (`artifact_critic_review_path` in session metadata), and a write failure degrades to a log line — the gate never crashes a turn over its own audit trail.
+
 ## [2.5.1] - 2026-10-14
 
 ### Changed

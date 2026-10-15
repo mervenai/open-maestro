@@ -195,7 +195,12 @@ milestone_prompts:
       read_only: true
       artifact_target: docs/adversarial-review.md
       default_track_only: true
-      after: design-005
+      # ANY semantics: ungate once ANY artifact-producing design step has
+      # effectively run. design-005 (review/sign-off) is intentionally not a
+      # prerequisite — organically-evolving projects run adversarial passes
+      # without ever producing docs/design-signoff.md, and the prompt itself
+      # reviews "whichever artifacts exist".
+      after: [design-001, design-002, design-003, design-004]
       prompt: |
         Adversarially review every artifact produced by this milestone for {epic_name}
         (the data/API contract, the blueprint diagram, the UX/template spec, and the

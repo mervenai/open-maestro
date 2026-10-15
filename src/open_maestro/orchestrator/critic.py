@@ -21,6 +21,7 @@ import logging
 import os
 import re
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -369,3 +370,55 @@ def extract_findings(text: str, max_lines: int = 6) -> list[str]:
                     break
             return findings
     return []
+
+
+def write_artifact_review(
+    project_path: Path,
+    *,
+    artifacts: list[str],
+    verdict: str,
+    review_text: str,
+    original_prompt: str,
+    agent_id: str,
+    now: datetime | None = None,
+) -> Path | None:
+    """Persist an artifact-critic pass to ``docs/reviews/``.
+
+    Why: the artifact-critic gate previously appended its findings only to
+    the turn text, so the durable record was a one-word verdict in session
+    metadata — noise on screen, nothing on disk. Writing the full review per
+    pass makes the gate's output inspectable, diffable, and shareable.
+    What: one timestamped Markdown file per pass:
+    ``docs/reviews/artifact-critic-<YYYYMMDD-HHMMSS>.md`` with a metadata
+    header (verdict, agent, artifacts, trigger excerpt) and the critic's
+    complete output.
+    Returns the written path, or None when the write fails — the gate must
+    never crash a turn over its own audit trail.
+    """
+    stamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%d-%H%M%S")
+    header = "\n".join(
+        [
+            f"# Artifact critic review — {stamp}",
+            "",
+            f"- Verdict: **{verdict}**",
+            f"- Agent: {agent_id}",
+            "- Artifacts reviewed:",
+            *[f"  - {a}" for a in artifacts],
+            "- Trigger request (excerpt):",
+            "```",
+            original_prompt[:800],
+            "```",
+            "",
+            "---",
+            "",
+        ]
+    )
+    try:
+        reviews_dir = Path(project_path) / "docs" / "reviews"
+        reviews_dir.mkdir(parents=True, exist_ok=True)
+        path = reviews_dir / f"artifact-critic-{stamp}.md"
+        path.write_text(header + review_text.strip() + "\n", encoding="utf-8")
+        return path
+    except OSError as exc:
+        logger.warning("artifact critic: failed to write review file: %s", exc)
+        return None

@@ -19,32 +19,21 @@ from open_maestro.milestones.prompt_history import PromptHistoryStore
 from open_maestro.milestones.store import MilestoneStore
 
 
-def _prerequisite_prompt_ran(
-    template: Any,
+def _single_prerequisite_ran(
+    prereq_id: str,
     playbook: PromptPlaybook,
     milestone_id: str,
     epic_id: str,
     project_root: Path,
     prompt_history: PromptHistoryStore | None,
 ) -> bool:
-    """Check whether the prompt referenced by ``template.after`` has effectively run.
-
-    A prompt counts as run when either a run record exists in the prompt
-    history for (epic_id, milestone_id, after), or the referenced prompt's
-    artifact_target file exists on disk under project_root (covering runs
-    from before prompt history existed, same idea as
-    ``PromptHistoryStore.backfill_from_artifacts``). When the referenced
-    prompt has no artifact_target, there is nothing to check on disk, so it
-    is treated as satisfied to avoid hiding prompts permanently.
-    """
-    if not template.after:
-        return True
+    """Check one ``after`` id: run record in prompt history or artifact on disk."""
     if prompt_history is not None:
         history = prompt_history.load()
-        if history.get(epic_id, milestone_id, template.after) is not None:
+        if history.get(epic_id, milestone_id, prereq_id) is not None:
             return True
     referenced = next(
-        (p for p in playbook.prompts_for(milestone_id) if p.id == template.after),
+        (p for p in playbook.prompts_for(milestone_id) if p.id == prereq_id),
         None,
     )
     if referenced is None or not referenced.artifact_target:
@@ -55,6 +44,42 @@ def _prerequisite_prompt_ran(
     if list(project_root.glob(target)):
         return True
     return bool(list(project_root.rglob(target.lstrip("/"))))
+
+
+def _prerequisite_prompt_ran(
+    template: Any,
+    playbook: PromptPlaybook,
+    milestone_id: str,
+    epic_id: str,
+    project_root: Path,
+    prompt_history: PromptHistoryStore | None,
+) -> bool:
+    """Check whether ``template.after`` is satisfied.
+
+    A prompt counts as run when either a run record exists in the prompt
+    history for (epic_id, milestone_id, after), or the referenced prompt's
+    artifact_target file exists on disk under project_root (covering runs
+    from before prompt history existed, same idea as
+    ``PromptHistoryStore.backfill_from_artifacts``). When the referenced
+    prompt has no artifact_target, there is nothing to check on disk, so it
+    is treated as satisfied to avoid hiding prompts permanently.
+
+    A single ``after`` id keeps those semantics. A list uses ANY semantics:
+    the prompt ungates once at least one listed prerequisite has run — for
+    prompts like the final adversarial review, whose real precondition is
+    "some design artifact exists", not one specific prior step.
+    """
+    if not template.after:
+        return True
+    prerequisites = (
+        [template.after] if isinstance(template.after, str) else list(template.after)
+    )
+    return any(
+        _single_prerequisite_ran(
+            prereq, playbook, milestone_id, epic_id, project_root, prompt_history
+        )
+        for prereq in prerequisites
+    )
 
 
 def get_current_or_next_milestone_prompts(

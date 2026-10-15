@@ -719,6 +719,58 @@ class TestCriticGate:
         assert "SQL injection" in result.text
         assert len(runtime.calls) == 2  # engineer + critic
 
+    def test_write_artifact_review_persists_full_review(self, tmp_path: Path) -> None:
+        """The artifact-critic pass leaves a durable review file, not just screen text."""
+        path = critic_mod.write_artifact_review(
+            tmp_path,
+            artifacts=["docs/blueprint-design-and-data-contract.md"],
+            verdict="BLOCK",
+            review_text="## Verdict: BLOCK\n\n## Findings\n\n| P0 | bad citation |\n",
+            original_prompt="draft the data contract",
+            agent_id="code-critic",
+            now=datetime(2026, 10, 15, 12, 0, 0, tzinfo=UTC),
+        )
+        assert path is not None and path.exists()
+        content = path.read_text(encoding="utf-8")
+        assert content.startswith("# Artifact critic review")
+        assert "**BLOCK**" in content
+        assert "docs/blueprint-design-and-data-contract.md" in content
+        assert "draft the data contract" in content
+        assert "bad citation" in content  # full critic output preserved
+        assert path.name == "artifact-critic-20261015-120000.md"
+
+    async def test_artifact_gate_writes_review_file(
+        self, monkeypatch, tmp_path: Path
+    ):
+        """An artifact-critic pass writes docs/reviews/ and points to it in the result."""
+        monkeypatch.setenv("MAESTRO_CRITIC_GATE", "on")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(critic_mod, "snapshot_head", lambda p: "abc123")
+        # Isolate the artifact gate (9.6) from the source-critic gate and the
+        # auto deep review (9.7).
+        monkeypatch.setattr(critic_mod, "detect_source_changes", lambda p, ref: [])
+        monkeypatch.setattr(
+            critic_mod,
+            "detect_artifact_changes",
+            lambda p, ref: [("docs/blueprint-design-and-data-contract.md", 120)],
+        )
+        import open_maestro.review.blueprint as review_bp
+
+        monkeypatch.setattr(review_bp, "auto_review_enabled", lambda: False)
+        runtime = CriticFakeRuntime()
+        pm = ProjectManager(runtime=runtime, registry=_critic_registry())
+
+        result = await pm.handle("draft the data contract", agent_id="engineer")
+
+        assert result.is_error is False
+        review_path = result.metadata.get("artifact_critic_review_path")
+        assert review_path and Path(review_path).exists()
+        assert Path(review_path).read_text(encoding="utf-8").startswith(
+            "# Artifact critic review"
+        )
+        assert "Full review written to" in result.text
+        assert len(runtime.calls) == 2  # engineer + artifact critic
+
     async def test_gate_skips_read_only_agent(self, monkeypatch):
         monkeypatch.setenv("MAESTRO_CRITIC_GATE", "on")
         monkeypatch.setattr(critic_mod, "snapshot_head", lambda p: "abc123")

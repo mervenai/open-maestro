@@ -1475,6 +1475,17 @@ class ProjectManager:
         result.text += summary
         result.metadata["artifact_critic_verdict"] = verdict
         result.metadata["artifact_critic_agent"] = critic.id
+        review_path = critic_mod.write_artifact_review(
+            Path.cwd(),
+            artifacts=artifacts,
+            verdict=verdict,
+            review_text=critic_result.text,
+            original_prompt=ctx.original_prompt,
+            agent_id=critic.id,
+        )
+        if review_path is not None:
+            result.text += f"\nFull review written to {review_path}"
+            result.metadata["artifact_critic_review_path"] = str(review_path)
         logger.info(
             "Artifact critic gate: verdict=%s (%d finding lines)",
             verdict,

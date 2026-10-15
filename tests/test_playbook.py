@@ -227,6 +227,80 @@ def test_after_gated_prompt_shown_with_existing_artifact(gated_project: Path) ->
     assert [template.id for template, _ in prompts] == ["design-001", "design-002"]
 
 
+PLAYBOOK_WITH_AFTER_LIST = """\
+playbook_id: test-after-list
+version: 1.0.0
+milestone_prompts:
+  design-blueprint:
+    - id: design-001
+      title: Draft contract
+      order: 1
+      artifact_target: docs/blueprint-design-and-data-contract.md
+      prompt: |
+        Draft the contract.
+    - id: design-002
+      title: Diagram the blueprint
+      order: 2
+      artifact_target: docs/diagrams/blueprint-user-journey.md
+      prompt: |
+        Diagram it.
+    - id: design-006
+      title: Adversarially verify all drafted design artifacts
+      order: 6
+      after: [design-001, design-002]
+      artifact_target: docs/adversarial-review.md
+      prompt: |
+        Review whichever artifacts exist.
+"""
+
+
+@pytest.fixture()
+def gated_list_project(tmp_path: Path) -> Path:
+    """Tmp project whose final adversarial step uses an ANY-list ``after`` gate."""
+    config_dir = tmp_path / ".open-maestro"
+    config_dir.mkdir()
+    (config_dir / "playbook.yaml").write_text(PLAYBOOK_WITH_AFTER_LIST, encoding="utf-8")
+    store = MilestoneStore(tmp_path)
+    plan = store.load()
+    _epic, milestone = plan.find_milestone("design-blueprint")
+    assert milestone is not None
+    milestone.status = MilestoneStatus.IN_PROGRESS
+    store.update(plan)
+    return tmp_path
+
+
+def test_load_playbook_populates_after_list(tmp_path: Path) -> None:
+    """An ``after`` list loads as a list (ANY semantics for the gated prompt)."""
+    config_dir = tmp_path / ".open-maestro"
+    config_dir.mkdir()
+    (config_dir / "playbook.yaml").write_text(PLAYBOOK_WITH_AFTER_LIST, encoding="utf-8")
+    playbook = load_playbook(tmp_path)
+    prompts = {p.id: p for p in playbook.prompts_for("design-blueprint")}
+    assert prompts["design-006"].after == ["design-001", "design-002"]
+
+
+def test_after_list_hidden_until_any_prerequisite_runs(gated_list_project: Path) -> None:
+    """ANY-list gate: no listed prerequisite has run -> stays hidden."""
+    prompts, _epic_id, _milestone_id = get_current_or_next_milestone_prompts(
+        gated_list_project
+    )
+    assert [template.id for template, _ in prompts] == ["design-001", "design-002"]
+
+
+def test_after_list_ungates_when_any_prerequisite_ran(gated_list_project: Path) -> None:
+    """ANY semantics: a run record for design-002 alone ungates design-006."""
+    history = PromptHistoryStore(gated_list_project)
+    history.record("default", "design-blueprint", "design-002", "Diagram the blueprint")
+    prompts, _epic_id, _milestone_id = get_current_or_next_milestone_prompts(
+        gated_list_project, prompt_history=history
+    )
+    assert [template.id for template, _ in prompts] == [
+        "design-001",
+        "design-002",
+        "design-006",
+    ]
+
+
 PLAYBOOK_WITH_READ_ONLY = """\
 playbook_id: test-read-only
 version: 1.0.0
