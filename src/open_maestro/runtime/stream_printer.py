@@ -14,12 +14,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sys
 from typing import Any
 
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.text import Text
+
+logger = logging.getLogger(__name__)
 
 # Claude stream-json event types that are internal noise and swallowed.
 _CLAUDE_SILENT_EVENTS = {
@@ -97,6 +100,11 @@ class StreamPrinter:
         try:
             msg: dict[str, Any] = json.loads(stripped)
         except json.JSONDecodeError:
+            return False
+        if not isinstance(msg, dict):
+            # Valid JSON but not an object (bare number, array, string):
+            # kimi-cli occasionally emits these; fall through to raw
+            # printing instead of crashing on msg.get().
             return False
 
         role = msg.get("role")
@@ -260,6 +268,15 @@ async def pump_stream(stream: asyncio.StreamReader | None, printer: Any) -> None
     """
     if stream is None:
         return
+
+    def _safe_write(text: str) -> None:
+        # Presentation must never kill a turn: a printer bug on one weird
+        # line should be logged, not propagated into the turn's task tree.
+        try:
+            printer.write(text)
+        except Exception:
+            logger.exception("stream printer failed on a line; continuing")
+
     pending = b""
     while True:
         chunk = await stream.read(65536)
@@ -268,6 +285,6 @@ async def pump_stream(stream: asyncio.StreamReader | None, printer: Any) -> None
         pending += chunk
         *lines, pending = pending.split(b"\n")
         for line in lines:
-            printer.write(line.decode(errors="replace") + "\n")
+            _safe_write(line.decode(errors="replace") + "\n")
     if pending:
-        printer.write(pending.decode(errors="replace"))
+        _safe_write(pending.decode(errors="replace"))

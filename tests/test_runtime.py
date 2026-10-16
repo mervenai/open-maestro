@@ -63,15 +63,19 @@ class TestKimiCLIParsing:
         assert result.session_id == expected_session
         assert result.metadata == {}
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="BUG: valid-JSON non-object lines (list/scalar) crash _parse_output "
-        "with AttributeError; should fall back to plain text like malformed lines",
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            '[1, 2, 3]\n{"role":"assistant","content":"ok"}',
+            '0\n{"role":"assistant","content":"ok"}',
+        ],
     )
-    def test_parse_non_object_json_line_does_not_crash(self):
-        raw = '[1, 2, 3]\n{"role":"assistant","content":"ok"}'
+    def test_parse_non_object_json_line_does_not_crash(self, raw):
+        # Valid-JSON non-object lines (scalar/array) fall back to plain text
+        # like malformed lines instead of crashing on msg.get().
+        line0 = raw.splitlines()[0]
         result = KimiCLIRuntime._parse_output(raw)
-        assert result.text == "[1, 2, 3]\nok"
+        assert result.text == f"{line0}\nok"
 
     def test_parse_last_resume_hint_wins(self):
         raw = (

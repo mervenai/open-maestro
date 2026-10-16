@@ -59,6 +59,20 @@ def test_stream_printer_raw_json_for_unknown_shape(capsys) -> None:
     assert "unknown" in captured.out
 
 
+@pytest.mark.parametrize("line", ["0", "42", "[1, 2, 3]", '"hello"'])
+def test_stream_printer_non_object_json_line_does_not_crash(capsys, line) -> None:
+    """Bare JSON scalars/arrays from kimi-cli fall back to raw printing.
+
+    kimi-cli occasionally emits lines that parse as JSON but aren't message
+    objects; the printer must not crash on msg.get() for those.
+    """
+    printer = StreamPrinter("kimi")
+    printer.write(line + "\n")
+    captured = capsys.readouterr()
+    assert "[kimi]" in captured.out
+    assert line in captured.out
+
+
 def test_stream_printer_plain_line_gets_prefix(capsys) -> None:
     """Non-JSON lines receive a colored label prefix."""
     printer = StreamPrinter("claude", color="magenta")
@@ -143,3 +157,27 @@ async def test_pump_stream_none_stream_is_noop():
     printer = StreamPrinter("kimi")
     await pump_stream(None, printer)
     assert printer.get_buffer() == ""
+
+
+class _ExplodingPrinter:
+    """Printer whose write() raises on lines containing 'boom'."""
+
+    def __init__(self) -> None:
+        self.buffer: list[str] = []
+
+    def write(self, text: str) -> None:
+        self.buffer.append(text)
+        if "boom" in text:
+            raise ValueError("boom")
+
+    def get_buffer(self) -> str:
+        return "".join(self.buffer)
+
+
+async def test_pump_stream_printer_exception_does_not_stop_drain():
+    # A presentational printer bug must never kill the turn: the pump keeps
+    # draining the stream, the bad line is logged, and no exception
+    # propagates into the turn's task tree.
+    printer = _ExplodingPrinter()
+    await pump_stream(_reader(b"ok\nboom\nstill-going\n"), printer)
+    assert printer.get_buffer() == "ok\nboom\nstill-going\n"

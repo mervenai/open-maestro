@@ -5,6 +5,11 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.3] - 2026-10-16
+
+### Fixed
+- **Turns dying mid-run on kimi-cli's non-object JSON lines.** kimi-cli occasionally emits stream-json lines that parse as JSON but aren't message objects (bare numbers, arrays, strings). The Kimi stream printer called `msg.get("role")` without the `isinstance(msg, dict)` guard its Claude counterpart already had, so one such line raised `AttributeError: 'int' object has no attribute 'get'` inside `pump_stream`, which tore down the whole turn — after the delegated agent's answer had already streamed, with the subprocess killed by the error path and the prompt left unrecorded. Three-layer hardening: (1) the Kimi printer now falls back to raw printing for non-object JSON lines, matching Claude behavior; (2) `KimiCLIRuntime._parse_output` applies the same plain-text fallback, closing the long-standing crash documented by the strict-xfail test (marker removed); (3) `pump_stream` now contains printer exceptions per line — presentational parsing can never again abort a turn or orphan the subprocess.
+
 ## [2.5.2] - 2026-10-15
 
 ### Fixed

@@ -324,6 +324,11 @@ class KimiCLIRuntime(AgentRuntime):
                 # Non-JSON line; treat as plain text fallback
                 text_parts.append(line)
                 continue
+            if not isinstance(msg, dict):
+                # Valid JSON but not an object (bare number, array, string);
+                # same plain-text fallback as malformed lines.
+                text_parts.append(line)
+                continue
 
             role = msg.get("role")
             if role == "assistant":
