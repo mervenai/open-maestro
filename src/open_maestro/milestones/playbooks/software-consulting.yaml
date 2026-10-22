@@ -10,7 +10,7 @@ milestone_prompts:
     - id: intake-001
       title: Read and summarize the PRD/RFP
       order: 1
-      agent_hint: researcher
+      agent_hint: research
       tags: [discover]
       read_only: true
       artifact_target: docs/intake/synthesis-{date}.md
@@ -30,7 +30,7 @@ milestone_prompts:
     - id: intake-002
       title: Identify existing service/code reuse
       order: 2
-      agent_hint: researcher
+      agent_hint: research
       tags: [discover, architecture]
       read_only: true
       artifact_target: docs/intake/reuse-assessment.md
@@ -45,7 +45,7 @@ milestone_prompts:
     - id: intake-003
       title: Create a risk register
       order: 3
-      agent_hint: researcher
+      agent_hint: research
       tags: [discover, planning]
       read_only: true
       artifact_target: docs/intake/risk-register.md
@@ -78,7 +78,7 @@ milestone_prompts:
     - id: plan-001
       title: Verify architecture against real repos
       order: 1
-      agent_hint: researcher
+      agent_hint: research
       tags: [discover, architecture]
       read_only: true
       artifact_target: docs/execution-plan-{date}.md
@@ -98,7 +98,7 @@ milestone_prompts:
     - id: plan-002
       title: Define ratified design decisions
       order: 2
-      agent_hint: researcher
+      agent_hint: research
       tags: [decide, architecture]
       artifact_target: docs/design-decisions.md
       default_track_only: true
@@ -114,7 +114,7 @@ milestone_prompts:
     - id: design-001
       title: Draft data and API contract
       order: 1
-      agent_hint: researcher
+      agent_hint: research
       tags: [specify, backend]
       artifact_target: docs/blueprint-design-and-data-contract.md
       default_track_only: true
@@ -169,7 +169,7 @@ milestone_prompts:
     - id: design-003
       title: Create UX/template spec
       order: 3
-      agent_hint: researcher
+      agent_hint: research
       tags: [specify, frontend]
       artifact_target: docs/template-spec.md
       default_track_only: true
@@ -201,7 +201,7 @@ milestone_prompts:
     - id: design-005
       title: Conduct design review and sign-off
       order: 5
-      agent_hint: researcher
+      agent_hint: research
       tags: [decide, verify]
       artifact_target: docs/design-signoff.md
       default_track_only: true
@@ -245,7 +245,7 @@ milestone_prompts:
     - id: build-001
       title: Create phased implementation plan
       order: 1
-      agent_hint: researcher
+      agent_hint: research
       tags: [plan]
       artifact_target: docs/build-plan-{epic_id}.md
       prompt: |

@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from open_maestro.agents.loader import AgentLoader
 from open_maestro.milestones.commands import get_current_or_next_milestone_prompts
 from open_maestro.milestones.models import MilestoneStatus
 from open_maestro.milestones.playbook import (
@@ -38,6 +39,28 @@ def test_load_default_playbook(tmp_project: Path) -> None:
     assert playbook.playbook_id == "software-consulting"
     assert "intake-discovery" in playbook.decks
     assert "implementation" in playbook.decks
+
+
+def test_default_playbook_agent_hints_resolve_in_registry(tmp_project: Path) -> None:
+    """Every agent_hint in the bundled playbook must name a registered agent.
+
+    A hint that misses the registry falls back to LLM routing (see the
+    researcher/research miss), silently defeating the hint's purpose.
+    """
+    repo = Path(__file__).resolve().parent.parent
+    registry = AgentLoader.load_tiered_dirs(None, None, repo / "agents")
+    playbook = load_playbook(tmp_project)
+    unknown = []
+    for deck in playbook.decks.values():
+        for template in deck.prompts:
+            hint = template.agent_hint
+            if not hint:
+                continue
+            try:
+                registry.get(hint)
+            except KeyError:
+                unknown.append(f"{template.id}: {hint}")
+    assert unknown == []
 
 
 def test_playbook_prompts_for_milestone_sorted() -> None:

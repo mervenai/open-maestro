@@ -5,6 +5,11 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.1] - 2026-10-22
+
+### Fixed
+- **`agent_hint: researcher` → `research` in the bundled software-consulting playbook** — the registry agent is `research`, so all 9 researcher-hinted prompts (intake-001/002/003, plan-001/002, design-001, and others) missed the registry and silently fell back to LLM routing instead of honoring the hint. New regression test asserts every bundled-playbook `agent_hint` resolves against the bundled agent registry.
+
 ## [3.0.0] - 2026-10-22
 
 ### Added
