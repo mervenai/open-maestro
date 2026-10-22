@@ -16,20 +16,10 @@ skills:
 - emergency-release-workflow
 - github-actions
 - pr-quality-checklist
-- brainstorming
-- dispatching-parallel-agents
 - git-workflow
 - git-worktrees
-- requesting-code-review
 - stacked-prs
-- writing-plans
-- json-data-handling
-- root-cause-tracing
-- systematic-debugging
 - verification-before-completion
-- internal-comms
-- test-driven-development
-- pre-merge-verification
 required_capabilities:
   tool_use: true
   reasoning: light

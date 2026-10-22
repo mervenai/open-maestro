@@ -359,7 +359,7 @@ class TestModelResolution:
 
         resolver = ModelResolver()
         assert resolver.resolve("smart", "claude-cli") == "claude-sonnet-4-6"
-        assert resolver.resolve("reasoning", "claude-cli") == "claude-opus-4-7"
+        assert resolver.resolve("reasoning", "claude-cli") == "claude-opus-5-5"
 
     def test_full_model_passed_through(self):
         from open_maestro.config.models import ModelResolver
@@ -367,6 +367,8 @@ class TestModelResolution:
         resolver = ModelResolver()
         assert resolver.resolve("gpt-4o", "openai-sdk") == "gpt-4o"
         assert resolver.resolve("kimi-code/k3", "kimi-cli") == "kimi-code/k3"
+        # Superseded flagship stays addressable by explicit identifier.
+        assert resolver.resolve("claude-opus-4-7", "claude-cli") == "claude-opus-4-7"
 
 
 class TestAgentDefinition:

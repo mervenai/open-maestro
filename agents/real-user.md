@@ -19,7 +19,6 @@ skills:
 - playwright
 - webapp-testing
 - condition-based-waiting
-- screenshot-verification
 - systematic-debugging
 - verification-before-completion
 - json-data-handling

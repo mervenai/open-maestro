@@ -53,6 +53,33 @@ models:
       cost_level: medium
       relative_cost: 3.5
 
+  # Claude Opus 5.5 (Claude 5.5 family, released 2026-09-22): Anthropic's
+  # current flagship. Matches Fable 5.1 on most tasks at ~20% below Opus 4.7
+  # list price ($4/$20 per M vs $5/$25; cache reads $0.20). Verified accepted
+  # by claude-cli 2.1.292. Context/output figures are carried over from the
+  # Opus 4.7 entry pending vendor confirmation — treat as approximate per the
+  # header note above.
+  claude-opus-5-5:
+    name: "Claude Opus 5.5"
+    provider: anthropic
+    aliases: [reasoning]
+    identifiers:
+      claude-cli: claude-opus-5-5
+    capabilities:
+      tier: premium
+      tool_use: true
+      vision: true
+      computer_use: false
+      reasoning: deep
+      coding_strength: high
+      max_context_tokens: 200000
+      max_output_tokens: 16384
+      latency_hint: high
+      cost_level: high
+      relative_cost: 6.4
+      price_input_per_million: 4.0
+      price_output_per_million: 20.0
+
   claude-haiku:
     name: "Claude Haiku 4.5"
     provider: anthropic
@@ -91,10 +118,13 @@ models:
       cost_level: medium
       relative_cost: 4.0
 
+  # Claude Opus 4.7 (released 2026-04-16): superseded as flagship by
+  # claude-opus-5-5 but kept addressable by explicit id
+  # (`--model claude-opus-4-7`) for anyone pinned to it.
   claude-opus:
     name: "Claude Opus 4.7"
     provider: anthropic
-    aliases: [reasoning]
+    aliases: []
     identifiers:
       claude-cli: claude-opus-4-7
     capabilities:

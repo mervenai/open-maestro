@@ -16,23 +16,12 @@ blocked_tools:
 - ApplyPatch
 skills:
 - graphql
-- api-security-review
-- brainstorming
-- dispatching-parallel-agents
-- git-workflow
-- requesting-code-review
-- writing-plans
 - json-data-handling
 - root-cause-tracing
-- systematic-debugging
 - verification-before-completion
-- internal-comms
-- condition-based-waiting
-- test-driven-development
 - test-quality-inspector
 - testing-anti-patterns
 - api-design-patterns
-- api-documentation
 required_capabilities:
   tool_use: true
   reasoning: light

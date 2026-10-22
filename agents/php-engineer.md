@@ -12,28 +12,13 @@ tools:
 - Write
 skills:
 - espocrm
-- wordpress-advanced-architecture
-- wordpress-block-editor-fse
 - wordpress-plugin-fundamentals
 - wordpress-security-validation
 - wordpress-testing-qa
-- tailwind
-- software-patterns
-- brainstorming
-- dispatching-parallel-agents
-- git-workflow
-- git-worktrees
-- requesting-code-review
-- stacked-prs
-- writing-plans
-- json-data-handling
-- root-cause-tracing
 - systematic-debugging
 - verification-before-completion
-- internal-comms
 - security-scanning
 - test-driven-development
-- bug-fix-verification
 required_capabilities:
   tool_use: true
   reasoning: light

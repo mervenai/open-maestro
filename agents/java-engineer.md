@@ -16,24 +16,11 @@ tools:
 - ApplyPatch
 skills:
 - software-patterns
-- brainstorming
-- dispatching-parallel-agents
-- git-workflow
-- git-worktrees
-- requesting-code-review
-- stacked-prs
-- writing-plans
-- json-data-handling
-- root-cause-tracing
 - systematic-debugging
 - verification-before-completion
-- internal-comms
 - security-scanning
 - test-driven-development
-- bug-fix-verification
 - api-design-patterns
-- java-algorithm-patterns
-- java-async-concurrent
 required_capabilities:
   tool_use: true
   reasoning: light

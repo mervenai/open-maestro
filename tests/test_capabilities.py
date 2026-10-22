@@ -182,7 +182,13 @@ class TestModelResolverCapabilities:
         # Should resolve default aliases using the bundled capabilities.
         assert resolver.resolve("fast", "kimi-cli") == "kimi-code/kimi-for-coding"
         assert resolver.resolve("smart", "kimi-cli") == "kimi-code/k3"
-        assert resolver.resolve("reasoning", "claude-cli") == "claude-opus-4-7"
+        assert resolver.resolve("reasoning", "claude-cli") == "claude-opus-5-5"
+
+    def test_superseded_opus_still_resolves_by_identifier(self):
+        resolver = ModelResolver()
+        # Opus 4.7 lost the `reasoning` alias to Opus 5.5 but remains
+        # addressable by its concrete identifier.
+        assert resolver.resolve("claude-opus-4-7", "claude-cli") == "claude-opus-4-7"
 
     def test_resolver_uses_profile_for_alias(self):
         resolver = ModelResolver()

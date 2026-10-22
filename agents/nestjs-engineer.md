@@ -27,7 +27,6 @@ skills:
 - nodejs-backend
 - typescript-core
 - fastify
-- jest-typescript
 - api-design-patterns
 - git-workflow
 - test-driven-development

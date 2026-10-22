@@ -16,29 +16,16 @@ blocked_tools:
 - MultiEdit
 - ApplyPatch
 skills:
-- dspy
-- langchain
-- langgraph
-- mcp
-- anthropic-sdk
-- openrouter
-- session-compression
 - software-patterns
-- brainstorming
-- dispatching-parallel-agents
-- git-workflow
-- requesting-code-review
-- writing-plans
-- json-data-handling
 - root-cause-tracing
-- systematic-debugging
-- verification-before-completion
-- internal-comms
-- skill-creator
-- test-driven-development
-- research-ticketing-protocol
-- research-mcp-skillset
-- research-google-workspace
+- reuse-assessment
+- risk-register
+- execution-plan
+- intake-synthesis
+- reuse-assessment
+- ux-template-spec
+- decision-register
+- blueprint-contract
 required_capabilities:
   tool_use: true
   reasoning: light

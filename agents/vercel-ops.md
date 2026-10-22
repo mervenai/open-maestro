@@ -17,18 +17,10 @@ tools:
 skills:
 - vercel-overview
 - docker
-- brainstorming
-- dispatching-parallel-agents
-- git-workflow
-- requesting-code-review
-- writing-plans
 - json-data-handling
 - root-cause-tracing
-- systematic-debugging
 - verification-before-completion
 - env-manager
-- internal-comms
-- test-driven-development
 required_capabilities:
   tool_use: true
   reasoning: light

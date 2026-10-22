@@ -15,7 +15,6 @@ tools:
 - ApplyPatch
 skills:
 - tailwind
-- shadcn-ui
 - web-performance-optimization
 - webapp-testing
 - git-workflow

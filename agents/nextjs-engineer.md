@@ -14,33 +14,13 @@ tools:
 - MultiEdit
 - ApplyPatch
 skills:
-- vite
 - nextjs
-- react
-- react-state-machines
 - validated-handler
 - nextjs-core
 - nextjs-v16
 - vercel-overview
-- trpc
-- tanstack-query
-- zustand
-- headlessui
-- shadcn-ui
-- tailwind
-- software-patterns
-- brainstorming
-- dispatching-parallel-agents
-- git-workflow
-- requesting-code-review
-- writing-plans
-- json-data-handling
-- root-cause-tracing
 - systematic-debugging
 - verification-before-completion
-- artifacts-builder
-- internal-comms
-- test-driven-development
 - web-performance-optimization
 required_capabilities:
   tool_use: true

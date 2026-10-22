@@ -101,7 +101,7 @@ models:
 Open Maestro scores every model against a task profile extracted from the
 prompt (or set via CLI flags) and picks the best concrete identifier for the
 active runtime.  For example, a request for deep architectural reasoning will
-prefer `kimi-code/k3` or `claude-opus-4-7`, while a quick summary will prefer
+prefer `kimi-code/k3` or `claude-opus-5-5`, while a quick summary will prefer
 `kimi-code/kimi-for-coding` or `gpt-4o-mini`.
 
 ## SDK runtimes and tool interception

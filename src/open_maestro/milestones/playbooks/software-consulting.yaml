@@ -24,6 +24,8 @@ milestone_prompts:
         - Any additional open questions (brief, uncapped — do not drop them)
         - Top 5-8 risks with proposed mitigations
         - Reuse opportunities in existing codebase or services
+        Follow the intake-synthesis skill for the canonical section set, the
+        question-vs-risk separation, and the superseded-decisions discipline.
 
     - id: intake-002
       title: Identify existing service/code reuse
@@ -36,6 +38,9 @@ milestone_prompts:
         Search the codebase for existing capabilities that could be reused for this feature.
         Look for: similar controllers, services, UI components, events, integration patterns, and auth/permissions models.
         Produce a reuse assessment with file paths, estimated level of effort to reuse (High/Medium/Low), and any contract mismatches.
+        Follow the reuse-assessment skill for the six-category search pattern,
+        the LOE anchors, the contract-mismatch taxonomy, and the citation
+        discipline (re-read every file:line before claiming it).
 
     - id: intake-003
       title: Create a risk register
@@ -48,6 +53,9 @@ milestone_prompts:
         Based on the PRD, synthesis, and reuse assessment, create a risk register.
         For each risk include: description, likelihood, impact, owner, and mitigation.
         Flag any risks that should block the design phase until resolved.
+        Follow the risk-register skill for the register shape, the RR-n ID discipline
+        (shared with the design-phase open-items register), and the rule that blocking
+        risks must be mirrored into .open-maestro/milestones.yaml.
 
     - id: intake-004
       title: Create the epic breakdown
@@ -64,6 +72,7 @@ milestone_prompts:
         - List dependencies on other epics explicitly
         Do not re-baseline scope or success metrics inside the epics; reference the risk register IDs instead.
         Write one '### CE-1 - <Name>' heading per epic (sequential numbering: CE-1, CE-2, ...) followed by goal, scope, service coverage, and gates.
+        Follow the epic-breakdown skill for the outcome-aligned split rules, the CE-n ID discipline, the gates-as-conditions rule, and the anti-patterns to reject.
 
   execution-planning:
     - id: plan-001
@@ -81,6 +90,10 @@ milestone_prompts:
         - Note any contract mismatch or missing dependency
         - Propose a ratified design decision
         Produce an execution plan with the corrected architecture, repo/service impact map, and a go/no-go recommendation for design.
+        Follow the execution-plan skill for the two-phase verification method, the
+        assumption-verification table, the impact map shape, and the go/no-go
+        framing; follow the blueprint-contract skill's citation discipline
+        (re-read every file:line, prove the claim, flag mechanism mismatches).
 
     - id: plan-002
       title: Define ratified design decisions
@@ -93,6 +106,9 @@ milestone_prompts:
         From the execution plan, extract the 3-6 architectural decisions that must be frozen before design begins.
         Use an ADR-style format: context, decision, consequences, rejected alternatives.
         Ensure each decision is numbered (D1, D2, ...) and references real code or docs.
+        Follow the decision-register skill's ADR format section for the entry
+        template, the D-n ID discipline, the status lifecycle, and when an
+        entry is warranted at all.
 
   design-blueprint:
     - id: design-001
@@ -161,6 +177,9 @@ milestone_prompts:
         Create a UX/template specification for the user-facing part of the {epic_name} epic.
         Cover: screen/layout structure, user flow, validation messages, empty/error states, and any file/template formats (e.g., Excel columns).
         Reference existing UI components and platform conventions.
+        Follow the ux-template-spec skill for the per-screen state blocks, the
+        validation-message table, the flow-branch rules, and the file/template
+        format conventions.
 
     - id: design-004
       title: Generate Jira stories with BDD acceptance criteria
@@ -174,52 +193,53 @@ milestone_prompts:
         Each story should have: ID, title, description, acceptance criteria (Given/When/Then), priority, and linked FR.
         Verify coverage before finishing: every PRD FR, every Section 4 measurable target, and every open question has a story or an explicit disposition (deferred / out of scope / resolved). List anything missing.
         Output as a CSV and a Markdown summary.
+        Follow the bdd-story-authoring skill for the story schema, the per-epic
+        story-ID discipline, the Given/When/Then rules, and the bidirectional
+        coverage audit (every FR, measurable target, and open question mapped
+        or dispositioned).
 
     - id: design-005
       title: Conduct design review and sign-off
       order: 5
       agent_hint: researcher
-      tags: [decide]
+      tags: [decide, verify]
       artifact_target: docs/design-signoff.md
       default_track_only: true
       prompt: |
-        Review the data contract, UX spec, and Jira stories for {epic_name}.
-        Identify inconsistencies, unresolved open questions, and risks.
-        Produce a design sign-off checklist with open items that must close before build planning.
+        Conduct the design review and sign-off for {epic_name} across every
+        artifact this milestone produced — the data/API contract, the blueprint
+        diagram, the UX/template spec, and the Jira stories (whichever exist).
 
-    - id: design-006
-      title: Adversarially verify all drafted design artifacts
-      order: 6
-      agent_hint: researcher
-      tags: [verify, backend]
-      read_only: true
-      artifact_target: docs/adversarial-review.md
-      default_track_only: true
-      # ANY semantics: ungate once ANY artifact-producing design step has
-      # effectively run. design-005 (review/sign-off) is intentionally not a
-      # prerequisite — organically-evolving projects run adversarial passes
-      # without ever producing docs/design-signoff.md, and the prompt itself
-      # reviews "whichever artifacts exist".
-      after: [design-001, design-002, design-003, design-004]
-      prompt: |
-        Adversarially review every artifact produced by this milestone for {epic_name}
-        (the data/API contract, the blueprint diagram, the UX/template spec, and the
-        Jira stories — or whichever of them exist in the project). Do not trust the artifacts.
-        Method:
-        1) Extract every file:line citation in each artifact.
-        2) Re-read each cited location in the actual code and confirm the cited code proves the
-           claim it anchors; list every citation that is wrong, ambiguous, or
-           matches-but-doesn't-prove the claim.
-        3) Check UI-facing enums/states/actions against the highest-authority source
-           (prototype bundle/UI code beats PRD); list any value taken from a lower-authority source.
-        4) List every element presented as reusing an existing pattern that is actually net-new.
-        5) Check auth/permission claims by tracing the actual attribute/policy code, not by name
-           similarity.
-        6) Cross-artifact consistency: flag any place where the contract, diagram, UX spec, and
-           Jira stories disagree with each other (counts, names, statuses, open questions).
-        Output a findings list ordered by severity (P0/P1/P2), each finding with the exact quoted
-        claim, the evidence, and the recommended fix. If a finding requires a design decision,
-        mark it DECISION NEEDED.
+        Per-artifact adversarial verification is already machine-enforced: the
+        artifact-critic gate re-checks citations, authority sources, and
+        net-new exposure on every artifact change, and the deep-review gate
+        (docs/blueprint*, *contract*, *spec*) blocks /complete until it passes.
+        Do NOT redo that work here. This step covers what those per-artifact
+        gates cannot see:
+
+        1) Cross-artifact consistency — the artifacts must agree with each
+           OTHER, not just with the code. Join on the artifact and register IDs
+           (CE-n-Sm stories, S-n screens, DT/OQ/RR-n items, D-n decisions) and
+           flag every disagreement: counts, names, statuses, enum/state values,
+           endpoint URLs, and items one artifact shows resolved while another
+           shows open.
+        2) Auth/permission claims — trace the actual attribute/policy code for
+           every auth claim the artifacts make, not name similarity.
+        3) Readiness review — unresolved open questions and risks (RR-n) that
+           must close before build planning; verify each blocking item's status
+           against the registers, not against memory.
+
+        Produce docs/design-signoff.md: the checklist with each artifact's pass
+        state, the must-close items cited by register ID, the consistency and
+        auth findings ordered by severity (P0/P1/P2) with evidence, and the
+        sign-off verdict. Mark findings that require a design decision
+        DECISION NEEDED and hand them to the decision-register skill (D-n).
+
+        Only this step may declare the design frozen — follow the
+        blueprint-contract skill's design-signoff section for the checklist
+        shape, the freeze language, and the mandatory decision-trail update
+        (design-decisions.md revision log + freeze-gate rows, decision-register
+        CSV, milestones.yaml blockers via the two-list invariant).
 
   build-planning:
     - id: build-001
@@ -249,6 +269,8 @@ milestone_prompts:
         - Implementation file(s)
         - Unit/E2E test file(s)
         - Status (Not Started / In Progress / Done)
+        Follow the traceability-matrix skill for the row shape, the
+        three-value status vocabulary, and the bidirectional coverage checks.
 
     - id: build-003
       title: Prepare test fixtures
@@ -336,6 +358,9 @@ milestone_prompts:
         - SBOM: syft . -o cyclonedx-json=docs/security/sbom-{date}.json
         Group findings by severity (critical/high/medium/low), note which tool produced each, and give a go/no-go recommendation for QA handoff.
         Critical or high findings are blockers until triaged with an owner.
+        Follow the security-scanning skill's milestone scan gate section for
+        the exact tool commands, the skip-not-fail policy, and the report
+        shape.
 
   qa-integration:
     - id: qa-001

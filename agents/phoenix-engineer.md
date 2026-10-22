@@ -14,27 +14,11 @@ tools:
 - MultiEdit
 - ApplyPatch
 skills:
-- ecto-patterns
 - phoenix-api-channels
 - phoenix-liveview
 - phoenix-ops
-- software-patterns
-- brainstorming
-- dispatching-parallel-agents
-- git-workflow
-- git-worktrees
-- requesting-code-review
-- stacked-prs
-- writing-plans
-- database-migration
-- json-data-handling
-- root-cause-tracing
 - systematic-debugging
-- verification-before-completion
-- internal-comms
-- security-scanning
 - test-driven-development
-- bug-fix-verification
 - api-design-patterns
 required_capabilities:
   tool_use: true

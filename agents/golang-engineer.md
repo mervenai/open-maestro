@@ -14,28 +14,12 @@ tools:
 - MultiEdit
 - ApplyPatch
 skills:
-- golang-cli-cobra-viper
 - golang-database-patterns
 - golang-observability-opentelemetry
 - golang-testing-strategies
-- golang-http-frameworks
-- software-patterns
-- brainstorming
-- dispatching-parallel-agents
-- git-workflow
-- git-worktrees
-- requesting-code-review
-- stacked-prs
-- writing-plans
-- database-migration
-- json-data-handling
-- root-cause-tracing
 - systematic-debugging
 - verification-before-completion
-- internal-comms
 - security-scanning
-- test-driven-development
-- bug-fix-verification
 - api-design-patterns
 required_capabilities:
   tool_use: true

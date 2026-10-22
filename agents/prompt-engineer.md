@@ -13,9 +13,7 @@ tools:
 - Bash
 - Write
 skills:
-- anthropic-sdk
 - brainstorming
-- caveman-prompt-compression
 - dispatching-parallel-agents
 - git-workflow
 - requesting-code-review

@@ -12,28 +12,13 @@ blocked_tools:
 - Write
 - Edit
 skills:
-- netlify
-- vercel-overview
 - dependency-audit
 - emergency-release-workflow
 - docker
 - github-actions
-- brainstorming
-- dispatching-parallel-agents
-- git-workflow
-- git-worktrees
-- requesting-code-review
-- stacked-prs
-- writing-plans
-- database-migration
-- json-data-handling
 - root-cause-tracing
-- systematic-debugging
-- verification-before-completion
 - env-manager
-- internal-comms
 - security-scanning
-- test-driven-development
 required_capabilities:
   tool_use: true
   reasoning: light

@@ -13,19 +13,10 @@ tools:
 blocked_tools:
 - Edit
 skills:
-- brainstorming
-- dispatching-parallel-agents
-- git-workflow
-- requesting-code-review
-- writing-plans
-- mermaid-diagrams
-- json-data-handling
-- root-cause-tracing
-- systematic-debugging
-- verification-before-completion
-- internal-comms
-- test-driven-development
 - api-documentation
+- mermaid-diagrams
+- bdd-story-authoring
+- traceability-matrix
 required_capabilities:
   tool_use: true
   reasoning: light

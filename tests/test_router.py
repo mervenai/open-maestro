@@ -17,12 +17,21 @@ from open_maestro.runtime.base import AgentResult, AgentRuntime
 
 
 class FakeRuntime(AgentRuntime):
-    """Runtime that returns a canned routing response."""
+    """Runtime that returns canned routing responses, one per call.
 
-    def __init__(self, response_text: str, is_error: bool = False):
-        self.response_text = response_text
+    Accepts a single response string or a list; the list is consumed in
+    order (the last entry repeats once exhausted) so tests can script a
+    first response plus a retry response.
+    """
+
+    def __init__(self, response_text: str | list[str], is_error: bool = False):
+        if isinstance(response_text, list):
+            self.responses = list(response_text)
+        else:
+            self.responses = [response_text]
         self.is_error = is_error
         self.last_prompt = ""
+        self.calls = 0
 
     @property
     def runtime_name(self) -> str:
@@ -30,7 +39,9 @@ class FakeRuntime(AgentRuntime):
 
     async def run(self, prompt: str, config=None):
         self.last_prompt = prompt
-        return AgentResult(text=self.response_text, is_error=self.is_error)
+        text = self.responses[min(self.calls, len(self.responses) - 1)]
+        self.calls += 1
+        return AgentResult(text=text, is_error=self.is_error)
 
     async def run_with_hooks(self, prompt, tool_guard=None, blocked_tools=None, config=None):
         return await self.run(prompt, config)
@@ -90,6 +101,37 @@ class TestLLMTaskRouter:
         router = LLMTaskRouter(runtime=runtime)
         agent = await router.select("write tests for the parser", sample_registry)
         assert agent.id == "engineer"
+
+    async def test_retries_once_with_constrained_prompt_on_unknown_id(
+        self, sample_registry
+    ):
+        # First response invents a plausible-but-nonexistent id (the observed
+        # real-world drift); the constrained retry must recover a valid pick.
+        runtime = FakeRuntime(
+            [
+                '{"agent_id": "Plan", "reason": "planning task", "confidence": "high"}',
+                '{"agent_id": "researcher", "reason": "investigation", "confidence": "high"}',
+            ]
+        )
+        router = LLMTaskRouter(runtime=runtime)
+        agent = await router.select("create a phased implementation plan", sample_registry)
+        assert agent.id == "researcher"
+        assert runtime.calls == 2
+        assert "EXACTLY one of these ids" in runtime.last_prompt
+        assert "engineer" in runtime.last_prompt
+        assert "researcher" in runtime.last_prompt
+
+    async def test_falls_back_when_retry_is_also_unknown(self, sample_registry):
+        runtime = FakeRuntime(
+            [
+                '{"agent_id": "Plan", "reason": "planning", "confidence": "high"}',
+                '{"agent_id": "Architect", "reason": "design", "confidence": "high"}',
+            ]
+        )
+        router = LLMTaskRouter(runtime=runtime)
+        agent = await router.select("write tests for the parser", sample_registry)
+        assert agent.id == "engineer"
+        assert runtime.calls == 2
 
     async def test_raises_when_no_fallback_and_unknown_id(self, sample_registry):
         runtime = FakeRuntime('{"agent_id": "missing"}')

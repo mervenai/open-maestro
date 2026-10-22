@@ -17,20 +17,11 @@ blocked_tools:
 - ApplyPatch
 skills:
 - dependency-audit
-- api-security-review
-- brainstorming
-- dispatching-parallel-agents
-- git-workflow
-- requesting-code-review
-- writing-plans
-- json-data-handling
+- security-scanning
 - root-cause-tracing
-- systematic-debugging
 - verification-before-completion
 - env-manager
-- internal-comms
 - security-scanning
-- test-driven-development
 required_capabilities:
   tool_use: true
   reasoning: light

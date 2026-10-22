@@ -90,6 +90,7 @@ def _build_router_prompt(
     task: str,
     agents: list[AgentDefinition],
     task_profile: TaskProfile | None = None,
+    constrain_ids: list[str] | None = None,
 ) -> str:
     lines = [
         _format_task_profile(task_profile),
@@ -109,6 +110,13 @@ def _build_router_prompt(
         lines.append("")
     lines.append(f"Task: {task}")
     lines.append("Which agent_id is the best match?")
+    if constrain_ids:
+        # Retry pass: the first response named an id outside the candidate
+        # list, so restate the valid ids as a closed choice.
+        lines.append(
+            "Respond with EXACTLY one of these ids and nothing else: "
+            + ", ".join(constrain_ids)
+        )
     return "\n".join(lines)
 
 
@@ -245,6 +253,7 @@ class LLMTaskRouter:
         agents: list[AgentDefinition],
         task_profile: TaskProfile | None = None,
     ) -> RoutingDecision | None:
+        valid_ids = {agent.id for agent in agents}
         prompt = _build_router_prompt(task, agents, task_profile=task_profile)
         config = AgentConfig(
             system_prompt=ROUTER_SYSTEM_PROMPT,
@@ -252,17 +261,45 @@ class LLMTaskRouter:
             max_turns=1,
             task_profile=task_profile,
         )
+        result = await self._run_router(prompt, config)
+        decision = _parse_routing_response(result) if result is not None else None
+        if decision is None:
+            return None
+        if decision.agent_id in valid_ids:
+            return decision
+
+        # The model drifted outside the candidate list (it invents ids that
+        # read naturally — e.g. "Plan" for a planning task). Retry once with
+        # the valid ids restated as a closed choice. If the retry still
+        # fails, return the invalid decision so select() applies its normal
+        # keyword-fallback / hard-error handling.
+        logger.warning(
+            "Router returned unknown agent_id '%s'; retrying with constrained ids",
+            decision.agent_id,
+        )
+        retry_prompt = _build_router_prompt(
+            task, agents, task_profile=task_profile, constrain_ids=sorted(valid_ids)
+        )
+        retry = await self._run_router(retry_prompt, config)
+        retry_decision = _parse_routing_response(retry) if retry is not None else None
+        if retry_decision is not None and retry_decision.agent_id in valid_ids:
+            return retry_decision
+        logger.warning("Router retry did not return a valid agent_id")
+        return retry_decision or decision
+
+    async def _run_router(
+        self, prompt: str, config: AgentConfig
+    ) -> AgentResult | None:
+        """Run one routing call, returning None on runtime/error failure."""
         try:
             result = await self.runtime.run(prompt, config=config)
         except Exception as exc:
             logger.warning("LLM routing call failed: %s", exc)
             return None
-
         if result.is_error:
             logger.warning("LLM routing returned error: %s", result.text)
             return None
-
-        return _parse_routing_response(result)
+        return result
 
     def _select_by_keyword(
         self,

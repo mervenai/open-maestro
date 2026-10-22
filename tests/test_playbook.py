@@ -121,7 +121,6 @@ def test_default_track_only_prompts_kept_for_default_track(tmp_project: Path) ->
         "design-003",
         "design-004",
         "design-005",
-        "design-006",
     ]
 
 
@@ -348,7 +347,6 @@ def test_default_playbook_tags_analysis_prompts_read_only(tmp_project: Path) -> 
     assert by_id["intake-003"].read_only is True  # risk register
     assert by_id["plan-001"].read_only is True  # verify architecture
     assert by_id["design-002"].read_only is False  # blueprint diagram (writes docs/diagrams/)
-    assert by_id["design-006"].read_only is True  # final adversarial verification
     # Build/implementation/QA prompts stay mutating.
     assert by_id["intake-004"].read_only is False
     assert by_id["impl-001"].read_only is False

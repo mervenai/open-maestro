@@ -16,26 +16,12 @@ blocked_tools:
 - ApplyPatch
 skills:
 - pr-quality-checklist
-- brainstorming
-- dispatching-parallel-agents
-- git-workflow
-- requesting-code-review
-- writing-plans
-- json-data-handling
 - root-cause-tracing
-- systematic-debugging
 - verification-before-completion
-- internal-comms
-- condition-based-waiting
 - test-driven-development
 - test-quality-inspector
 - testing-anti-patterns
-- mutation-testing
 - webapp-testing
-- playwright
-- bug-fix-verification
-- pre-merge-verification
-- screenshot-verification
 required_capabilities:
   tool_use: true
   reasoning: light

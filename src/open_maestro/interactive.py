@@ -54,6 +54,7 @@ from open_maestro.milestones import (
     handle_next_command,
     handle_prompts_command,
     handle_track_command,
+    load_playbook,
 )
 from open_maestro.monitor.live import Monitor
 from open_maestro.orchestrator.load import apply_source_load, estimate_source_load
@@ -1572,6 +1573,24 @@ async def _clone_org_repos(
     )
 
 
+def _playbook_agent_hint(prompt_id: str) -> str:
+    """Return the playbook's agent_hint for *prompt_id* ('' if none/unknown).
+
+    Playbook authors name the right agent for each prompt; honoring the hint
+    avoids an LLM routing call that can drift to a plausible-sounding but
+    nonexistent agent.
+    """
+    try:
+        playbook = load_playbook(Path.cwd())
+    except Exception:
+        return ""
+    for deck in playbook.decks.values():
+        for template in deck.prompts:
+            if template.id == prompt_id:
+                return template.agent_hint
+    return ""
+
+
 def _resolve_suggested_prompt(
     user_input: str,
     suggested_prompts: list[tuple[str, str, str]],
@@ -2326,6 +2345,19 @@ async def run_interactive(args: Any) -> int:
 
         state.turn += 1
 
+        # Honor the playbook's agent_hint for a selected prompt: the author
+        # already chose the agent, so skip the LLM router for this turn. A
+        # hint naming an unknown agent falls through to routing as before.
+        turn_agent_id = state.agent_id
+        if pending_prompt_id is not None:
+            hint = _playbook_agent_hint(pending_prompt_id)
+            if hint:
+                try:
+                    registry.get(hint)
+                    turn_agent_id = hint
+                except KeyError:
+                    print(f"→ Playbook agent hint '{hint}' not in registry; routing normally")
+
         # Ask for repo location when an analysis task's target is ambiguous.
         # Playbook prompts queued by /next are already scoped to the current
         # project, so skip the clarification unless they contain an explicit URL
@@ -2521,7 +2553,7 @@ async def run_interactive(args: Any) -> int:
                     monitor.state.turn = state.turn
                     return await pm.handle(
                         prompt,
-                        agent_id=state.agent_id,
+                        agent_id=turn_agent_id,
                         task_profile=profile,
                         model=turn_model,
                         allowed_tools=args.allowed_tools,
@@ -2541,7 +2573,7 @@ async def run_interactive(args: Any) -> int:
                     )
             return await pm.handle(
                 prompt,
-                agent_id=state.agent_id,
+                agent_id=turn_agent_id,
                 task_profile=profile,
                 model=turn_model,
                 allowed_tools=args.allowed_tools,

@@ -18,8 +18,8 @@ Use when a task says "draft the data and API contract", "design-001", or "bluepr
 
 ## Framing rules (these prevent the recurring failures)
 
-- **This step drafts; it does not freeze.** Label the document `vX.Y-draft` with status DRAFT. The word "frozen" is claimed by design-005 (sign-off) after design-006 (adversarial pass) — never by the drafting step, and never in chain summaries. Do not write "ready for sign-off" conclusions; end with the open-items register and what unblocks it.
-- **Drafting ≠ verifying.** Citation self-checks (below) catch transcription errors only. Real review is design-006. Do not let a self-verification stand in for it in summaries or headers.
+- **This step drafts; it does not freeze.** Label the document `vX.Y-draft` with status DRAFT. The word "frozen" is claimed by design-005 (sign-off), which follows the machine-enforced adversarial passes — never by the drafting step, and never in chain summaries. Do not write "ready for sign-off" conclusions; end with the open-items register and what unblocks it.
+- **Drafting ≠ verifying.** Citation self-checks (below) catch transcription errors only. Real review is machine-enforced: the artifact-critic gate on every significant artifact change, and the deep-review gate (milestone-significant blueprint changes, enforced at `/complete`). Do not let a self-verification stand in for them in summaries or headers.
 
 ## Document header block (every version, from v1)
 
@@ -55,7 +55,7 @@ Bump the version on every material revision; archive the prior version to `docs/
 
 - Every open question gets a **stable register ID** — `DT-n` (design task), `OQ-n` (open question), `RR-n` (risk/register item) — assigned once, never renumbered; new items take the next number.
 - Each row: ID | question | owner (named team/person) | blocking (yes/no) | what unblocks it. Blocking items are the freeze gates; non-blocking items still get IDs so downstream artifacts can reference them.
-- The same IDs are reused by design-002 (diagram inline tags), design-004 (Jira stories), design-005/006 (review targets), and the decision-register CSV. IDs are the join key across all milestone artifacts.
+- The same IDs are reused by design-002 (diagram inline tags), design-004 (Jira stories), design-005 (sign-off review targets), and the decision-register CSV. IDs are the join key across all milestone artifacts.
 
 ## Propagate the decision trail (mandatory last step)
 
@@ -63,7 +63,19 @@ A new contract version changes the project's decision state. The dashboard, late
 
 1. **`.open-maestro/milestones.yaml`** — add/update a `blockers:` entry under design-blueprint for each **blocking** open item (register ID + one-line description), add a dated `notes:` entry (version, headline decisions, gates closed/opened), and follow the decision-register skill's two-list invariant and validation rules (per-milestone lists AND `summary.active_blockers`, asserted identical).
 2. **`docs/design-decisions.md`** — append a dated entry to the Revision Log (create the section if the doc doesn't have one: prior ADR docs end at a "Freeze gate summary" — add `## Revision Log` above it or at the end), and update the Freeze Gate Summary table: every ID this contract opens, closes, or changes gets its Status/Conditions row revised. Never leave the freeze-gate table describing a pre-contract state.
-3. **`docs/decision-register-vX.Y.csv`** — create it if absent, else add rows, following the decision-register skill: one row per decision, stable register IDs, status vocabulary (Open/Decided/Resolved/Ratified/Accepted/Superseded/Withdrawn/Absorbed), open rows first with client-facing questions, closed rows with date + decider. This CSV is the client-feedback artifact; it only exists if a step produces it.
+3. **`docs/decision-register-vX.Y.csv`** — create it if absent, else add rows, following the decision-register skill: one row per decision, stable register IDs, strict status enum (the Status cell carries one enum word only — exact match, no dates/deciders/prose; see the decision-register skill), open rows first with client-facing questions, closed rows with date + decider. This CSV is the client-feedback artifact; it only exists if a step produces it.
+
+## Design sign-off (design-005)
+
+The sign-off step is the only step that may declare the design frozen. Its output (`docs/design-signoff.md`) follows this shape:
+
+- **Header**: epic, date, artifacts reviewed (each cited by path), and the verdict — `Signed off` / `Signed off with conditions` / `Rejected`. Verdicts of `Signed off` or `Signed off with conditions` are the only places the word "frozen" may appear, applied to the contract version cited in the header (e.g. "v1.3 is frozen"); a bare "the design is frozen" is not allowed.
+- **Checklist**: one block per artifact (contract, diagram, UX spec, Jira stories), each with pass state and the evidence pointer — artifact-critic verdicts and the deep-review ledger record for that artifact, not a fresh re-verification.
+- **Must-close items**: every open item that blocks build planning, cited by register ID (`RR-n` / `OQ-n` / `DT-n`) with its current status verified against the registers. Anything still open becomes an explicit sign-off condition.
+- **Findings**: cross-artifact consistency and auth-tracing findings ordered P0/P1/P2 with quoted evidence; each `DECISION NEEDED` finding gets a `D-n` proposal per the decision-register skill's ADR format.
+- **Freeze statement**: which contract version is frozen, what unfreezes it (the conditions list), and the single sentence of client-facing summary.
+
+Sign-off triggers the same propagation step as a contract revision (above): revision-log entry, freeze-gate summary rows for every ID opened/closed, decision-register CSV rows, and `milestones.yaml` blockers under the two-list invariant. Unfreezing (a later revision) is recorded the same way — never silently.
 
 ## Definition of done
 
