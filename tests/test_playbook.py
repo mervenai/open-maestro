@@ -41,6 +41,97 @@ def test_load_default_playbook(tmp_project: Path) -> None:
     assert "implementation" in playbook.decks
 
 
+def test_load_playbook_parses_inputs(tmp_project: Path) -> None:
+    """PromptTemplate.inputs round-trips from the bundled playbook."""
+    playbook = load_playbook(tmp_project)
+    template = next(
+        t
+        for deck in playbook.decks.values()
+        for t in deck.prompts
+        if t.id == "build-004"
+    )
+    assert [i["name"] for i in template.inputs] == ["dev_env"]
+    assert "question" in template.inputs[0]
+
+
+def test_apply_input_answers_substitutes(tmp_project: Path) -> None:
+    """Answers replace {name} tokens; unrelated tokens are untouched."""
+    from open_maestro.milestones.playbook import apply_input_answers
+
+    playbook = load_playbook(tmp_project)
+    template = next(
+        t
+        for deck in playbook.decks.values()
+        for t in deck.prompts
+        if t.id == "build-004"
+    )
+    text = template.render({"date": "2026-10-23", "epic_name": "Default Track"})
+    out = apply_input_answers(
+        text, template.inputs, {"dev_env": "https://preview.example.com"}
+    )
+    assert "{dev_env}" not in out
+    assert "https://preview.example.com" in out
+    assert "{epic_name}" not in out  # rendered before substitution
+
+
+def test_apply_input_answers_blank_answer_falls_back(tmp_project: Path) -> None:
+    """A blank answer with no default becomes a discover-from-repo marker."""
+    from open_maestro.milestones.playbook import apply_input_answers
+
+    playbook = load_playbook(tmp_project)
+    template = next(
+        t
+        for deck in playbook.decks.values()
+        for t in deck.prompts
+        if t.id == "build-004"
+    )
+    out = apply_input_answers(
+        template.prompt, template.inputs, {"dev_env": ""}
+    )
+    assert "{dev_env}" not in out
+    assert "discover it from the repo" in out
+
+
+async def test_ask_playbook_inputs_prompts_and_substitutes(
+    tmp_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_ask_playbook_inputs asks declared questions and substitutes answers."""
+    from open_maestro.interactive import _ask_playbook_inputs
+
+    monkeypatch.chdir(tmp_project)
+    answers = iter(["https://preview.example.com"])
+
+    async def fake_read_line(prompt: str = "> ") -> str:
+        return next(answers)
+
+    monkeypatch.setattr("open_maestro.interactive._read_line", fake_read_line)
+    out = await _ask_playbook_inputs(
+        "build-004", "Smoke-test the environment at {dev_env}."
+    )
+    assert "https://preview.example.com" in out
+    assert "{dev_env}" not in out
+
+
+async def test_ask_playbook_inputs_no_inputs_passthrough(
+    tmp_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Prompts without declared inputs pass through unchanged."""
+    from open_maestro.interactive import _ask_playbook_inputs
+
+    monkeypatch.chdir(tmp_project)
+    called = False
+
+    async def fake_read_line(prompt: str = "> ") -> str:
+        nonlocal called
+        called = True
+        return "oops"
+
+    monkeypatch.setattr("open_maestro.interactive._read_line", fake_read_line)
+    out = await _ask_playbook_inputs("intake-001", "Read the PRD.")
+    assert out == "Read the PRD."
+    assert not called
+
+
 def test_default_playbook_agent_hints_resolve_in_registry(tmp_project: Path) -> None:
     """Every agent_hint in the bundled playbook must name a registered agent.
 

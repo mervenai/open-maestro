@@ -44,10 +44,16 @@ class PromptTemplate:
     # whichever artifact-producing step ran, even when review/sign-off steps
     # were skipped).
     after: str | list[str] | None = None
+    # Follow-up questions the interactive REPL asks before delegating the
+    # prompt. Each entry is {"name": ..., "question": ...}; answers replace
+    # ``{name}`` tokens in the prompt text (see apply_input_answers).
+    inputs: list[dict[str, str]] | None = None
 
     def __post_init__(self) -> None:
         if self.tags is None:
             self.tags = []
+        if self.inputs is None:
+            self.inputs = []
 
     def render(self, context: dict[str, str]) -> str:
         """Resolve placeholders in the prompt text.
@@ -121,6 +127,31 @@ def _resolve_artifact_target(prompt: PromptTemplate, context: dict[str, str]) ->
     return ctx
 
 
+def apply_input_answers(
+    text: str,
+    inputs: list[dict[str, str]],
+    answers: dict[str, str],
+) -> str:
+    """Substitute user answers for declared ``inputs`` placeholders.
+
+    An unanswered input (no answer, no default) becomes a discover-from-repo
+    marker so no raw ``{name}`` token ever reaches the agent. Tokens without a
+    declared input are left untouched.
+    """
+    for item in inputs:
+        name = item.get("name", "")
+        if not name:
+            continue
+        token = f"{{{name}}}"
+        if token not in text:
+            continue
+        value = answers.get(name, "").strip() or item.get("default", "")
+        if not value:
+            value = "(not specified — discover it from the repo: CI config, deploy scripts, docs)"
+        text = text.replace(token, value)
+    return text
+
+
 def _slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9_-]+", "-", name.lower()).strip("-") or "epic"
 
@@ -155,6 +186,7 @@ def load_playbook(
                     prompt=item["prompt"],
                     agent_hint=item.get("agent_hint", ""),
                     tags=item.get("tags", []),
+                    inputs=item.get("inputs") or [],
                     artifact_target=item.get("artifact_target", ""),
                     example_from=item.get("example_from", ""),
                     default_track_only=item.get("default_track_only", False),

@@ -5,6 +5,14 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.2] - 2026-10-23
+
+### Added
+- **Playbook prompts can declare follow-up inputs** (`inputs:` list of `name`/`question` on a prompt template). The interactive REPL asks each question when the prompt is selected or dequeued from `/next`, substitutes the answers into `{name}` tokens in the prompt text (`apply_input_answers`), and echoes a `[Inputs captured]` line. A blank answer with no `default` becomes a discover-from-repo marker so no raw token reaches the agent. First user: **build-004** asks for the dev environment (local path or preview/deployment URL) up front instead of relying on repo discovery.
+
+### Changed
+- **build-004 "Smoke-test dev environments" now targets the ephemeral per-branch/preview environment by default** instead of assuming local full-stack startup. Local remains a fallback only when every dependency (database, auth broker, cross-service endpoints) is reproducible locally; otherwise services are smoked on the preview deployment with a one-line note on why local was skipped. The prompt also now requires env-var names only (never values) and per-service health checks proving dependency reachability.
+
 ## [3.0.1] - 2026-10-22
 
 ### Fixed

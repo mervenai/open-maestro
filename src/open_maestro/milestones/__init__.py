@@ -35,7 +35,11 @@ from open_maestro.milestones.dossier import (
     format_dossier_context,
 )
 from open_maestro.milestones.merven_sync import MervenSyncError, sync_from_merven
-from open_maestro.milestones.playbook import get_prompts_for_milestone, load_playbook
+from open_maestro.milestones.playbook import (
+    apply_input_answers,
+    get_prompts_for_milestone,
+    load_playbook,
+)
 from open_maestro.milestones.prompt_history import (
     PromptHistoryStore,
     PromptRunHistory,
@@ -84,6 +88,7 @@ __all__ = [
     "handle_prompts_command",
     "get_current_or_next_milestone_prompts",
     "get_prompts_for_milestone",
+    "apply_input_answers",
     "load_playbook",
     "format_prompt_context",
     "advance_milestone_on_prompt",

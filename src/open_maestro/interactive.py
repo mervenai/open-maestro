@@ -46,6 +46,7 @@ from open_maestro.milestones import (
     MilestoneStore,
     PromptHistoryStore,
     advance_milestone_on_prompt,
+    apply_input_answers,
     format_run_indicator,
     get_current_or_next_milestone_prompts,
     get_prompts_for_milestone,
@@ -1573,6 +1574,19 @@ async def _clone_org_repos(
     )
 
 
+def _playbook_template(prompt_id: str):
+    """Return the playbook's PromptTemplate for *prompt_id* (None if unknown)."""
+    try:
+        playbook = load_playbook(Path.cwd())
+    except Exception:
+        return None
+    for deck in playbook.decks.values():
+        for template in deck.prompts:
+            if template.id == prompt_id:
+                return template
+    return None
+
+
 def _playbook_agent_hint(prompt_id: str) -> str:
     """Return the playbook's agent_hint for *prompt_id* ('' if none/unknown).
 
@@ -1580,15 +1594,36 @@ def _playbook_agent_hint(prompt_id: str) -> str:
     avoids an LLM routing call that can drift to a plausible-sounding but
     nonexistent agent.
     """
-    try:
-        playbook = load_playbook(Path.cwd())
-    except Exception:
-        return ""
-    for deck in playbook.decks.values():
-        for template in deck.prompts:
-            if template.id == prompt_id:
-                return template.agent_hint
-    return ""
+    template = _playbook_template(prompt_id)
+    return template.agent_hint if template is not None else ""
+
+
+async def _ask_playbook_inputs(prompt_id: str, prompt_text: str) -> str:
+    """Ask the prompt's declared follow-up questions and substitute answers.
+
+    Templates may declare ``inputs`` (name + question). The REPL asks each
+    question before delegation and the answers replace the matching
+    ``{name}`` tokens in the prompt text. Prompts without inputs pass through
+    unchanged.
+    """
+    template = _playbook_template(prompt_id)
+    if template is None or not template.inputs:
+        return prompt_text
+    answers: dict[str, str] = {}
+    for item in template.inputs:
+        name = item.get("name", "")
+        if not name:
+            continue
+        try:
+            answer = await _read_line(f"? {item.get('question', name)}: ")
+        except (EOFError, KeyboardInterrupt):
+            answer = ""
+        answers[name] = answer.strip()
+    captured = ", ".join(
+        f"{k}={v}" if v else f"{k}=(blank)" for k, v in answers.items()
+    )
+    print(f"[Inputs captured] {captured}")
+    return apply_input_answers(prompt_text, template.inputs, answers)
 
 
 def _resolve_suggested_prompt(
@@ -2350,6 +2385,7 @@ async def run_interactive(args: Any) -> int:
         # hint naming an unknown agent falls through to routing as before.
         turn_agent_id = state.agent_id
         if pending_prompt_id is not None:
+            user_input = await _ask_playbook_inputs(pending_prompt_id, user_input)
             hint = _playbook_agent_hint(pending_prompt_id)
             if hint:
                 try:

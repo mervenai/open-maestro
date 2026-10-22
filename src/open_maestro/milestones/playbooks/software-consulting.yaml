@@ -290,9 +290,20 @@ milestone_prompts:
       agent_hint: local-ops
       tags: [plan, verify]
       artifact_target: docs/dev-smoke-test.md
+      inputs:
+        - name: dev_env
+          question: Dev environment to smoke-test — local path or preview/deployment URL (blank = discover from repo)
       prompt: |
-        Verify that local dev environments for all affected services run and can talk to each other.
-        Document startup steps, required env vars, and any failures or workarounds.
+        Smoke-test the dev environment for the {epic_name} epic and record the result.
+        Target environment: {dev_env}
+        If the target is local, verify each affected service boots and can talk to
+        its dependencies. If it is remote (shared dev or ephemeral per-branch/preview
+        deployment), verify via its URL and any available deploy/health endpoints —
+        remote environments carry the real database, auth broker, and service
+        networking, so prefer them when both are reachable.
+        For each affected service record: how the environment is reached, startup/deploy
+        steps, required env vars (names only, never values), a health check proving it
+        can talk to its dependencies, and any failures or workarounds.
 
   implementation:
     - id: impl-001
