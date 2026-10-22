@@ -5,6 +5,11 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **decision-register skill: cell-discipline rule with word budgets** — `Decision / answer` ≤50 words (verdict + ≤3 compact `file:line` citations), `Context / notes` ≤25 (provenance/state only). Over-budget analysis moves to **`docs/design-decisions.md`, the default detail home** — one dated section per register ID (OQ-n/RR-n/DT rows as well as D-n ADRs), with the CSV cell carrying only `full analysis: docs/design-decisions.md#<id>`; blueprint sections, change reports, and intake docs remain alternate homes under the same pointer convention. Embedded "RESIDUAL" follow-ups must split into their own OQ-n/RR-n rows. The validation snippet gained a length audit that flags over-budget cells; the checklist carries both budgets. First live run against PMS2DR's v1.0 register flagged 115/225 prose cells — confirming the drift this rule exists to stop.
+
 ## [3.0.2] - 2026-10-23
 
 ### Added
