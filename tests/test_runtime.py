@@ -565,10 +565,9 @@ class TestRuntimeAutoDetection:
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         # Only generic OpenAI credentials are configured. Clear provider-specific
         # endpoint keys so cheaper LOW-cost models reachable only via their own
-        # endpoint (deepseek-flash/glm-5.3-flash, selectable only when
-        # DEEPSEEK_API_KEY/ZAI_API_KEY is set) are not available and leak in from
-        # the developer's environment.
-        for var in ("ZAI_API_KEY", "DEEPSEEK_API_KEY", "DASHSCOPE_API_KEY"):
+        # endpoint (deepseek-flash, selectable only when DEEPSEEK_API_KEY is set)
+        # are not available and leak in from the developer's environment.
+        for var in ("DEEPSEEK_API_KEY", "DASHSCOPE_API_KEY"):
             monkeypatch.delenv(var, raising=False)
         # Avoid picking a real local Ollama model if one happens to be running.
         monkeypatch.setattr(availability, "_ollama_models", lambda: set())
@@ -690,8 +689,9 @@ class TestOpenAIFallbackAliases:
 
         resolver = ModelResolver()
         assert resolver.resolve("default", "openai-sdk") == "gpt-4o"
-        # glm-5-3-flash is the first openai-sdk entry with the "fast" alias.
-        assert resolver.resolve("fast", "openai-sdk") == "glm-5.3-flash"
+        # deepseek-flash is the first openai-sdk entry with the "fast" alias
+        # (inherited from retired GLM-5.3-Flash).
+        assert resolver.resolve("fast", "openai-sdk") == "deepseek-flash"
         assert resolver.resolve("reasoning", "openai-sdk") == "o3-mini"
 
 

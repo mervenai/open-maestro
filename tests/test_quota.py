@@ -91,13 +91,13 @@ class TestClassifyQuotaError:
 
 class TestCircuitBreaker:
     def test_mark_and_check(self):
-        assert quota_mod.is_exhausted("glm-5-3-flash") is False
-        quota_mod.mark_exhausted("glm-5-3-flash")
-        assert quota_mod.is_exhausted("glm-5-3-flash") is True
-        assert "glm-5-3-flash" in quota_mod.exhausted()
+        assert quota_mod.is_exhausted("deepseek-flash") is False
+        quota_mod.mark_exhausted("deepseek-flash")
+        assert quota_mod.is_exhausted("deepseek-flash") is True
+        assert "deepseek-flash" in quota_mod.exhausted()
 
     def test_clear(self):
-        quota_mod.mark_exhausted("glm-5-3-flash")
+        quota_mod.mark_exhausted("deepseek-flash")
         quota_mod.clear()
         assert quota_mod.exhausted() == set()
 
@@ -144,7 +144,12 @@ class TestRegistryExclusion:
     def _registry(self) -> CapabilityRegistry:
         return CapabilityRegistry(
             {
-                "glm-5-3-flash": _make_model("glm-5-3-flash", "glm-5.3-flash"),
+                # id vs runtime identifier differ (as with glm-5-3-flash /
+                # glm-5.3-flash before retirement) so identifier-based
+                # exclusion stays covered.
+                "openai-gpt4o-mini": _make_model(
+                    "openai-gpt4o-mini", "gpt-4o-mini"
+                ),
                 "kimi-k3": _make_model(
                     "kimi-k3",
                     "kimi-k3",
@@ -160,22 +165,22 @@ class TestRegistryExclusion:
         registry = self._registry()
         best = registry.match("openai-sdk", _light_profile())
         assert best is not None
-        assert best.id == "glm-5-3-flash"
+        assert best.id == "openai-gpt4o-mini"
 
     def test_exclude_by_model_id(self):
         registry = self._registry()
         best = registry.match(
-            "openai-sdk", _light_profile(), exclude={"glm-5-3-flash"}
+            "openai-sdk", _light_profile(), exclude={"openai-gpt4o-mini"}
         )
         assert best is not None
         assert best.id == "kimi-k3"
 
     def test_exclude_by_runtime_identifier(self):
-        # The circuit may hold the runtime identifier ("glm-5.3-flash")
+        # The circuit may hold the runtime identifier ("gpt-4o-mini")
         # rather than the canonical id; both spellings must exclude.
         registry = self._registry()
         best = registry.match(
-            "openai-sdk", _light_profile(), exclude={"glm-5.3-flash"}
+            "openai-sdk", _light_profile(), exclude={"gpt-4o-mini"}
         )
         assert best is not None
         assert best.id == "kimi-k3"
@@ -220,7 +225,7 @@ class _ScriptedRuntime(AgentRuntime):
         return await self.run(prompt, config)
 
 
-def _quota_error_result(model: str = "glm-5.3-flash") -> AgentResult:
+def _quota_error_result(model: str = "deepseek-flash") -> AgentResult:
     return AgentResult(
         text="OpenAI API error: insufficient balance",
         is_error=True,
@@ -269,10 +274,10 @@ class TestPMQuotaFallback:
         assert runtime.last_config is not None
         assert runtime.last_config.model == "kimi-k3"
         # The failed model is on the session circuit.
-        assert quota_mod.is_exhausted("glm-5.3-flash")
+        assert quota_mod.is_exhausted("deepseek-flash")
         # The warning event fired with fallback details.
         assert len(events) == 1
-        assert events[0]["model"] == "glm-5.3-flash"
+        assert events[0]["model"] == "deepseek-flash"
         assert events[0]["fallback"] == "kimi-k3"
 
     async def test_non_quota_errors_do_not_retry(self):
@@ -332,12 +337,12 @@ class TestFallbackOrderConfig:
     ):
         pm = _pm_with_runtime(_ScriptedRuntime([]))
         monkeypatch.setattr(
-            quota_mod, "load_fallback_order", lambda: ["glm-5-3-flash", "kimi-k3"]
+            quota_mod, "load_fallback_order", lambda: ["deepseek-flash", "kimi-k3"]
         )
         monkeypatch.setattr(pm_mod, "is_model_available", lambda runtime, model: True)
 
         picked = pm._select_fallback(
-            TaskProfile(), {"glm-5-3-flash"}, False, "glm-5-3-flash"
+            TaskProfile(), {"deepseek-flash"}, False, "deepseek-flash"
         )
 
         assert picked is not None
@@ -363,11 +368,11 @@ class TestFallbackOrderConfig:
         monkeypatch.setattr(pm_mod, "select_runtime_for_task", _auto)
 
         picked = pm._select_fallback(
-            TaskProfile(), {"glm-5-3-flash"}, False, "glm-5-3-flash"
+            TaskProfile(), {"deepseek-flash"}, False, "deepseek-flash"
         )
 
         assert picked == ("openai-sdk", "auto-model")
-        assert seen.get("exclude") == {"glm-5-3-flash"}
+        assert seen.get("exclude") == {"deepseek-flash"}
 
 
 class TestChainSwarmQuotaPropagation:
@@ -397,7 +402,7 @@ class TestChainSwarmQuotaPropagation:
                     step=step,
                     agent=self._agent(),
                     runtime_name="openai-sdk",
-                    model="glm-5.3-flash",
+                    model="deepseek-flash",
                     result=_quota_error_result(),
                 )
             ],
@@ -405,7 +410,7 @@ class TestChainSwarmQuotaPropagation:
 
         assert combined.is_error is True
         assert combined.metadata["quota_exhausted"] == "balance or quota exhausted"
-        assert combined.metadata["quota_exhausted_model"] == "glm-5.3-flash"
+        assert combined.metadata["quota_exhausted_model"] == "deepseek-flash"
 
     def test_swarm_synthesize_propagates_quota(self):
         from open_maestro.orchestrator.chain import HandoffStep, StepResult
@@ -425,7 +430,7 @@ class TestChainSwarmQuotaPropagation:
                     step=HandoffStep(agent_id="engineer", purpose="do it"),
                     agent=self._agent(),
                     runtime_name="openai-sdk",
-                    model="glm-5.3-flash",
+                    model="deepseek-flash",
                     result=_quota_error_result(),
                 )
             ],
@@ -433,7 +438,7 @@ class TestChainSwarmQuotaPropagation:
 
         assert combined.is_error is True
         assert combined.metadata["quota_exhausted"] == "balance or quota exhausted"
-        assert combined.metadata["quota_exhausted_model"] == "glm-5.3-flash"
+        assert combined.metadata["quota_exhausted_model"] == "deepseek-flash"
 
     async def test_run_agent_marks_circuit_and_excludes_on_next_selection(
         self, monkeypatch: pytest.MonkeyPatch
@@ -460,11 +465,11 @@ class TestChainSwarmQuotaPropagation:
         await executor._run_agent(
             self._agent(), "prompt", idx=1, profile=TaskProfile()
         )
-        assert quota_mod.is_exhausted("glm-5.3-flash")
+        assert quota_mod.is_exhausted("deepseek-flash")
 
         await executor._run_agent(
             self._agent(), "prompt", idx=2, profile=TaskProfile()
         )
         # The second selection excluded the model that just died.
-        assert seen_excludes[1] == {"glm-5.3-flash"}
+        assert seen_excludes[1] == {"deepseek-flash"}
         assert runtime.calls == 2

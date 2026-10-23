@@ -17,8 +17,9 @@ orchestrator-enforced, machine-checked quality gates:
   - **v1.2.4+ taxonomy:** projects contain **epics** (workstreams/features); each epic contains the 8 standard lifecycle **milestones**
 - **Adversarial review layer** (v2.0.0): seven fresh-agent audit personas, a
   sha-keyed gate ledger with carry/delta, a multi-model adversarial panel
-  (Kimi k3 / GLM / Claude / DeepSeek seats, anonymized cross-ranking, never
-  GLM chairman), and blueprint deep review with an admission bar. `maestro
+  (Kimi k3 / GPT-4o mini / Claude / DeepSeek seats, anonymized cross-ranking,
+  fast-tier seats never chair), and blueprint deep review with an admission
+  bar. `maestro
   --review <doc>` runs the gating personas; `/complete` refuses to close a
   milestone whose blueprint artifacts fail the gate
 - **Auto deep review** (v2.1.0): milestone-significant blueprint edits (new

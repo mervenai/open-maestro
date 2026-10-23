@@ -5,6 +5,11 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.4] - 2026-10-23
+
+### Changed
+- **GLM retired; DeepSeek V4.1 Flash takes its place everywhere.** The `glm-5-3-flash` registry entry (z.ai, ZAI_API_KEY) is removed and `deepseek-flash` inherits its `fast` alias — `resolve("fast", "openai-sdk")` now returns `deepseek-flash`. The adversarial panel's skeptic seat passes from GLM to GPT-4o mini (DeepSeek was already seated as causal-auditor), keeping four voices; fast-tier seats still never chair. GLM references across quota/availability/load-selection comments, DEPLOY.md, and 9 test files are re-pointed to DeepSeek or GPT-4o mini (739 tests green). Two historical notes intentionally keep the GLM mention as history (panel docstring, quota exclusion test).
+
 ## [3.0.3] - 2026-10-23
 
 ### Changed

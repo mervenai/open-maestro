@@ -152,23 +152,23 @@ def test_thresholds_user_editable(tmp_path: Path, monkeypatch) -> None:
     assert load.level == LoadLevel.MEDIUM  # would be LOW with defaults
 
 
-def test_glm_flash_excluded_under_high_load() -> None:
+def test_gpt4o_mini_excluded_under_high_load() -> None:
     from open_maestro.config.capabilities import _score_model
     from open_maestro.config.models import ModelResolver
 
     resolver = ModelResolver()
-    glm = next(
-        (m for m in resolver._registry.list_models() if m.id == "glm-5-3-flash"),
+    mini = next(
+        (m for m in resolver._registry.list_models() if m.id == "openai-gpt4o-mini"),
         None,
     )
-    assert glm is not None
+    assert mini is not None
 
-    # Light profile: glm-flash passes the capability bar.
-    assert _score_model(glm, _profile()) is not None
+    # Light profile: gpt-4o-mini passes the capability bar.
+    assert _score_model(mini, _profile()) is not None
 
     # High-load profile: the deep-reasoning hard bar excludes it outright.
     high = apply_source_load(
         _profile(), SourceLoad(artifacts=6, level=LoadLevel.HIGH)
     )
     assert high.reasoning_depth == ReasoningLevel.DEEP
-    assert _score_model(glm, high) is None
+    assert _score_model(mini, high) is None

@@ -205,9 +205,10 @@ class TestModelResolverCapabilities:
             cost_preference=CostLevel.MEDIUM,
         )
         resolved = resolver.select_for_task("openai-sdk", profile)
-        # GLM-5.3-Flash satisfies vision + high coding with lower cost and
-        # latency than gpt-4o, so it wins this profile.
-        assert resolved == "glm-5.3-flash"
+        # GPT-4o satisfies vision + high coding within the MEDIUM cost
+        # preference; gpt-4o-mini fails the coding-strength bar and
+        # deepseek-flash has no vision, so gpt-4o wins this profile.
+        assert resolved == "gpt-4o"
 
 
 class TestCapabilityRegistryMerge:
@@ -321,34 +322,34 @@ class TestModelEndpoint:
         model = ModelCapability.from_dict("demo", {"name": "Demo"})
         assert model.endpoint is None
 
-    def test_default_registry_glm_endpoint(self) -> None:
+    def test_default_registry_deepseek_endpoint(self) -> None:
         registry = CapabilityRegistry.load()
-        model = registry.models["glm-5-3-flash"]
-        assert model.provider == "zai"
-        assert model.identifier_for("openai-sdk") == "glm-5.3-flash"
+        model = registry.models["deepseek-flash"]
+        assert model.provider == "deepseek"
+        assert model.identifier_for("openai-sdk") == "deepseek-flash"
         assert model.endpoint is not None
-        assert model.endpoint.base_url == "https://api.z.ai/api/paas/v4"
-        assert model.endpoint.api_key_env == "ZAI_API_KEY"
+        assert model.endpoint.base_url == "https://api.deepseek.com/v1"
+        assert model.endpoint.api_key_env == "DEEPSEEK_API_KEY"
 
     def test_model_for_identifier(self) -> None:
         registry = CapabilityRegistry.load()
-        entry = registry.model_for_identifier("openai-sdk", "glm-5.3-flash")
+        entry = registry.model_for_identifier("openai-sdk", "deepseek-flash")
         assert entry is not None
-        assert entry.id == "glm-5-3-flash"
+        assert entry.id == "deepseek-flash"
         assert registry.model_for_identifier("openai-sdk", "no-such-model") is None
 
     def test_user_override_replaces_endpoint(self, tmp_path: Path) -> None:
         override = tmp_path / "capabilities.yaml"
         override.write_text(
             "models:\n"
-            "  glm-5-3-flash:\n"
+            "  deepseek-flash:\n"
             "    endpoint:\n"
             "      runtime: openai-sdk\n"
             "      base_url: https://openrouter.ai/api/v1\n"
             "      api_key_env: OPENROUTER_API_KEY\n"
         )
         registry = CapabilityRegistry.load(user_paths=[override])
-        model = registry.models["glm-5-3-flash"]
+        model = registry.models["deepseek-flash"]
         assert model.endpoint is not None
         assert model.endpoint.base_url == "https://openrouter.ai/api/v1"
         assert model.endpoint.api_key_env == "OPENROUTER_API_KEY"

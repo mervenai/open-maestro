@@ -369,19 +369,19 @@ class TestOpenAISDKToolLoop:
 
 
 class TestPerModelEndpointClient:
-    def test_glm_model_uses_registry_endpoint_client(self, monkeypatch):
-        monkeypatch.setenv("ZAI_API_KEY", "zai-test")
+    def test_deepseek_model_uses_registry_endpoint_client(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-test")
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
         runtime = OpenAISDKRuntime()
 
-        client = runtime._client_for_model("glm-5.3-flash")
-        assert str(client.base_url) == "https://api.z.ai/api/paas/v4/"
+        client = runtime._client_for_model("deepseek-flash")
+        assert str(client.base_url) == "https://api.deepseek.com/v1/"
         # Clients are cached per endpoint.
-        assert runtime._client_for_model("glm-5.3-flash") is client
+        assert runtime._client_for_model("deepseek-flash") is client
 
     def test_model_without_endpoint_uses_default_client(self, monkeypatch):
-        monkeypatch.setenv("ZAI_API_KEY", "zai-test")
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-test")
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
         runtime = OpenAISDKRuntime()
@@ -393,7 +393,7 @@ class TestPerModelEndpointClient:
     def test_model_without_endpoint_and_no_generic_creds_raises(self, monkeypatch):
         # A cloud model without its own endpoint must not silently fall back
         # to the autodetected local Ollama client (where its name 404s).
-        monkeypatch.setenv("ZAI_API_KEY", "zai-test")
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-test")
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
         runtime = OpenAISDKRuntime()
@@ -403,14 +403,14 @@ class TestPerModelEndpointClient:
 
 
 class TestCostEstimation:
-    def test_glm_price_parsed_from_default_capabilities(self):
+    def test_deepseek_price_parsed_from_default_capabilities(self):
         from open_maestro.config.capabilities import CapabilityRegistry
 
         registry = CapabilityRegistry.load()
-        entry = registry.model_for_identifier("openai-sdk", "glm-5.3-flash")
+        entry = registry.model_for_identifier("openai-sdk", "deepseek-flash")
         assert entry is not None
-        assert entry.capabilities.price_input_per_million == 0.15
-        assert entry.capabilities.price_output_per_million == 0.50
+        assert entry.capabilities.price_input_per_million == 0.30
+        assert entry.capabilities.price_output_per_million == 1.20
 
     def test_model_without_price_returns_none(self):
         from open_maestro.config.capabilities import CapabilityRegistry
@@ -426,8 +426,8 @@ class TestCostEstimation:
         runtime = OpenAISDKRuntime()
 
         class _Caps:
-            price_input_per_million = 0.15
-            price_output_per_million = 0.50
+            price_input_per_million = 0.30
+            price_output_per_million = 1.20
 
         class _Entry:
             capabilities = _Caps()
@@ -437,9 +437,9 @@ class TestCostEstimation:
                 return _Entry()
 
         runtime._registry = _Registry()
-        # 2M input tokens, 0.5M output tokens at $0.15/$0.50 per M.
-        cost = runtime._estimate_cost("glm-5.3-flash", 2_000_000, 500_000)
-        assert cost == round(2 * 0.15 + 0.5 * 0.50, 6)
+        # 2M input tokens, 0.5M output tokens at $0.30/$1.20 per M.
+        cost = runtime._estimate_cost("deepseek-flash", 2_000_000, 500_000)
+        assert cost == round(2 * 0.30 + 0.5 * 1.20, 6)
 
     def test_estimate_cost_returns_none_without_price(self):
         runtime = OpenAISDKRuntime()
@@ -461,4 +461,4 @@ class TestCostEstimation:
     def test_estimate_cost_returns_none_without_registry(self):
         runtime = OpenAISDKRuntime()
         runtime._registry = None
-        assert runtime._estimate_cost("glm-5.3-flash", 1000, 1000) is None
+        assert runtime._estimate_cost("deepseek-flash", 1000, 1000) is None

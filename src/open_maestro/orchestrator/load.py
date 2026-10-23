@@ -163,7 +163,7 @@ def apply_source_load(
 
     Never lowers any requirement.  MEDIUM load only raises the context
     estimate; HIGH load also requires deep reasoning, which is the hard bar
-    that excludes light-reasoning cheap models (e.g. GLM-5.3-Flash).
+    that excludes light-reasoning cheap models (e.g. GPT-4o mini).
     """
     if load.level == LoadLevel.LOW:
         return profile

@@ -258,7 +258,7 @@ def test_status_command_renders_sessions_and_handoff(tmp_path, monkeypatch) -> N
             session_id="s1",
             runtime_name="openai-sdk",
             agent_id="engineer",
-            model="glm-5.3-flash",
+            model="deepseek-flash",
             prompt_summary="summarize the current milestone status",
             created_at=datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc),
             updated_at=datetime(2026, 9, 20, 12, 30, tzinfo=timezone.utc),
@@ -277,7 +277,7 @@ def test_status_command_renders_sessions_and_handoff(tmp_path, monkeypatch) -> N
     assert out.startswith("# Where you left off")
     assert "No milestone plan found" in out
     assert "summarize the current milestone status" in out
-    assert "[engineer/glm-5.3-flash]" in out
+    assert "[engineer/deepseek-flash]" in out
     assert "Verify the PRD." in out
 
 

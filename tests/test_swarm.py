@@ -712,7 +712,7 @@ class TestSwarmResilience:
                     is_error=True,
                     metadata={
                         "quota_exhausted": "balance or quota exhausted",
-                        "quota_exhausted_model": "glm-5.3-flash",
+                        "quota_exhausted_model": "deepseek-flash",
                     },
                 )
             return AgentResult(text="worker ok")
@@ -734,7 +734,7 @@ class TestSwarmResilience:
         failed = result.metadata["swarm_failed_workers"]
         assert [w["agent_id"] for w in failed] == ["engineer"]
         # Quota signal must propagate even for partial failure.
-        assert result.metadata["quota_exhausted_model"] == "glm-5.3-flash"
+        assert result.metadata["quota_exhausted_model"] == "deepseek-flash"
 
     def test_consistency_failure_flagged(self, swarm_registry):
         """MSTRO-125: a 'not consistent' consistency pass is surfaced."""

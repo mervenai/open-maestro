@@ -1,7 +1,7 @@
 """Quota exhaustion detection and a session-scoped circuit breaker.
 
-When a model credential runs out of balance (e.g. GLM-5.3-Flash credits on
-z.ai), the provider returns an auth/quota error.  Without handling, Maestro
+When a model credential runs out of balance (e.g. DeepSeek-Flash credits
+on platform.deepseek.com), the provider returns an auth/quota error.  Without handling, Maestro
 surfaces a dead-end error turn and picks the same dead model again on the
 next turn.  This module classifies such errors at the runtime layer and
 remembers the exhausted model for the lifetime of the process, so selection

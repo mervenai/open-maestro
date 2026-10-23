@@ -87,20 +87,20 @@ def test_is_model_available_cli_runtime_unavailable(registry: CapabilityRegistry
         assert availability.is_model_available("claude-cli", model) is False
 
 
-def test_glm_model_available_only_with_zai_key(registry: CapabilityRegistry) -> None:
-    model = registry.models["glm-5-3-flash"]
+def test_deepseek_model_available_only_with_deepseek_key(registry: CapabilityRegistry) -> None:
+    model = registry.models["deepseek-flash"]
     assert model.endpoint is not None
     with mock.patch.object(availability, "_sdk_package_available", return_value=True):
-        with mock.patch.dict("os.environ", {"ZAI_API_KEY": "zai-test"}, clear=True):
+        with mock.patch.dict("os.environ", {"DEEPSEEK_API_KEY": "ds-test"}, clear=True):
             assert availability.is_model_available("openai-sdk", model) is True
         with mock.patch.dict("os.environ", {}, clear=True):
             assert availability.is_model_available("openai-sdk", model) is False
 
 
-def test_openai_sdk_runtime_available_with_only_zai_key(registry: CapabilityRegistry) -> None:
+def test_openai_sdk_runtime_available_with_only_deepseek_key(registry: CapabilityRegistry) -> None:
     with mock.patch.object(availability, "_sdk_package_available", return_value=True):
         with mock.patch.dict(
-            "os.environ", {"ZAI_API_KEY": "zai-test"}, clear=True
+            "os.environ", {"DEEPSEEK_API_KEY": "ds-test"}, clear=True
         ):
             assert availability.is_runtime_available("openai-sdk") is True
         with mock.patch.dict("os.environ", {}, clear=True):
@@ -125,9 +125,10 @@ def test_alibaba_model_available_only_with_dashscope_key(registry) -> None:
 def test_endpointless_cloud_model_not_available_with_other_provider_key(
     registry,
 ) -> None:
-    """Regression: ZAI_API_KEY (for GLM) must not make qwen/gpt models look
-    selectable — without generic OpenAI credentials their requests would
-    fall back to the autodetected local endpoint and 404 there."""
+    """Regression: DEEPSEEK_API_KEY (for DeepSeek) must not make qwen/gpt
+    models look selectable — without generic OpenAI credentials their
+    requests would fall back to the autodetected local endpoint and 404
+    there."""
     for model_id in ("openai-gpt4o-mini", "openai-gpt4o"):
         model = registry.models[model_id]
         assert model.endpoint is None
@@ -135,7 +136,7 @@ def test_endpointless_cloud_model_not_available_with_other_provider_key(
             availability, "_sdk_package_available", return_value=True
         ):
             with mock.patch.dict(
-                "os.environ", {"ZAI_API_KEY": "zai-test"}, clear=True
+                "os.environ", {"DEEPSEEK_API_KEY": "ds-test"}, clear=True
             ):
                 assert (
                     availability.is_model_available("openai-sdk", model) is False

@@ -201,9 +201,9 @@ def is_model_available(runtime_name: str, model: ModelCapability) -> bool:
             return bool(os.environ.get(model.endpoint.api_key_env))
         # No model-specific endpoint: this model is only reachable through the
         # generic OpenAI credentials. Another provider's endpoint key (e.g.
-        # ZAI_API_KEY for GLM) must not make it look selectable — without
-        # generic credentials the request would fall back to the autodetected
-        # local endpoint and fail with a cryptic 404 there.
+        # DEEPSEEK_API_KEY for DeepSeek) must not make it look selectable —
+        # without generic credentials the request would fall back to the
+        # autodetected local endpoint and fail with a cryptic 404 there.
         base_url = os.environ.get("OPENAI_BASE_URL", "")
         return bool(os.environ.get("OPENAI_API_KEY")) or bool(
             base_url and "localhost" not in base_url and "127.0.0.1" not in base_url

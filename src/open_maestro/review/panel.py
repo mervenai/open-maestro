@@ -3,11 +3,11 @@
 History: the original constraint (MSTRO-115) was "no new vendor signups" —
 the panel launched with one worker per model family already configured
 (Kimi k3 via kimi-cli, GLM-5.3-Flash via openai-sdk, Claude via claude-cli).
-MSTRO-133 lifted that for DeepSeek V4.1 Flash: cheapest reasoning-capable
-seat available, genuinely different training corpus, and it replaces the
-dead GLM balance as the panel's cheap voice. GLM stays seated (still
-configured; when its balance dies it records as unreachable — silence is
-never consent).
+MSTRO-133 added DeepSeek V4.1 Flash: cheapest reasoning-capable seat
+available, genuinely different training corpus. GLM was retired (vendor
+dropped); its skeptic seat passed to GPT-4o mini, already configured via
+openai-sdk. A seat whose credential dies records as unreachable — silence
+is never consent.
 
 Discipline (from skill-share brainstorm.md + karpathy/llm-council):
 
@@ -23,9 +23,8 @@ Discipline (from skill-share brainstorm.md + karpathy/llm-council):
   counted as approval; "I cannot verify this" is a high-quality answer,
   ranked above the agreeable one; a voice that errors or stays silent is
   recorded as unreachable — silence is never consent.
-* **The chairman is never GLM.**  GLM-5.3-Flash is a fast but unstable
-  voice (measured: invented facts, rankings that move between runs); it
-  speaks, it does not chair.
+* **The chairman comes from CHAIRMAN_PREFERENCE only.** Fast-tier voices
+  speak, they do not chair.
 """
 
 from __future__ import annotations
@@ -57,12 +56,13 @@ class PanelSeat:
 
 PANEL_SEATS: tuple[PanelSeat, ...] = (
     PanelSeat("kimi-k3", "falsifier", "kimi-cli", "kimi-code/k3"),
-    PanelSeat("glm-flash", "skeptic", "openai-sdk", "glm-5.3-flash"),
+    PanelSeat("gpt-4o-mini", "skeptic", "openai-sdk", "gpt-4o-mini"),
     PanelSeat("claude-sonnet", "steel-man", "claude-cli", "claude-sonnet-4-6"),
     PanelSeat("deepseek-flash", "causal-auditor", "openai-sdk", "deepseek-flash"),
 )
 
-# Chairman preference order; GLM is deliberately absent.
+# Chairman preference order; fast-tier seats (gpt-4o-mini, deepseek-flash)
+# are deliberately absent — they speak, they do not chair.
 CHAIRMAN_PREFERENCE: tuple[str, ...] = ("claude-sonnet", "kimi-k3")
 
 # Chairman synthesis retries (MSTRO-122): transient runtime failures
@@ -188,8 +188,8 @@ def choose_chairman(seats: tuple[PanelSeat, ...]) -> PanelSeat | None:
         for seat in seats:
             if seat.id == preferred:
                 return seat
-    # GLM-only degenerate case: still chair with the first seat rather
-    # than fail, but note it.
+    # Degenerate case (no preferred seat present): still chair with the
+    # first seat rather than fail, but note it.
     return seats[0] if seats else None
 
 
@@ -333,10 +333,11 @@ async def run_panel(
     )
     try:
         # Chairman candidates: preferred chairman first, then remaining
-        # preference-ordered seats. GLM is never a candidate (see module
-        # docstring). Each candidate gets CHAIRMAN_ATTEMPTS tries before
-        # falling back — a single transient runtime failure must not end
-        # the panel without an aggregate verdict.
+        # preference-ordered seats. Non-preferred seats are never
+        # candidates (see module docstring). Each candidate gets
+        # CHAIRMAN_ATTEMPTS tries before falling back — a single transient
+        # runtime failure must not end the panel without an aggregate
+        # verdict.
         candidates = [chairman] + [
             seat
             for preferred in CHAIRMAN_PREFERENCE

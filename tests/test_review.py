@@ -245,7 +245,7 @@ class TestPanel:
         seats = panel.PANEL_SEATS
         opinions = {
             "kimi-k3": "Falsifier finding one.\nFINDINGS n=2",
-            "glm-flash": "Skeptic finding.\nFINDINGS n=1",
+            "gpt-4o-mini": "Skeptic finding.\nFINDINGS n=1",
             "claude-sonnet": "Steel-man case.\nFINDINGS n=1",
             "deepseek-flash": "Causal audit finding.\nFINDINGS n=1",
         }
@@ -258,7 +258,7 @@ class TestPanel:
         factory = lambda rt_type: rt("seat")  # replaced below
         made: list[rt] = []
         counter = {"i": 0}
-        ids = ["kimi-k3", "glm-flash", "claude-sonnet", "deepseek-flash"]
+        ids = ["kimi-k3", "gpt-4o-mini", "claude-sonnet", "deepseek-flash"]
 
         def factory(rt_type):
             inst = rt(ids[counter["i"] % len(ids)])
@@ -313,11 +313,12 @@ class TestPanel:
         assert result.unreachable, "errored seat must be recorded as unreachable"
         assert any("silence is not consent" in n for n in result.notes)
 
-    async def test_chairman_never_glm(self):
-        glm_only = tuple(s for s in panel.PANEL_SEATS if s.id == "glm-flash")
-        assert panel.choose_chairman(glm_only) is glm_only[0]  # degenerate fallback
+    async def test_chairman_comes_from_preference_only(self):
+        fast_only = tuple(s for s in panel.PANEL_SEATS if s.id == "gpt-4o-mini")
+        assert panel.choose_chairman(fast_only) is fast_only[0]  # degenerate fallback
         normal = panel.choose_chairman(panel.PANEL_SEATS)
-        assert normal is not None and normal.id != "glm-flash"
+        assert normal is not None and normal.id == "claude-sonnet"
+        assert normal.id not in ("gpt-4o-mini", "deepseek-flash")
 
     def test_seat_integrity(self):
         """MSTRO-133: unique seat ids, defined lenses, and the uncalibrated
@@ -373,7 +374,8 @@ class TestPanel:
         )
 
     async def test_chairman_falls_back_to_next_preference(self, monkeypatch):
-        """MSTRO-122: preferred chairman dying for good falls back (never to GLM)."""
+        """MSTRO-122: preferred chairman dying for good falls back (never to a
+        non-preferred seat)."""
 
         monkeypatch.setattr(panel, "CHAIRMAN_RETRY_BACKOFF_S", 0.0)
 
@@ -1019,7 +1021,7 @@ class TestPersonaSeating:
         runtimes = [FakeRuntime(t) for t in self.REPORTS]
         calls = self._patch_router(
             monkeypatch,
-            [("kimi-cli", "kimi-code/k3"), ("openai-sdk", "glm-5-3-flash"),
+            [("kimi-cli", "kimi-code/k3"), ("openai-sdk", "deepseek-flash"),
              ("claude-cli", "claude-sonnet")],
         )
         self._patch_create(monkeypatch, runtimes)
@@ -1029,7 +1031,7 @@ class TestPersonaSeating:
         assert review.passed
         assert [r.configs[0].model for r in runtimes] == [
             "kimi-code/k3",
-            "glm-5-3-flash",
+            "deepseek-flash",
             "claude-sonnet",
         ]
         # The second seat excludes the model the first persona used.
@@ -1051,7 +1053,7 @@ class TestPersonaSeating:
         doc.write_text("# doc\n")
         dead = QuotaRuntime()
         seats = [
-            ("openai-sdk", "glm-5-3-flash"),   # persona 1, attempt 1 (dies)
+            ("openai-sdk", "deepseek-flash"),   # persona 1, attempt 1 (dies)
             ("kimi-cli", "kimi-code/k3"),      # persona 1, re-seat
             ("kimi-cli", "kimi-code/k3"),      # persona 2
             ("kimi-cli", "kimi-code/k3"),      # persona 3
@@ -1065,7 +1067,7 @@ class TestPersonaSeating:
         assert review.passed
         assert created[:2] == ["openai-sdk", "kimi-cli"]
         assert runtimes[1].configs[0].model == "kimi-code/k3"
-        assert quota_mod.is_exhausted("glm-5-3-flash")
+        assert quota_mod.is_exhausted("deepseek-flash")
         quota_mod.clear()
 
     async def test_falls_back_to_light_when_no_deep_model(
@@ -1076,7 +1078,7 @@ class TestPersonaSeating:
         runtime = FakeRuntime(self.REPORTS[1])
         calls = self._patch_router(
             monkeypatch,
-            [RuntimeError("no deep model"), ("openai-sdk", "glm-5-3-flash")],
+            [RuntimeError("no deep model"), ("openai-sdk", "deepseek-flash")],
         )
         self._patch_create(monkeypatch, [runtime])
 
