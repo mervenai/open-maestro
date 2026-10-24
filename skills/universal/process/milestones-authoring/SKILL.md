@@ -42,6 +42,8 @@ Blockers exist in TWO places: each milestone's own `blockers:` list and the flat
 
 ## Adding a custom milestone
 
+**First decide: blocker or milestone?** A sign-off gate, conformance check, or external dependency with no artifacts, no completion weight, and no build work of its own is a **blocker on the milestone it gates** — not a new milestone. It would render as an extra phase after the standard 8 and dilute the phase list (the dashboard has no separate gate section). Reserve custom milestones for trackable work with real deliverables and exit criteria.
+
 Maestro never invents these — you are defining a project-specific gate or track. Follow every rule or the dashboard misleads:
 
 - **Stable kebab-case id**, never renumbered later (other artifacts cite `epic_id/milestone_id`).
@@ -101,6 +103,7 @@ The published dashboard (merven.ai link) changes only when republished (`--publi
 
 - [ ] No live `maestro --interactive` session in the project (or explicitly cleared to proceed)
 - [ ] Backup taken
+- [ ] Gate-with-no-work items (sign-off / conformance / dependency) recorded as blockers on the milestone they gate, not as custom milestones
 - [ ] Custom milestones: stable id, next free `order`, `weight: 0`, provenance in `notes`
 - [ ] Resolved blockers carry `resolved_at` + dated resolution; none in `summary.active_blockers`
 - [ ] Active flattened blockers == `summary.active_blockers`; blocker locations correct; orders unique

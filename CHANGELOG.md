@@ -5,6 +5,14 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.5] - 2026-10-24
+
+### Changed
+- **milestones-authoring skill: gate-vs-milestone steering rule.** A sign-off gate, conformance check, or external dependency with no artifacts, no completion weight, and no build work of its own is recorded as a **blocker on the milestone it gates**, not as a custom milestone — a weight-0 milestone renders as an extra phase after the standard 8 and dilutes the phase list (the dashboard has no separate gate section). Custom milestones are reserved for trackable work with real deliverables and exit criteria. New decision rule at the top of "Adding a custom milestone" plus a checklist item. Found via ActivityMonitor, where three v4.1 gates (design-freeze, dna-contract conformance, TZ-ENTITY-1 dependency) had been appended as weight-0 milestones 9–11 on the default epic.
+
+### Fixed
+- **Dashboard exports never silently omit the Active Blockers section.** Both the HTML and Markdown exporters used to drop the entire section (heading included) when `active_blockers` was empty — a dashboard that omits blockers reads as "not tracked", the one thing it must never say. Empty lists now render an explicit "No active blockers recorded." zero-state (new `.blocker-none` style, `--muted-fg` token). Found via IntelInvoiceCoding's dashboard, which showed no blocker section at all despite the project tracking them; note the published-JSON path always carried the list, so this only affected HTML/Markdown exports. New regression test `test_zero_blockers_render_explicit_section`.
+
 ## [3.0.4] - 2026-10-23
 
 ### Changed

@@ -155,12 +155,15 @@ def export_dashboard_markdown_from_data(data: dict[str, Any]) -> str:
         lines.append(f"### {epic['name']} — {status_label} ({epic['completion']}%)")
         lines.append("")
 
+    lines.append("## Active Blockers")
+    lines.append("")
     if data.get("active_blockers"):
-        lines.append("## Active Blockers")
-        lines.append("")
         for b in data["active_blockers"]:
             lines.append(f"- **{b['epic']} / {b['milestone']}:** {b['description']}")
-        lines.append("")
+    else:
+        # Never omit the section: an absent heading reads as "not tracked".
+        lines.append("No active blockers recorded.")
+    lines.append("")
 
     if data.get("recent_deliverables"):
         lines.append("## Recent Deliverables")
@@ -386,6 +389,11 @@ def export_dashboard_html_from_data(data: dict[str, Any]) -> str:
     .blocker strong {{
       color: #f87171;
     }}
+    .blocker-none {{
+      color: var(--muted-fg);
+      font-style: italic;
+      padding: 0.5rem 0.25rem;
+    }}
     .deliverable {{
       background: var(--accent);
       border: 1px solid var(--border);
@@ -588,8 +596,13 @@ def _milestone_bar(m: dict[str, Any]) -> str:
 
 
 def _blockers_section(blockers: list[dict[str, Any]]) -> str:
+    # Always render the section: a dashboard that silently omits blockers
+    # reads as "not tracked", which is the one thing it must never say.
     if not blockers:
-        return ""
+        return """<section class="section">
+  <h2>Active Blockers</h2>
+  <div class='blocker-none'>No active blockers recorded.</div>
+</section>"""
     items = "\n".join(
         f"<div class='blocker'><strong>{_escape(b['epic'])} / {_escape(b['milestone'] or '')}</strong> — {_escape(b['description'])}</div>"
         for b in blockers

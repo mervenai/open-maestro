@@ -412,6 +412,19 @@ class TestDashboard:
         assert "Intake & Discovery" in md
         assert "Epics" in md
 
+    def test_zero_blockers_render_explicit_section(self, tmp_path):
+        """Transparency: an empty blocker list must render an explicit
+        zero-state, never silently omit the section (a missing heading
+        reads as 'not tracked')."""
+        store = MilestoneStore(tmp_path)
+        plan = store.load()
+        html = export_dashboard_html(plan)
+        assert "<h2>Active Blockers</h2>" in html
+        assert "No active blockers recorded." in html
+        md = export_dashboard_markdown(plan)
+        assert "## Active Blockers" in md
+        assert "No active blockers recorded." in md
+
     def test_html_export_uses_merven_colors(self, tmp_path):
         store = MilestoneStore(tmp_path)
         plan = store.load()
