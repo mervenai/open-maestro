@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import logging
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
+
+import pytest
 
 from open_maestro.agents.definition import AgentDefinition
 from open_maestro.agents.registry import AgentRegistry
@@ -880,6 +881,15 @@ class ArtifactCriticFakeRuntime(FakeRuntime):
 
 
 class TestArtifactCriticGate:
+    @pytest.fixture(autouse=True)
+    def _isolate_cwd(self, monkeypatch, tmp_path: Path) -> None:
+        """Why: the gate writes docs/reviews/ under Path.cwd(); without this every
+        run leaked an artifact-critic-<stamp>.md into the repo.
+        What: chdir into tmp_path for each test in this class.
+        Test: full suite run leaves `git status --short` clean.
+        """
+        monkeypatch.chdir(tmp_path)
+
     def _patch_detection(self, monkeypatch, artifacts):
         monkeypatch.setenv("MAESTRO_CRITIC_GATE", "on")
         monkeypatch.setattr(critic_mod, "snapshot_head", lambda p: "abc123")

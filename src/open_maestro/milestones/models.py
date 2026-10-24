@@ -59,6 +59,7 @@ class Milestone(BaseModel):
     weight: int = Field(..., ge=0, le=100)
     client_visible: bool = True
     status: MilestoneStatus = MilestoneStatus.NOT_STARTED
+    progress: int | None = Field(None, ge=0, le=100)
     started_at: date | None = None
     completed_at: date | None = None
     artifacts: list[Artifact] = Field(default_factory=list)
@@ -73,12 +74,36 @@ class Milestone(BaseModel):
         return self
 
     def completion(self) -> int:
-        """Return 0-100 completion for this milestone based on status."""
+        """Return 0-100 completion for this milestone.
+
+        Why: a flat 50% for any started milestone overstates early work.
+        What: completed=100, not_started/skipped=0; otherwise the explicit
+        ``progress`` when set, else 50 (back-compat for plans without it).
+        Test: in_progress with progress=12 -> 12; without progress -> 50;
+        completed with a stale progress=30 -> 100.
+        """
         if self.status == MilestoneStatus.COMPLETED:
             return 100
         if self.status in (MilestoneStatus.NOT_STARTED, MilestoneStatus.SKIPPED):
             return 0
-        return 50
+        return 50 if self.progress is None else self.progress
+
+
+def weighted_completion(milestones: list[Milestone]) -> int:
+    """Return the weight-weighted 0-100 completion of non-skipped milestones.
+
+    Why: epic and overall percentages must use one rule, or they disagree.
+    What: floor(sum(weight * completion) / sum(weight)) over non-skipped
+    milestones, flooring once; plain mean when all weights are 0; 0 if none.
+    Test: weights 10 (completed) + 30 (not started) -> 25; all skipped -> 0.
+    """
+    active = [m for m in milestones if m.status != MilestoneStatus.SKIPPED]
+    if not active:
+        return 0
+    total_weight = sum(m.weight for m in active)
+    if total_weight == 0:
+        return sum(m.completion() for m in active) // len(active)
+    return sum(m.weight * m.completion() for m in active) // total_weight
 
 
 class Epic(BaseModel):
@@ -100,11 +125,8 @@ class Epic(BaseModel):
         return milestones
 
     def completion(self) -> int:
-        """Return 0-100 completion averaged across milestones."""
-        active = [m for m in self.milestones if m.status != MilestoneStatus.SKIPPED]
-        if not active:
-            return 0
-        return sum(m.completion() for m in active) // len(active)
+        """Return 0-100 completion weighted by milestone weight (skipped excluded)."""
+        return weighted_completion(self.milestones)
 
     def get_milestone(self, milestone_id: str) -> Milestone | None:
         """Return a milestone by ID within this epic."""
@@ -159,12 +181,7 @@ class MilestonePlan(BaseModel):
             for epic_id, m in all_milestones
             if m.status != MilestoneStatus.SKIPPED
         ]
-        total_weight = sum(m.weight for _, m in active)
-        earned = sum(
-            m.weight * m.completion() // 100
-            for _, m in active
-        )
-        overall = int(earned / max(total_weight, 1) * 100)
+        overall = weighted_completion([m for _, m in active])
 
         current = [
             f"{epic_id}/{m.id}"
@@ -194,7 +211,10 @@ class MilestonePlan(BaseModel):
             current_milestone_ids=current,
             next_milestone_ids=next_ids,
             active_blockers=active_blockers,
-            client_ready=overall >= 0,
+            # Ready only when every non-skipped milestone is completed; derived
+            # from statuses, not the floored percentage, and false when empty.
+            client_ready=bool(active)
+            and all(m.status == MilestoneStatus.COMPLETED for _, m in active),
         )
 
     def get_epic(self, epic_id: str) -> Epic | None:

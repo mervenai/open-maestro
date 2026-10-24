@@ -5,6 +5,19 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - 2026-10-24
+
+### Added
+- **Optional `progress` field on milestones (0–100).** An `in_progress` or `blocked` milestone now reports its real progress instead of a flat 50%; `completed` is always 100 and `not_started`/`skipped` always 0 regardless of a stale `progress` value. Plans without the field keep the old 50% behaviour, so existing `milestones.yaml` files load unchanged.
+
+### Changed
+- **Epic completion is weighted by milestone weight**, using the same `weighted_completion()` rule as the overall rollup (non-skipped milestones, floored once; plain mean when every weight is 0). Previously the epic % was an unweighted mean, so two completed low-weight planning slots could read 100%, and epic and overall percentages disagreed. Overall completion also no longer floors per milestone before summing.
+- **`client_ready` is honest.** It is true only when every non-skipped milestone is completed (and false for an empty plan); it was previously `overall >= 0`, i.e. always true.
+
+### Fixed
+- **Epic status reads "Complete" when all non-skipped milestones are completed**, so an epic can no longer show "Planning" next to a 100% bar.
+- **Test suite no longer leaks review files into the repo.** `TestArtifactCriticGate` ran the artifact-critic gate from the real working directory, so every run wrote a `docs/reviews/artifact-critic-<timestamp>.md` fixture file into the checkout (several were committed with earlier releases). The class now runs each test in `tmp_path`; a full run leaves `git status` clean.
+
 ## [3.0.5] - 2026-10-24
 
 ### Changed
