@@ -891,7 +891,7 @@ class TestParseEpics:
         assert epic.completion() == 0
         by_id = {m.id: m for m in epic.milestones}
         by_id["design-blueprint"].status = MilestoneStatus.COMPLETED
-        assert epic.completion() == 100 // 6  # 1 of 6 active milestones
+        assert epic.completion() == 15 * 100 // 80  # design (w15) of 80 active weight
 
     def test_work_epic_skipped_phase_reactivates(self):
         # The /track reactivation path: flipping a skipped phase to
@@ -899,4 +899,4 @@ class TestParseEpics:
         epic = _build_work_epic(2, "ce", "1", "Data Foundation")
         planning = next(m for m in epic.milestones if m.id == "execution-planning")
         planning.status = MilestoneStatus.IN_PROGRESS
-        assert epic.completion() == 50 // 7  # 1 in-progress of 7 active
+        assert epic.completion() == 10 * 50 // 90  # planning (w10) at 50 of 90 active weight

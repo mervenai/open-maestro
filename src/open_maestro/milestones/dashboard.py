@@ -459,7 +459,12 @@ def _derive_epic_status(epic: Epic) -> str:
       - Milestones 1-4 (Intake through Build Planning) = Planning
       - Milestones 5-7 (Implementation through Demo & Delivery) = In Progress
       - Milestone 8 (Retrospective & Findings) = Complete
+    An epic whose non-skipped milestones are all completed is Complete, so the
+    label never reads Planning next to a 100% bar.
     """
+    considered = [m for m in epic.milestones if m.status != MilestoneStatus.SKIPPED]
+    if considered and all(m.status == MilestoneStatus.COMPLETED for m in considered):
+        return "completed"
     active = [
         m for m in epic.milestones
         if m.status not in (MilestoneStatus.NOT_STARTED, MilestoneStatus.SKIPPED)
