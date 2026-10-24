@@ -5,6 +5,16 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0] - 2026-10-25
+
+### Added
+- **maestro MCP server — out-of-band milestone progress, enforced in code.** Any MCP-capable agent (Claude Code, Kimi, …) can now record project progress through tools instead of hand-editing `milestones.yaml`: `get_state` (compact summary — per-epic statuses, current/next milestones, active blockers; cheaper than reading the yaml), `list_blockers(active_only)`, `add_blocker`, `resolve_blocker` (dated one-line resolution appended; drops off the dashboard), and `set_milestone_status` (optional dated notes line). Serve with `maestro --mcp-serve` (stdio).
+- **Mutations are drift-guarded and memory-paired.** Every write goes through the new `open_maestro.milestones.mutations` service: the plan file's mtime is snapshotted at load and a save is refused if the file changed on disk in between (another maestro session or editor wrote first — re-open and retry), and the summary recompute (two-list invariant) runs on every save. Each successful mutation also stores a dated memory via the kuzu-memory CLI, so state and narrative advance together; memory failures never fail the mutation.
+- **`maestro --mcp-init`** merges the maestro stdio server into a project's `.mcp.json` (the project-level config read by both Claude Code and Kimi) without touching existing server entries; prints the folder-trust reminder for Kimi.
+
+### Changed
+- **milestones-authoring skill: state-delta contract + MCP-first authoring.** New "State deltas, not narrative" section — the yaml is the decision layer (dated one-line deltas with doc pointers; narrative lives in the register CSV, `design-decisions.md`, or memory); the dashboard renders only that layer. Gate-vs-milestone rule (3.0.5) extended by a checklist item: mutations go through the MCP tools when wired, hand edits are the fallback.
+
 ## [3.1.0] - 2026-10-24
 
 ### Added

@@ -11,7 +11,7 @@ tags:
 
 # Milestone Plan Authoring (milestones.yaml)
 
-Author or edit a maestro project's `.open-maestro/milestones.yaml` safely, from any tool — a maestro session, Claude Code, or by hand. This file is the project's single source of truth for the dashboard; there is no maestro command that adds custom milestones, so disciplined direct editing is the sanctioned path, not a workaround.
+Author or edit a maestro project's `.open-maestro/milestones.yaml` safely, from any tool — a maestro session, Claude Code, Kimi, or by hand. This file is the project's single source of truth for the dashboard. There are two sanctioned write paths: the **maestro MCP tools** (`get_state`, `add_blocker`, `resolve_blocker`, `set_milestone_status`, … — wired per-project via `maestro --mcp-init`), which enforce the invariants in code, and **disciplined direct editing** per this skill, which remains the fallback for humans and agents without MCP.
 
 Use when the user says any of: "add a milestone", "add a gate", "update milestones.yaml", "sync blockers", "mark a blocker resolved", "the dashboard is stale", or before ANY edit to `.open-maestro/milestones.yaml`.
 
@@ -39,6 +39,15 @@ Blockers exist in TWO places: each milestone's own `blockers:` list and the flat
 - **Resolving a blocker:** set `resolved_at` to the resolution date and append the resolution (dated, with its decision source) to the description or milestone notes. The entry STAYS in the per-milestone list as history — it must NOT appear in `summary.active_blockers`. Never delete it.
 - **Adding a blocker:** append to the owning milestone's `blockers:` AND mirror it into `summary.active_blockers` — one without the other is drift either way.
 - **Removing from summary** requires the same dated decision source as setting `resolved_at`.
+
+## State deltas, not narrative
+
+The yaml is the *decision layer*, not the *discussion layer*. It gets dated one-line state deltas with a doc pointer; its growth stays linear in decisions, and the dashboard renders only this layer (blocker descriptions + milestone statuses — notes and exit criteria never reach the dashboard). Everything longer has a sanctioned home:
+
+- **Blocker resolution:** `resolved_at` + one appended line ("Resolved 2026-10-24: <verdict + decision source>"). Full analysis → `docs/design-decisions.md` per-ID section (decision-register skill's detail home); the cell carries `full analysis: docs/design-decisions.md#<id>`.
+- **New blocker:** one-line description (what blocks, owner of the next step, doc pointer). Batch related items into ONE umbrella blocker (list the member ids) rather than N rows — the dashboard shows every active blocker until resolved.
+- **Status flips:** one dated `notes` line. No narrative paragraphs.
+- **Narrative, evidence, client-answer text:** the decision-register CSV, `design-decisions.md`, or kuzu memory. Link, never copy, into the yaml.
 
 ## Adding a custom milestone
 
@@ -103,6 +112,8 @@ The published dashboard (merven.ai link) changes only when republished (`--publi
 
 - [ ] No live `maestro --interactive` session in the project (or explicitly cleared to proceed)
 - [ ] Backup taken
+- [ ] Only dated one-line state deltas written; narrative linked (register / design-decisions.md / memory), not copied
+- [ ] MCP path preferred when wired: mutations go through the maestro tools, not hand edits
 - [ ] Gate-with-no-work items (sign-off / conformance / dependency) recorded as blockers on the milestone they gate, not as custom milestones
 - [ ] Custom milestones: stable id, next free `order`, `weight: 0`, provenance in `notes`
 - [ ] Resolved blockers carry `resolved_at` + dated resolution; none in `summary.active_blockers`

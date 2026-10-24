@@ -293,6 +293,20 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Project token for --publish-dashboard (or set MAESTRO_DASHBOARD_PROJECT_TOKEN)",
     )
     parser.add_argument(
+        "--mcp-serve",
+        action="store_true",
+        help=(
+            "Serve the maestro MCP server over stdio (blocks). Agents edit "
+            "milestone state through tools; see --mcp-init to wire it into a "
+            "project's .mcp.json"
+        ),
+    )
+    parser.add_argument(
+        "--mcp-init",
+        action="store_true",
+        help="Add the maestro stdio server to the project's .mcp.json and exit",
+    )
+    parser.add_argument(
         "--add-agent-source",
         metavar="URL",
         help="Add a Git source for agents and exit",
@@ -587,6 +601,32 @@ async def main_async() -> int:
         except MervenSyncError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 1
+        return 0
+
+    if args.mcp_serve:
+        # Inside main_async's event loop: use the async entry point (the
+        # blocking mcp.run() cannot nest inside a running loop).
+        from open_maestro.mcp.server import mcp as _mcp_server
+
+        await _mcp_server.run_stdio_async()
+        return 0
+
+    if args.mcp_init:
+        from open_maestro.mcp.init_config import write_mcp_config
+
+        try:
+            report = write_mcp_config(Path.cwd())
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        state = "created" if report["created"] else "updated"
+        print(f"{state} {report['path']}")
+        print(f"servers: {', '.join(report['servers'])}")
+        print(
+            "Note: agents must trust this project folder for project-level MCP "
+            "servers to load (in Kimi: run `kimi` here and choose 'Trust this "
+            "folder')."
+        )
         return 0
 
     if args.publish_dashboard:
