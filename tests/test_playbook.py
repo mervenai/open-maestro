@@ -465,3 +465,37 @@ def test_default_playbook_tags_analysis_prompts_read_only(tmp_project: Path) -> 
     assert by_id["intake-004"].read_only is False
     assert by_id["impl-001"].read_only is False
     assert by_id["qa-001"].read_only is False
+
+
+def test_bundle_execution_prompts(tmp_project: Path) -> None:
+    """The bundle-execution feature ships in the bundled playbook.
+
+    Why: bundling is a first-class process (skill + prompts); these assertions
+    keep the prompts from silently disappearing from the playbook.
+    """
+    playbook = load_playbook(tmp_project)
+
+    build = playbook.decks["build-planning"]
+    b5 = next(t for t in build.prompts if t.id == "build-005")
+    assert "bundle-execution skill" in b5.prompt
+    assert b5.artifact_target == "docs/build-plan-bundles-{date}.md"
+
+    impl = playbook.decks["implementation"]
+    ordered = [t.id for t in sorted(impl.prompts, key=lambda p: p.order)]
+    assert ordered[0] == "impl-000"  # kickoff runs before any build prompt
+    kickoff = next(t for t in impl.prompts if t.id == "impl-000")
+    assert "decision-register row" in kickoff.prompt
+    assert "entry gate" in kickoff.prompt
+
+    impl4 = next(t for t in impl.prompts if t.id == "impl-004")
+    assert "bundle-execution skill" in impl4.prompt
+
+
+def test_bundle_execution_skill_exists() -> None:
+    """The bundle-execution skill ships in the bundled skills."""
+    skills_dir = Path(__file__).parent.parent / "skills" / "universal" / "process"
+    skill = skills_dir / "bundle-execution" / "SKILL.md"
+    assert skill.exists()
+    text = skill.read_text()
+    assert "1,500 production lines" in text
+    assert "questions before coding" in text

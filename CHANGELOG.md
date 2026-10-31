@@ -5,6 +5,12 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.0] - 2026-10-31
+
+### Added
+- **Bundle execution — batching implementation is now a first-class maestro process**, generalized from a measured 38-story project (~43 agent rounds instead of 150–230 per-story; ~10 env checks instead of ~38). New `bundle-execution` skill (`skills/universal/process/`) carries the contract: group stories by repo/stack/touch-point into bundles of ≤ ~1,500 production lines (two parallel reviewers only above that or on mixed stacks), the 5-step lean process (kickoff questions before coding → one stacked-branch build pass → one independent review → one fix-and-merge pass with re-review only on BLOCK/HIGH → one env checklist per bundle), the bundle-plan doc template, and the rescoping rule (revise the bundle doc — rework bundles, primes, pauses — never rewrite story rows). Bundle state stays out of `milestones.yaml`; the yaml remains the slow decision layer.
+- **Playbook prompts:** `build-005` "Batch the build plan into bundles" (authors `docs/build-plan-bundles-{date}.md` per the skill) and `impl-000` "Bundle kickoff — questions before coding" (sorts before every build prompt; records foreseeable product questions as decision-register rows and verifies the bundle's entry gate before code). `impl-004` now works bundle-by-bundle when a bundle plan exists.
+
 ## [3.2.0] - 2026-10-25
 
 ### Added
