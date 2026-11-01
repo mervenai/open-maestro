@@ -5,32 +5,41 @@ workstations for a team of engineers.
 
 ## Current state (read this first)
 
-Open Maestro **2.2.0** is a multi-agent orchestration layer with
-orchestrator-enforced, machine-checked quality gates:
+Open Maestro is a multi-agent orchestration layer with
+orchestrator-enforced, machine-checked quality gates. For the current
+release, see [CHANGELOG.md](../CHANGELOG.md).
 
 - Vendor-agnostic agent routing across Claude, Kimi, and OpenAI-compatible
-  models (including DeepSeek); model arbitration picks the cheapest capable
-  backend per task, with `OPEN_MAESTRO_RUNTIME`/`--runtime`/`/model` pins
-  honored end-to-end
+  models; model arbitration picks the cheapest capable backend per task,
+  with `OPEN_MAESTRO_RUNTIME`/`--runtime`/`/model` pins honored end-to-end.
+  The model registry rotates with vendor releases (see CHANGELOG):
+  `claude-opus-5-5` is the current claude-cli reasoning flagship and
+  DeepSeek Flash holds the `fast` alias.
 - Research, planning, documentation, and code-change workflows
 - Milestone-guided project lifecycle with client-facing dashboard
-  - **v1.2.4+ taxonomy:** projects contain **epics** (workstreams/features); each epic contains the 8 standard lifecycle **milestones**
-- **Adversarial review layer** (v2.0.0): seven fresh-agent audit personas, a
+  - projects contain **epics** (workstreams/features); each epic contains
+    the 8 standard lifecycle **milestones**
+  - milestone prompts defer format and ID discipline to versioned skills
+    (decision-register, epic-breakdown, blueprint-contract,
+    milestones-authoring, …), so methodology fixes ship with the package
+  - bundle execution: implementation work is batched into bundles (grouped
+    by repo/stack/touch-point, ~5-step lean process), cutting per-story
+    agent rounds by ~75% on measured projects
+- **Adversarial review layer**: seven fresh-agent audit personas, a
   sha-keyed gate ledger with carry/delta, a multi-model adversarial panel
   (Kimi k3 / GPT-4o mini / Claude / DeepSeek seats, anonymized cross-ranking,
   fast-tier seats never chair), and blueprint deep review with an admission
-  bar. `maestro
-  --review <doc>` runs the gating personas; `/complete` refuses to close a
-  milestone whose blueprint artifacts fail the gate
-- **Auto deep review** (v2.1.0): milestone-significant blueprint edits (new
+  bar. `maestro --review <doc>` runs the gating personas; `/complete`
+  refuses to close a milestone whose blueprint artifacts fail the gate
+- **Auto deep review**: milestone-significant blueprint edits (new
   artifact, ≥150 changed lines, or version-marker change) trigger the
   3-persona audit automatically after the turn; full persona reports persist
-  to `.open-maestro/reviews/` (v2.1.11)
+  to `.open-maestro/reviews/`
 - Persistent project memory via kuzu-memory
 - Semantic code search via mcp-vector-search — exposed to agent seats
-  through MCP (v2.2.0), with a vetted read-only tool set for restricted
-  auditor agents; per-project indexing, gitignored code snapshots
-  re-includable via `force_include_paths`
+  through MCP, with a vetted read-only tool set for restricted auditor
+  agents; per-project indexing, gitignored code snapshots re-includable via
+  `force_include_paths`
 - Live activity monitor (`--monitor`) showing current agent, runtime, model, and state
 - Per-turn quality gates: automatic code-critic review pass after
   implementation turns, an artifact-critic citation tripwire for design
@@ -530,7 +539,23 @@ then re-run `mcp-vector-search index` in the project.
 
 ### MCP servers
 
-Create `~/.open-maestro/mcp.json` or `./.open-maestro/mcp.json`:
+**Maestro's milestone tools (v3.2.0+):** run once per project —
+
+```bash
+maestro --mcp-init
+```
+
+This merges a `maestro` stdio server entry (`maestro --mcp-serve`) into the
+project's `.mcp.json`, which both Claude Code and Kimi read at the project
+root. Agent seats can then read and edit milestone state through tools
+(project state, blocker list/add/resolve, milestone status) instead of
+hand-editing `milestones.yaml`. The merge preserves servers already
+configured, so a file that already contains `mcp-vector-search` keeps it.
+Note that each interface still requires trusting the project folder before
+project-level servers load (in Kimi: run `kimi` there and choose "Trust this
+folder").
+
+Other servers are configured manually — create `~/.open-maestro/mcp.json` or `./.open-maestro/mcp.json`:
 
 ```json
 {
