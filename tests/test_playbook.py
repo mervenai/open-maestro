@@ -235,6 +235,7 @@ def test_default_track_only_prompts_kept_for_default_track(tmp_project: Path) ->
         "design-003",
         "design-004",
         "design-005",
+        "design-006",
     ]
 
 

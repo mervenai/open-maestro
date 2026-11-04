@@ -5,6 +5,18 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.0] - 2026-11-04
+
+### Added
+- **Client design approval — the readable face of the freeze, now a first-class maestro artifact** (`docs/client-design-approval.md`, maestro `design-006`, gated after design-005). Generalized from the approval brief Merven assembled by hand for ActivityMonitor's blueprint v4.6 — the document an M3 architect actually reads and signs instead of the artifact stack (blueprint, sign-off evidence, feedback CSV). New `client-design-approval` skill (`skills/universal/process/`) carries the shape distilled from that real brief:
+  - **The ask, instrumented** — named approver (role + person), `DRAFT, NOT APPROVED` banner, stated scope boundaries (approving the design does not approve deployment sequencing or merge PRs; companion review docs named), and a **signature block as the instrument**: Approved / Approved with conditions / Changes required, Name / Role / Date.
+  - **Explicit-call list** — every decision that changed since the client last agreed (e.g. a poll interval moved 1 min → 5 min without telling M3) or was made without client input, narrated before the decision table. A client discovering a silent change in a table row instead of this list is a trust defect.
+  - **Three-value decision status vocabulary with provenance** — `Agreed with M3` / `Merven proposal, needs M3 sign-off` / `Open, depends on M3 or DnA`, with date and how agreed in-cell; asks are self-locating.
+  - **Sections**: inline architecture diagram with legend; major-decisions table (citing blueprint `§`); repos-impacted table with a **Current state** column (live draft-PR/env-check status) plus the "nothing is merged; this review can change the draft PRs" timing line; security-and-data prose where each open concern ends in an explicit confirm-ask; conditions of approval (sourced from the design-signoff conditions table); glossary + sources footer.
+  - **Synthesized, never authoritative** — everything cites `§`/register IDs, no new decisions; version mirrors the contract under approval (may postdate the freeze via `CR-nn`) and regenerates on every contract bump; the returned record becomes register row `APPROVAL-1` and per-decision answers flow into the existing rows' Client answer columns per the decision-register skill.
+- **Playbook prompt `design-006`** "Assemble the client design approval" (order 6, `default_track_only`, artifact_target `docs/client-design-approval.md`); the design-milestone default-track prompt list test updated to match.
+- **Cross-references**: blueprint-contract's design-signoff section feeds its conditions table to the approval doc (only sign-off says "frozen", the approval doc says "approved"); decision-register gains the `APPROVAL-1` record rule and signed-copy archive convention.
+
 ## [3.4.0] - 2026-11-04
 
 ### Added

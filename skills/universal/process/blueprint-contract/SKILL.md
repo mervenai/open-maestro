@@ -77,6 +77,8 @@ The sign-off step is the only step that may declare the design frozen. Its outpu
 
 Sign-off triggers the same propagation step as a contract revision (above): revision-log entry, freeze-gate summary rows for every ID opened/closed, decision-register CSV rows, and `milestones.yaml` blockers under the two-list invariant. Unfreezing (a later revision) is recorded the same way — never silently.
 
+After sign-off, the design-006 step assembles `docs/client-design-approval.md` (per the client-design-approval skill) — the readable brief the client approver actually reads. This sign-off's conditions table is its conditions-of-approval source, and the returned record becomes register row `APPROVAL-1`. Only this sign-off may say "frozen"; the approval doc says "approved".
+
 ## Definition of done
 
 - [ ] Header block complete; labeled draft; no "frozen"/"ready for sign-off" language

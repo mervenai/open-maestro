@@ -83,6 +83,7 @@ Rules:
 - **Open rows:** `Question` is plain client-facing language; `Context` states what is *already decided* so they only answer what's asked; `Options` + `Merven recommendation` where a real choice exists; last two columns blank for the client.
 - **Closed rows:** `Decision / answer` records the actual outcome (quote stakeholder answers verbatim when available); `Date decided` + `Decided by` are mandatory.
 - **Cell discipline — registers are read in a spreadsheet, not an editor.** One slot, one job; the long-form analysis lives in a linked artifact and the cell points to it.
+- **Approval record.** When a client design-approval brief (`docs/client-design-approval.md`, maestro design-006) comes back signed, record the verdict as one row `APPROVAL-1`: `Approved` → status Ratified; `Approved with conditions` → Accepted with the conditions quoted in Context; `Changes required` → the required changes become or refresh open rows (they are the asks, not the verdict row). Per-decision client answers flow into the existing rows' `Client answer` columns — never new rows. Archive the signed copy next to the doc and cite it in the row.
 
   | Column | Carries | Reject |
   |---|---|---|

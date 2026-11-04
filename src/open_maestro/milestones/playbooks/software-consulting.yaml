@@ -241,6 +241,31 @@ milestone_prompts:
         (design-decisions.md revision log + freeze-gate rows, decision-register
         CSV, milestones.yaml blockers via the two-list invariant).
 
+    - id: design-006
+      title: Assemble the client design approval
+      order: 6
+      agent_hint: research
+      tags: [decide, client]
+      artifact_target: docs/client-design-approval.md
+      default_track_only: true
+      prompt: |
+        Assemble the client-facing design approval for the {epic_name} epic,
+        following the client-design-approval skill.
+        Synthesize the frozen artifact stack — the data/API contract, the
+        decision register with client answers, the design sign-off and its
+        conditions, the diagram, and the current repo/PR state — into the
+        readable approval brief the client approver needs instead of the
+        artifacts themselves. Name the approver (role and, when known,
+        person), state the ask and where the decision is recorded, list every
+        decision that changed since the client last agreed or was made without
+        client input, and give every major decision a status from the skill's
+        three-value vocabulary. The signature block is the instrument:
+        Approved / Approved with conditions / Changes required, with
+        Name / Role / Date.
+        When the record comes back, register it as APPROVAL-1 per the
+        decision-register skill and flow per-decision answers into the existing
+        rows' Client answer columns.
+
   build-planning:
     - id: build-001
       title: Create phased implementation plan
