@@ -5,6 +5,14 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.1] - 2026-11-05
+
+### Changed
+- **client-design-approval skill rewritten to the revised reference shape** — the ActivityMonitor v4.6 brief's 2026-11-05 revision is now the normative template. The document is exactly **six numbered sections plus a reference appendix, in order**: §1 the ask (scope boundaries, specific review tasks, explicit-call list), §2 architecture in brief (legend + rendered-diagram pointer + behavioral sentences), §3 major decisions (three-column table), §4 repos impacted (Current state + nothing-merged line), §5 security and data (never omitted; every open concern ends in an explicit confirm-ask), §6 approval (boundary statement, conditions, four-field signature table with the three decision checkboxes and the scope line), then glossary + dated sources. The previous nine-section skeleton, an inference from the PDF export, is superseded.
+- **Normativity rules added** after the first ad-hoc production (IntelInvoiceCoding's brief, built outside design-006, drifted into ratification-memo genre): sections are never omitted — `N/A — <reason>` in place; the three-value status vocabulary is mandatory per row with RAG permitted only as an optional rollup, never a replacement; a **common drifts to reject** block names the failure modes (memo genre, traffic-light substitution, tables-for-architecture, register dump as narrative, omitting §5, approval language beyond the scope line).
+- **Two patterns from the revision encoded**: freshness attributions — any external input received after the doc's base date carries an inline `(Name (party), YYYY-MM-DD)` at the point it appears — and open items naming their register ID in the status cell (`Open, depends on M3 (DNA-D12)`).
+- **design-006 prompt now enumerates the six sections by name** so the shape survives routing to any agent, not just the hinted one.
+
 ## [3.5.0] - 2026-11-04
 
 ### Added

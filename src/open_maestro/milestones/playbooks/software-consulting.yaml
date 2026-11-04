@@ -250,21 +250,32 @@ milestone_prompts:
       default_track_only: true
       prompt: |
         Assemble the client-facing design approval for the {epic_name} epic,
-        following the client-design-approval skill.
-        Synthesize the frozen artifact stack — the data/API contract, the
-        decision register with client answers, the design sign-off and its
-        conditions, the diagram, and the current repo/PR state — into the
-        readable approval brief the client approver needs instead of the
-        artifacts themselves. Name the approver (role and, when known,
-        person), state the ask and where the decision is recorded, list every
-        decision that changed since the client last agreed or was made without
-        client input, and give every major decision a status from the skill's
-        three-value vocabulary. The signature block is the instrument:
-        Approved / Approved with conditions / Changes required, with
-        Name / Role / Date.
+        following the client-design-approval skill. The document is exactly
+        six numbered sections plus a reference appendix, in this order:
+        1 The ask (review target, decision location, scope boundaries,
+        specific review tasks, then the explicit-call list of decisions
+        changed since the client agreed or made without client input),
+        2 Architecture in brief (legend, rendered-diagram pointer,
+        behavioral sentences),
+        3 Major decisions (three-column table; every row one of Agreed
+        with M3 / Merven proposal, needs M3 sign-off / Open, depends on
+        M3 or DnA, open items naming their register ID; blueprint § refs),
+        4 Repos impacted (with Current state and the nothing-merged line),
+        5 Security and data (never omitted; every open concern ends in an
+        explicit confirm-ask),
+        6 Approval (boundary statement, conditions of approval, signature
+        table with Name/Role/Date, the three decision checkboxes, and the
+        scope line), then Reference (glossary + dated sources).
+        Synthesize from the frozen artifact stack — the data/API contract,
+        the decision register with client answers, the design sign-off and
+        its conditions, the diagram, and the current repo/PR state — into
+        the readable approval brief the client approver needs instead of
+        the artifacts themselves. Name the approver (role and, when known,
+        person); carry DRAFT banner, § notation, and dated inline
+        attributions for any input received after the base date.
         When the record comes back, register it as APPROVAL-1 per the
-        decision-register skill and flow per-decision answers into the existing
-        rows' Client answer columns.
+        decision-register skill and flow per-decision answers into the
+        existing rows' Client answer columns.
 
   build-planning:
     - id: build-001
