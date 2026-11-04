@@ -122,6 +122,45 @@ security vulnerability, data loss risk, or silent failure mode. PM halts the pip
 immediately, presents the critic finding table verbatim to the user, and awaits explicit
 direction. PM MUST NOT auto-retry the engineer without user input.
 
+## Visual & Design-System Review (screen-touching diffs)
+
+These checks activate automatically when a diff adds or changes a screen. They exist
+because code-level gates cannot see visual drift: unit tests render no layout, production
+builds compile undefined CSS silently, and a review scoped to correctness passes a screen
+that looks nothing like the approved prototype. Post-mortem evidence: a dashboard shipped
+with 12 visual regions wrong after 76 tests, two reviews, and a fix pass — none of which
+looked at a rendered screen.
+
+**Screenshot gate.** UI work is not verifiable without renders. If the engineer did not
+attach side-by-side screenshots (build vs prototype at the fixed reference viewport, in
+populated/empty/error states), record a HIGH finding: "visual claims unverifiable —
+capture via `web-qa` before delivery" and treat every visual claim as unverified.
+
+**Visual fidelity, per region.** Inputs: the prototype, the build screenshots, and the
+template spec. Do not read the code first. For each region (header, tabs, tiles, charts,
+lists, filter bar, grid, empty, loading and error states, spacing and page background)
+record **PASS / FAIL / ACCEPTED-DEVIATION** with the ruling id. Any FAIL without a ruling
+blocks. Also open the screen at 400 px and in keyboard-only navigation.
+
+**Design system.**
+
+1. Only CSS custom properties that are defined in the codebase are allowed. Run
+   `grep -rhoE 'var\(--[a-z0-9-]+' <module> | sort -u` and check each name against its
+   definition. Any undefined name fails — including names with a fallback value.
+2. Where the platform has a shared component, it must be used (tabs, stat tiles, selects,
+   date ranges, toggles, filter bars, grid overlays). Replacing a shared component with
+   native elements is a finding unless a CR says otherwise; cite the precedent
+   `file:line` for each shared component used.
+3. If a shared component genuinely can't meet the requirement, fix it at the call site or
+   raise a CR — do not silently substitute.
+
+**Backend-availability flags.** Every UI call to an endpoint owned by an unbuilt or
+undeployed bundle must sit behind a named availability flag defaulting to **false**,
+gating both the call and the entry points (links, tabs, widgets). The reviewer lists
+every endpoint the screen calls, with its owning bundle and deployed status; a flag that
+gates entry points but not the call (or vice versa) is a HIGH finding, as is turning a
+flag on without the backend bundle's env-check cited.
+
 ## 80% Confidence Filter
 
 A clean review is a valid review. Do not manufacture findings.

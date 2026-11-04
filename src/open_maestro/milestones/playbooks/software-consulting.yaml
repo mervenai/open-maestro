@@ -329,7 +329,8 @@ milestone_prompts:
         Kick off the next bundle for the {epic_name} epic before any code is written.
         Read the bundle plan (docs/build-plan-bundles-*.md) and list every product/client question the bundle's scope makes foreseeable: contract ambiguities the bundle must resolve, permission and scope questions, UX copy decisions, audit/observability expectations, anything a reviewer could raise as a product question.
         Record each question as a decision-register row (status Open, owner named) per the decision-register skill; these must exist before the build pass starts, because questions found after code has shipped each cost a fix round.
-        Also confirm the bundle's entry gate from the plan is met (answers received, dependencies merged); if it is not, stop and report instead of building.
+        For bundles that add or change screens, also list every difference between the template-spec text and the prototype for those screens (counts, components, layout, states); each difference needs a named ruling or becomes a CR before coding starts — the prototype is the visual authority, and unlisted divergences become silently wrong screens.
+        Also confirm the bundle's entry gate from the plan is met (answers received, dependencies merged, visual-target block and mock coverage for UI bundles); if it is not, stop and report instead of building.
 
     - id: impl-001
       title: Scaffold key endpoints and services
