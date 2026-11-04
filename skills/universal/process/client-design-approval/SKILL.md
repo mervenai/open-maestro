@@ -15,6 +15,10 @@ Create `docs/client-design-approval.md` (maestro `design-006`): the readable, st
 
 Use when a task says "design-006", "assemble the client approval", "client design approval", or "approval brief".
 
+## Preconditions (hard gate)
+
+This brief is assembled **only after a passing design sign-off** (`docs/design-signoff.md`, maestro design-005, verdict `Signed off` or `Signed off with conditions`). If the sign-off is absent, `Rejected`, or still open: **stop and report** — do not assemble a brief, do not ask the client to ratify. A terminal-clean decision register is necessary but never sufficient evidence of readiness: freeze gating lives in artifact-level state (milestone exit criteria, cross-artifact consistency, auth claims traced to code) that only the sign-off verifies. Deriving "all resolved" from a CSV sweep, or asking the client to approve while internal findings are open, is the exact failure this gate exists to prevent.
+
 ## Framing rules
 
 - **Synthesized, never authoritative.** Every row and claim traces to a source artifact — blueprint `§` references and register IDs — and introduces no new decision. If synthesis surfaces a discrepancy, fix the source artifact, not this doc.
@@ -74,6 +78,7 @@ Any external input incorporated after the doc's base date carries an inline attr
 - **Tables for the architecture** — a component/owner/status table instead of the diagram + legend + behavioral sentences.
 - **Register dump as narrative** — long decision lists without rationale or status; the table is the summary, the register is the detail.
 - **Omitting §5** because "security is fine" — fine is a sentence in §5, not an absent section.
+- **Register-clean claims** — "all decisions resolved / freeze gate green" derived from a terminal-clean CSV sweep. Readiness is the sign-off's verdict, not the register's Status column.
 - **Approval language beyond the scope line** — the only approval sentence is the Scope cell; everything else is conditions.
 
 ## When the record comes back

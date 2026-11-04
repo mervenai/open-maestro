@@ -5,6 +5,15 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.2] - 2026-11-05
+
+### Fixed
+- **The design-006 hard gate — client approval briefs can no longer precede (or contradict) the design sign-off.** Found live in IntelInvoiceCoding: the client approval brief was assembled *before* the sign-off ran and asked the client VP to ratify a design that the later sign-off returned **"Changes Required — Design freeze BLOCKED"** against (7 P0 findings, including an unmet milestone exit criterion the brief never mentioned). The brief's "all resolved" claim came from a terminal-clean register sweep — the exact blind spot the sign-off exists to cover. Four closes:
+  - **`client-design-approval` skill gains a "Preconditions (hard gate)" section** — the brief is assembled only after a passing sign-off (`Signed off` / `Signed off with conditions`); otherwise stop and report, exactly like impl-000's entry gate. A terminal-clean CSV is necessary but never sufficient readiness evidence; asking the client to approve while internal findings are open is the named failure.
+  - **design-006 prompt states the hard gate first** (read design-signoff.md; wrong/absent verdict → STOP and report) and the playbook row gains `after: design-005` so `/next` won't offer it before sign-off has run.
+  - **blueprint-contract's design-signoff section fixes the verdict boundary** — the sign-off verdict is exactly `Signed off` / `Signed off with conditions` / `Rejected`; a blocked sign-off is `Rejected` with the required changes as its conditions list and a re-run trigger, and the client-approval vocabulary (`Approved` / `Approved with conditions` / `Changes required`) belongs to the design-006 signature block, never to this verdict.
+  - **Drifts-to-reject gains "register-clean claims"** — "freeze gate green" derived from a CSV sweep is a named rejection.
+
 ## [3.5.1] - 2026-11-05
 
 ### Changed

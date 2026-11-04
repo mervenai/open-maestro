@@ -248,9 +248,14 @@ milestone_prompts:
       tags: [decide, client]
       artifact_target: docs/client-design-approval.md
       default_track_only: true
+      after: design-005
       prompt: |
         Assemble the client-facing design approval for the {epic_name} epic,
-        following the client-design-approval skill. The document is exactly
+        following the client-design-approval skill. HARD GATE first: read
+        docs/design-signoff.md — if its verdict is not "Signed off" or
+        "Signed off with conditions" (absent, Rejected, or still open), STOP
+        and report instead of assembling the brief; a terminal-clean decision
+        register is not readiness evidence. The document is exactly
         six numbered sections plus a reference appendix, in this order:
         1 The ask (review target, decision location, scope boundaries,
         specific review tasks, then the explicit-call list of decisions
