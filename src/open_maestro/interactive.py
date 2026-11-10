@@ -17,6 +17,8 @@ import shutil
 import subprocess
 import sys
 import time
+
+import yaml
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -1598,27 +1600,84 @@ def _playbook_agent_hint(prompt_id: str) -> str:
     return template.agent_hint if template is not None else ""
 
 
+def _prompt_inputs_file() -> Path:
+    """Per-project store for playbook input answers (defaults on later runs)."""
+    return Path.cwd() / ".open-maestro" / "prompt_inputs.yaml"
+
+
+def _load_prompt_inputs() -> dict[str, dict[str, str]]:
+    store_path = _prompt_inputs_file()
+    if not store_path.exists():
+        return {}
+    try:
+        data = yaml.safe_load(store_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+    return {
+        str(prompt_id): {str(name): str(val) for name, val in answers.items()}
+        for prompt_id, answers in data.items()
+        if isinstance(answers, dict)
+    }
+
+
+def _save_prompt_inputs(store: dict[str, dict[str, str]]) -> None:
+    store_path = _prompt_inputs_file()
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+    store_path.write_text(
+        yaml.safe_dump(store, sort_keys=True), encoding="utf-8"
+    )
+
+
 async def _ask_playbook_inputs(prompt_id: str, prompt_text: str) -> str:
     """Ask the prompt's declared follow-up questions and substitute answers.
 
     Templates may declare ``inputs`` (name + question). The REPL asks each
     question before delegation and the answers replace the matching
-    ``{name}`` tokens in the prompt text. Prompts without inputs pass through
-    unchanged.
+    ``{name}`` tokens in the prompt text. Non-blank answers are remembered
+    per project (``.open-maestro/prompt_inputs.yaml``) and offered as
+    bracketed defaults on later runs — a repeated prompt must not park
+    silently on a question whose answer is already known. A stored default
+    can be replaced by typing a new value; clearing it means editing the
+    yaml. Prompts without inputs pass through unchanged.
     """
     template = _playbook_template(prompt_id)
     if template is None or not template.inputs:
         return prompt_text
+    store = _load_prompt_inputs()
+    stored = store.get(prompt_id, {})
+    if stored:
+        print(
+            f"\n[maestro] INPUT NEEDED: {len(template.inputs)} question(s) for "
+            f"'{prompt_id}' — stored defaults in [brackets]; Enter keeps them."
+        )
+    else:
+        print(
+            f"\n[maestro] INPUT NEEDED: {len(template.inputs)} question(s) for "
+            f"'{prompt_id}'. This session is waiting for your answer."
+        )
     answers: dict[str, str] = {}
     for item in template.inputs:
         name = item.get("name", "")
         if not name:
             continue
+        default = stored.get(name, "")
+        shown = f" [{default}]" if default else ""
         try:
-            answer = await _read_line(f"? {item.get('question', name)}: ")
+            answer = await _read_line(f"? {item.get('question', name)}{shown}: ")
         except (EOFError, KeyboardInterrupt):
             answer = ""
-        answers[name] = answer.strip()
+        answer = answer.strip()
+        if not answer and default:
+            answer = default
+        answers[name] = answer
+    new_stored = {
+        name: answers[name]
+        for item in template.inputs
+        if (name := item.get("name", "")) and answers.get(name)
+    }
+    if new_stored != stored or (new_stored and prompt_id not in store):
+        store[prompt_id] = new_stored
+        _save_prompt_inputs(store)
     captured = ", ".join(
         f"{k}={v}" if v else f"{k}=(blank)" for k, v in answers.items()
     )

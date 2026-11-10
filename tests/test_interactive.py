@@ -624,3 +624,83 @@ def test_restore_latest_session_keeps_prior_output(tmp_path):
     _restore_latest_session(state, store)
     assert state.prior_turn_output is not None
     assert "Do the thing" in state.prior_turn_output
+
+
+class TestAskPlaybookInputs:
+    """Playbook input questions remember answers per project (3.7.1).
+
+    A repeated prompt must not park silently on a question whose answer is
+    already known: non-blank answers persist to .open-maestro/prompt_inputs.yaml
+    and are offered as bracketed defaults on later runs.
+    """
+
+    def _patch(
+        self, tmp_path, monkeypatch, answers: list[str], inputs=None
+    ) -> list[str]:
+        import asyncio
+        from types import SimpleNamespace
+
+        from open_maestro import interactive
+
+        monkeypatch.chdir(tmp_path)
+        template = SimpleNamespace(
+            inputs=inputs
+            if inputs is not None
+            else [{"name": "dev_env", "question": "Which env?"}]
+        )
+        monkeypatch.setattr(interactive, "_playbook_template", lambda pid: template)
+        shown: list[str] = []
+        iterator = iter(answers)
+
+        async def fake_read_line(prompt: str = "> ") -> str:
+            shown.append(prompt)
+            return next(iterator, "")
+
+        monkeypatch.setattr(interactive, "_read_line", fake_read_line)
+        return asyncio.run(
+            interactive._ask_playbook_inputs("build-004", "Env: {dev_env}")
+        ), shown
+
+    def test_first_run_asks_and_persists(self, tmp_path, monkeypatch):
+        out, shown = self._patch(tmp_path, monkeypatch, ["https://env.example"])
+        assert out == "Env: https://env.example"
+        assert "[https://env.example]" not in shown[0]
+        store = tmp_path / ".open-maestro" / "prompt_inputs.yaml"
+        assert "https://env.example" in store.read_text()
+
+    def test_second_run_blank_keeps_stored_default(self, tmp_path, monkeypatch):
+        store_dir = tmp_path / ".open-maestro"
+        store_dir.mkdir()
+        (store_dir / "prompt_inputs.yaml").write_text(
+            "build-004:\n  dev_env: https://env.example\n"
+        )
+        out, shown = self._patch(tmp_path, monkeypatch, [""])
+        assert out == "Env: https://env.example"
+        assert "[https://env.example]" in shown[0]
+        # unchanged — no pointless rewrite
+        assert (store_dir / "prompt_inputs.yaml").read_text() == (
+            "build-004:\n  dev_env: https://env.example\n"
+        )
+
+    def test_typed_answer_overrides_stored_default(self, tmp_path, monkeypatch):
+        store_dir = tmp_path / ".open-maestro"
+        store_dir.mkdir()
+        (store_dir / "prompt_inputs.yaml").write_text(
+            "build-004:\n  dev_env: https://old.example\n"
+        )
+        out, _ = self._patch(tmp_path, monkeypatch, ["https://new.example"])
+        assert out == "Env: https://new.example"
+        assert "https://new.example" in (store_dir / "prompt_inputs.yaml").read_text()
+
+    def test_blank_first_run_discovers_and_stores_nothing(
+        self, tmp_path, monkeypatch
+    ):
+        out, _ = self._patch(tmp_path, monkeypatch, [""])
+        assert "discover it from the repo" in out
+        assert not (tmp_path / ".open-maestro" / "prompt_inputs.yaml").exists()
+
+    def test_no_inputs_passthrough(self, tmp_path, monkeypatch):
+        out, shown = self._patch(tmp_path, monkeypatch, [], inputs=[])
+        assert out == "Env: {dev_env}"
+        assert shown == []
+        assert not (tmp_path / ".open-maestro" / "prompt_inputs.yaml").exists()

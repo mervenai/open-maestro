@@ -5,6 +5,13 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.1] - 2026-11-11
+
+### Fixed
+- **Playbook input questions can no longer park a session invisibly.** Second occurrence in IntelInvoiceCoding (2026-11-11): the build-004 dev-env question blocked the REPL for 15+ minutes — no delegation started, no spinner, nothing in scrollback to say the session was waiting (syscall-level diagnosis: both threads idle in `kevent`, blocked on stdin). Two closes:
+  - **Answers are remembered per project.** Non-blank answers to a prompt's `inputs` questions persist to `.open-maestro/prompt_inputs.yaml` and are offered as bracketed defaults on later runs (`? Dev environment [...]: ` — Enter keeps the stored value, typing replaces it). A repeated smoke test no longer re-asks what it already knows; a stored default is cleared by editing the yaml or typing a new value. The file tolerates corruption (treated as empty) and is only rewritten when an answer actually changes.
+  - **A loud banner precedes every blocking question** — `[maestro] INPUT NEEDED: N question(s) for '<prompt-id>'` — so a waiting session is obvious in terminal scrollback even when the prompt-toolkit widget doesn't paint.
+
 ## [3.7.0] - 2026-11-11
 
 ### Added
