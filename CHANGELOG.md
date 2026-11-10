@@ -5,6 +5,24 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.0] - 2026-11-11
+
+### Added
+- **`dev-env-smoke-test` skill** (`skills/universal/process/`) — the build-004 smoke test was prompt-only improvisation: no procedure, no liveness bounds, and a blocking follow-up question that parked sessions read as a hang (found live in IntelInvoiceCoding, 2026-11-11: the session sat 15+ minutes at the `dev_env` input with zero delegation started). The skill supplies what the prompt could not:
+  - **Target-selection rules** — remote shared dev / ephemeral per-branch URLs are preferred over local (real DB, auth broker, service networking); blank answer = a bounded discovery pass over chart values, CI/deploy configs, and `.open-maestro` history, then stop-and-report — never invent a URL.
+  - **Liveness rules (the anti-hang contract)** — never leave a foreground server running; one boot attempt plus one articulated retry per service, then record BLOCKED and move on; a missing dependency (no DB, no auth broker, VPN-only endpoint) is BLOCKED with evidence and an owner-level fix, not a failed smoke test; every network check carries a 30 s timeout and records the exact command and output.
+  - **The smoke doc contract** — `docs/dev-smoke-test.md` with a three-value verdict vocabulary (`PASS` / `PASS WITH WORKAROUNDS` / `BLOCKED`), a per-service table (how reached / startup steps / env var names only / health check + result / failures), a blocked-items table with owners, and stable section numbers downstream artifacts cite.
+  - **build-004 prompt now delegates to the skill** for target selection, liveness rules, and the required doc sections.
+- **Model registry refresh for claude-cli** (ground truth: local claude-cli 2.1.292 model list):
+  - **`claude-sonnet` now resolves to `claude-sonnet-5-5`** — the vendor-retired Sonnet 4.6 was still the `smart`/`default` seat and the adversarial panel's steel-man seat.
+  - **`claude-opus` shorthand now resolves to Opus 5.5.** Previously the natural `--model claude-opus` hit the legacy registry key and routed to April's Opus 4.7 while `opus` got 5.5; the legacy entry is renamed `claude-opus-4-7` (explicit pins keep working, including runtime inference).
+  - **`claude-fable-5-1` registered opt-in** — the vendor's tier above Opus 5.5, no alias, so capability routing keeps Opus 5.5 (cheaper; matches Fable on most tasks per the vendor's positioning) as the default reasoning seat; request Fable explicitly via `--model claude-fable-5-1`.
+  - **Fallback alias table in `config/models.py` refreshed** — `fast` no longer falls back to the 2024-era `claude-3-5-haiku-20241022` (reachable whenever capability scoring rejected all registry matches); `default`/`smart`/`sonnet` → `claude-sonnet-5-5`.
+
+### Fixed
+- **traceability-matrix skill maintenance protocol pointed at the wrong prompt** — it assigned matrix row updates to `build-004` (the dev-environment smoke test); the updating prompt is `impl-004` (three references corrected). Root cause of matrices that are "MET at milestone close and never touched again": the skill's own maintenance contract sent maintainers to the wrong prompt.
+- **DEPLOY.md model line updated** (sonnet-5-5 default seat, fable-5-1 opt-in).
+
 ## [3.5.2] - 2026-11-05
 
 ### Fixed

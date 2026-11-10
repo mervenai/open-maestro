@@ -336,6 +336,8 @@ milestone_prompts:
           question: Dev environment to smoke-test — local path or preview/deployment URL (blank = discover from repo)
       prompt: |
         Smoke-test the dev environment for the {epic_name} epic and record the result.
+        Follow the dev-env-smoke-test skill for target selection, the liveness rules,
+        and the required sections of the smoke doc.
         Target environment: {dev_env}
         If the target is local, verify each affected service boots and can talk to
         its dependencies. If it is remote (shared dev or ephemeral per-branch/preview

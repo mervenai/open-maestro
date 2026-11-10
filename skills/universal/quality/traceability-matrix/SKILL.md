@@ -18,7 +18,7 @@ Use when a task says "build the traceability matrix", "build-002", or when a pha
 ## Framing rules
 
 - **The matrix is the single join table of the project.** FRs, stories (`CE-n-Sm`), implementation files, and tests meet here. If a fact exists in two places, this is the place that says which places agree.
-- **It is a living document, updated at phase boundaries** — build-004 updates it after each phase, qa-001 reads it for coverage, qa-004 reports against it. A matrix that is only accurate on day one is worse than none: it lies with confidence.
+- **It is a living document, updated at phase boundaries** — impl-004 updates it after each phase, qa-001 reads it for coverage, qa-004 reports against it. A matrix that is only accurate on day one is worse than none: it lies with confidence.
 - **Status is a claim, and claims get challenged.** Status values reflect evidence (a merged PR, a passing test run), not intention.
 
 ## Matrix shape (one row per requirement)
@@ -33,7 +33,7 @@ Use when a task says "build the traceability matrix", "build-002", or when a pha
 
 ## Maintenance protocol
 
-- **build-004** adds/updates rows as phases land — a phase is not done until its matrix rows reflect it.
+- **impl-004** adds/updates rows as phases land — a phase is not done until its matrix rows reflect it.
 - **qa-001** derives test-coverage targets from the matrix: every `Done` row must have both test cells filled, and every filled test cell must actually exist (spot-check paths).
 - **qa-004** reports pass/fail per matrix row; the report's go/no-go references row statuses, not vibes.
 - Rows are never deleted. A withdrawn requirement keeps its row with Status `Done` and a note, or is struck through with the disposition citation — the history is the point.
@@ -48,4 +48,4 @@ Use when a task says "build the traceability matrix", "build-002", or when a pha
 - [ ] One row per FR/target/NFR; IDs stable; type column correct
 - [ ] Status restricted to the three-value vocabulary, evidence-based
 - [ ] Bidirectional check clean: no orphan requirements, no dangling story/file/test references
-- [ ] Ownership of updates assigned (build-004 / qa-001 / qa-004) and noted in the doc header
+- [ ] Ownership of updates assigned (impl-004 / qa-001 / qa-004) and noted in the doc header

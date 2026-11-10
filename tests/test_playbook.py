@@ -500,3 +500,17 @@ def test_bundle_execution_skill_exists() -> None:
     text = skill.read_text()
     assert "1,500 production lines" in text
     assert "questions before coding" in text
+
+
+def test_dev_env_smoke_test_skill_exists() -> None:
+    """The dev-env-smoke-test skill ships and build-004 wires to it."""
+    skills_dir = Path(__file__).parent.parent / "skills" / "universal" / "process"
+    skill = skills_dir / "dev-env-smoke-test" / "SKILL.md"
+    assert skill.exists()
+    text = skill.read_text()
+    assert "Liveness rules" in text
+    assert "BLOCKED" in text
+
+    plan = load_playbook(Path(__file__).parent.parent)
+    build = next(p for d in plan.decks.values() for p in d.prompts if p.id == "build-004")
+    assert "dev-env-smoke-test skill" in build.prompt

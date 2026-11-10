@@ -358,7 +358,7 @@ class TestModelResolution:
         from open_maestro.config.models import ModelResolver
 
         resolver = ModelResolver()
-        assert resolver.resolve("smart", "claude-cli") == "claude-sonnet-4-6"
+        assert resolver.resolve("smart", "claude-cli") == "claude-sonnet-5-5"
         assert resolver.resolve("reasoning", "claude-cli") == "claude-opus-5-5"
 
     def test_full_model_passed_through(self):
@@ -645,7 +645,8 @@ class TestRuntimePinning:
             shutil, "which", lambda b: "/fake/bin" if b == "claude" else None
         )
         assert factory.runtime_for_model("opus") == "claude-cli"
-        assert factory.runtime_for_model("claude-sonnet-4-6") == "claude-cli"
+        assert factory.runtime_for_model("claude-sonnet-5-5") == "claude-cli"
+        assert factory.runtime_for_model("claude-opus") == "claude-cli"
 
     def test_runtime_for_model_id(self, monkeypatch):
         import shutil

@@ -13,8 +13,9 @@ release, see [CHANGELOG.md](../CHANGELOG.md).
   models; model arbitration picks the cheapest capable backend per task,
   with `OPEN_MAESTRO_RUNTIME`/`--runtime`/`/model` pins honored end-to-end.
   The model registry rotates with vendor releases (see CHANGELOG):
-  `claude-opus-5-5` is the current claude-cli reasoning flagship and
-  DeepSeek Flash holds the `fast` alias.
+  `claude-opus-5-5` is the current claude-cli reasoning flagship
+  (`claude-sonnet-5-5` the default/smart seat; `claude-fable-5-1` registered
+  opt-in) and DeepSeek Flash holds the `fast` alias.
 - Research, planning, documentation, and code-change workflows
 - Milestone-guided project lifecycle with client-facing dashboard
   - projects contain **epics** (workstreams/features); each epic contains

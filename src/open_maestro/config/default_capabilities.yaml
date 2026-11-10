@@ -59,10 +59,12 @@ models:
   # by claude-cli 2.1.292. Context/output figures are carried over from the
   # Opus 4.7 entry pending vendor confirmation — treat as approximate per the
   # header note above.
+  # `claude-opus` is also an alias of this entry so the natural shorthand
+  # routes to the flagship instead of the legacy 4.7 entry below.
   claude-opus-5-5:
     name: "Claude Opus 5.5"
     provider: anthropic
-    aliases: [reasoning]
+    aliases: [reasoning, claude-opus]
     identifiers:
       claude-cli: claude-opus-5-5
     capabilities:
@@ -79,6 +81,31 @@ models:
       relative_cost: 6.4
       price_input_per_million: 4.0
       price_output_per_million: 20.0
+
+  # Claude Fable 5.1: vendor's tier above Opus 5.5 (present in claude-cli
+  # 2.1.292's model list). Registered opt-in only — no alias — so capability
+  # routing keeps Opus 5.5 (cheaper; vendor positions it as matching Fable
+  # on most tasks) as the default reasoning seat. Request explicitly via
+  # `--model claude-fable-5-1`. Context/output figures are approximate
+  # pending vendor docs, per the header note above.
+  claude-fable-5-1:
+    name: "Claude Fable 5.1"
+    provider: anthropic
+    aliases: []
+    identifiers:
+      claude-cli: claude-fable-5-1
+    capabilities:
+      tier: premium
+      tool_use: true
+      vision: true
+      computer_use: false
+      reasoning: deep
+      coding_strength: high
+      max_context_tokens: 200000
+      max_output_tokens: 16384
+      latency_hint: high
+      cost_level: high
+      relative_cost: 9.0
 
   claude-haiku:
     name: "Claude Haiku 4.5"
@@ -99,12 +126,14 @@ models:
       cost_level: low
       relative_cost: 2.0
 
+  # Claude Sonnet 5.5: current default/smart seat for claude-cli (vendor
+  # retired Sonnet 4.6; verified present in claude-cli 2.1.292's model list).
   claude-sonnet:
-    name: "Claude Sonnet 4.6"
+    name: "Claude Sonnet 5.5"
     provider: anthropic
     aliases: [smart, default]
     identifiers:
-      claude-cli: claude-sonnet-4-6
+      claude-cli: claude-sonnet-5-5
     capabilities:
       tier: standard
       tool_use: true
@@ -119,9 +148,10 @@ models:
       relative_cost: 4.0
 
   # Claude Opus 4.7 (released 2026-04-16): superseded as flagship by
-  # claude-opus-5-5 but kept addressable by explicit id
-  # (`--model claude-opus-4-7`) for anyone pinned to it.
-  claude-opus:
+  # claude-opus-5-5; kept addressable by explicit id (`--model claude-opus-4-7`)
+  # so existing pinned invocations keep working. The `claude-opus` shorthand
+  # is an alias of the 5.5 entry above.
+  claude-opus-4-7:
     name: "Claude Opus 4.7"
     provider: anthropic
     aliases: []

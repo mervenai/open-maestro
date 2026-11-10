@@ -31,15 +31,15 @@ _FALLBACK_ALIASES: dict[str, dict[str, str]] = {
         "reasoning": "kimi-code/k3",
     },
     "claude-cli": {
-        "default": "claude-sonnet-4-6",
-        "fast": "claude-3-5-haiku-20241022",
-        "smart": "claude-sonnet-4-6",
+        "default": "claude-sonnet-5-5",
+        "fast": "claude-haiku-4-5-20251001",
+        "smart": "claude-sonnet-5-5",
         "reasoning": "claude-opus-5-5",
         # Vendor shorthand users type after /model or --model: the registry
         # has no entries under these names, so without the fallback they
         # passed through raw to the CLI.
         "opus": "claude-opus-5-5",
-        "sonnet": "claude-sonnet-4-6",
+        "sonnet": "claude-sonnet-5-5",
         "haiku": "claude-haiku-4-5-20251001",
     },
     "openai-sdk": {
