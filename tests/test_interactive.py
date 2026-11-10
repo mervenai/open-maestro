@@ -5,31 +5,31 @@ from __future__ import annotations
 import asyncio
 import sys
 import types
+from datetime import UTC
 
+import pytest
 from prompt_toolkit import HTML
 from prompt_toolkit.formatted_text import to_formatted_text
 
 from open_maestro.agents.definition import AgentDefinition
 from open_maestro.agents.registry import AgentRegistry
-from open_maestro.session.store import SessionRecord, SessionStore
-import pytest
-
 from open_maestro.interactive import (
     InteractiveState,
     _assemble_prompt,
     _echo_user_prompt,
     _extract_remote_urls,
     _handle_command,
+    _handoff_excerpt,
+    _is_execution_follow_up,
     _looks_like_decision,
     _maybe_clarify_repo_path,
     _resolve_suggested_prompt,
-    _handoff_excerpt,
-    _is_execution_follow_up,
     _restore_latest_session,
     _strip_plan_prefix,
     _turn_includes_history,
     _warn_if_artifact_missing,
 )
+from open_maestro.session.store import SessionRecord, SessionStore
 
 
 def _make_registry() -> AgentRegistry:
@@ -244,7 +244,7 @@ def _session_store_for(tmp_path, monkeypatch) -> SessionStore:
 
 
 def test_status_command_renders_sessions_and_handoff(tmp_path, monkeypatch) -> None:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from open_maestro.interactive import _handle_status_command
 
@@ -260,8 +260,8 @@ def test_status_command_renders_sessions_and_handoff(tmp_path, monkeypatch) -> N
             agent_id="engineer",
             model="deepseek-flash",
             prompt_summary="summarize the current milestone status",
-            created_at=datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc),
-            updated_at=datetime(2026, 9, 20, 12, 30, tzinfo=timezone.utc),
+            created_at=datetime(2026, 9, 20, 12, 0, tzinfo=UTC),
+            updated_at=datetime(2026, 9, 20, 12, 30, tzinfo=UTC),
         )
     )
 
@@ -526,7 +526,7 @@ def test_clarify_repo_path_proceeds_for_git_remote(monkeypatch):
 
 
 def _make_record(session_id: str, runtime: str, **kwargs) -> SessionRecord:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     return SessionRecord(
         session_id=session_id,
@@ -534,8 +534,8 @@ def _make_record(session_id: str, runtime: str, **kwargs) -> SessionRecord:
         agent_id="ticketing",
         model="claude-haiku-4-5",
         prompt_summary="task",
-        created_at=kwargs.get("created_at", datetime.now(timezone.utc)),
-        updated_at=kwargs.get("updated_at", datetime.now(timezone.utc)),
+        created_at=kwargs.get("created_at", datetime.now(UTC)),
+        updated_at=kwargs.get("updated_at", datetime.now(UTC)),
     )
 
 
@@ -555,11 +555,11 @@ def test_restore_latest_session_sets_state(tmp_path):
 
 
 def test_restore_latest_session_prefers_most_recent(tmp_path):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     store = SessionStore(base_dirs=[tmp_path])
-    older = datetime(2026, 9, 1, tzinfo=timezone.utc)
-    newer = datetime(2026, 9, 29, tzinfo=timezone.utc)
+    older = datetime(2026, 9, 1, tzinfo=UTC)
+    newer = datetime(2026, 9, 29, tzinfo=UTC)
     store.save(_make_record("sess-old", "kimi-cli", updated_at=older))
     store.save(_make_record("sess-new", "claude-cli", updated_at=newer))
     state = InteractiveState()
@@ -607,14 +607,14 @@ def test_handoff_excerpt_falls_back_to_tail() -> None:
 
 
 def test_restore_latest_session_keeps_prior_output(tmp_path):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     store = SessionStore(base_dirs=[tmp_path])
     store.save(
         _make_record(
             "sess-out",
             "kimi-cli",
-            updated_at=datetime(2026, 9, 29, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 9, 29, tzinfo=UTC),
         )
     )
     rec = store.get("sess-out")
@@ -698,6 +698,34 @@ class TestAskPlaybookInputs:
         out, _ = self._patch(tmp_path, monkeypatch, [""])
         assert "discover it from the repo" in out
         assert not (tmp_path / ".open-maestro" / "prompt_inputs.yaml").exists()
+
+    def test_tty_path_uses_simple_input(self, tmp_path, monkeypatch):
+        import asyncio
+        import sys
+
+        from open_maestro import interactive
+
+        monkeypatch.chdir(tmp_path)
+        template = type(
+            "T", (), {"inputs": [{"name": "dev_env", "question": "Which env?"}]}
+        )()
+        monkeypatch.setattr(interactive, "_playbook_template", lambda pid: template)
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
+        shown: list[str] = []
+
+        def fake_simple(prompt: str = "> ") -> str:
+            shown.append(prompt)
+            return "https://tty.example"
+
+        monkeypatch.setattr(interactive, "_read_input_simple", fake_simple)
+        out = asyncio.run(
+            interactive._ask_playbook_inputs("build-004", "Env: {dev_env}")
+        )
+        assert out == "Env: https://tty.example"
+        assert shown == ["? Which env?: "]
+        assert "https://tty.example" in (
+            tmp_path / ".open-maestro" / "prompt_inputs.yaml"
+        ).read_text()
 
     def test_no_inputs_passthrough(self, tmp_path, monkeypatch):
         out, shown = self._patch(tmp_path, monkeypatch, [], inputs=[])

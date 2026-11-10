@@ -7,7 +7,6 @@ conversation history and a single session across turns.
 from __future__ import annotations
 
 import asyncio
-import threading
 import json
 import logging
 import os
@@ -16,13 +15,14 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import time
-
-import yaml
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 from open_maestro.agents.loader import AgentLoader
 from open_maestro.agents.registry import AgentRegistry
@@ -40,7 +40,6 @@ from open_maestro.events.progress import InteractiveProgressHandler, ProgressInd
 from open_maestro.events.stream import StreamingHandler
 from open_maestro.mcp.config import load_mcp_config
 from open_maestro.memory.kuzu_client import KuzuMemoryClient
-from open_maestro.orchestrator.critic import CODE_EXTENSIONS
 from open_maestro.milestones import (
     DashboardPublishHistoryStore,
     MilestoneDetector,
@@ -60,6 +59,7 @@ from open_maestro.milestones import (
     load_playbook,
 )
 from open_maestro.monitor.live import Monitor
+from open_maestro.orchestrator.critic import CODE_EXTENSIONS
 from open_maestro.orchestrator.load import apply_source_load, estimate_source_load
 from open_maestro.orchestrator.pm import ProjectManager
 from open_maestro.orchestrator.router import LLMTaskRouter
@@ -291,7 +291,7 @@ def _assemble_prompt(prompt: str, history: list[dict[str, str]]) -> str:
     return "\n".join(parts)
 
 
-def _turn_includes_history(state: "InteractiveState", turn_runtime: str) -> bool:
+def _turn_includes_history(state: InteractiveState, turn_runtime: str) -> bool:
     """False when the turn will natively resume a backend session.
 
     A resumed session (e.g. ``kimi -r <id> -p ...``) already carries the full
@@ -311,7 +311,7 @@ def _turn_includes_history(state: "InteractiveState", turn_runtime: str) -> bool
 
 
 def _restore_latest_session(
-    state: "InteractiveState", store: SessionStore
+    state: InteractiveState, store: SessionStore
 ) -> SessionRecord | None:
     """Restore the most recent project session into *state* (MSTRO-111).
 
@@ -1662,8 +1662,15 @@ async def _ask_playbook_inputs(prompt_id: str, prompt_text: str) -> str:
             continue
         default = stored.get(name, "")
         shown = f" [{default}]" if default else ""
+        question = f"? {item.get('question', name)}{shown}: "
         try:
-            answer = await _read_line(f"? {item.get('question', name)}{shown}: ")
+            if sys.stdin.isatty():
+                loop = asyncio.get_event_loop()
+                answer = await loop.run_in_executor(
+                    None, _read_input_simple, question
+                )
+            else:
+                answer = await _read_line(question)
         except (EOFError, KeyboardInterrupt):
             answer = ""
         answer = answer.strip()
@@ -1819,8 +1826,8 @@ async def _run_with_interrupt(coro: Any, indicator: ProgressIndicator | None = N
 
 def _add_escape_binding(question: Any) -> None:
     """Add an Escape key binding that cancels a questionary prompt."""
-    from prompt_toolkit.keys import Keys
     from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
+    from prompt_toolkit.keys import Keys
 
     existing = question.application.key_bindings
 
@@ -2093,6 +2100,17 @@ def _read_input_tui(prompt: str = "> ") -> str:
         return session.prompt()
     except (EOFError, KeyboardInterrupt):
         return ""
+
+
+def _read_input_simple(prompt: str) -> str:
+    """Read one line with the terminal's native cooked-mode input.
+
+    Used for playbook input questions (single-line answers such as URLs and
+    paths). Unlike the prompt_toolkit TUI, cooked mode echoes paste
+    immediately and cannot wedge between back-to-back prompt sessions —
+    pasted text that a TUI buffer accepts invisibly is always visible here.
+    """
+    return input(prompt)
 
 
 async def _read_line(prompt: str = "> ") -> str:

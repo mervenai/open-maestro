@@ -5,6 +5,11 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.2] - 2026-11-11
+
+### Fixed
+- **Pasted text was invisible at playbook input questions.** On the build-004 dev-env question, pasting a URL showed nothing until Enter — the answer was captured correctly (per `[Inputs captured]`), but the user couldn't see what they were submitting. Cause: the questions inherited the main REPL's prompt_toolkit TUI, whose paste rendering can wedge in the gap between back-to-back prompt sessions (raw-mode echo off, repaint lost). Playbook input answers are single-line by design, so they now read via plain cooked-mode `input()` — the terminal's native echo shows paste immediately, and the TUI (with its multi-line editing and history) stays on the main REPL where it belongs.
+
 ## [3.7.1] - 2026-11-11
 
 ### Fixed
