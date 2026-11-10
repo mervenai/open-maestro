@@ -514,3 +514,17 @@ def test_dev_env_smoke_test_skill_exists() -> None:
     plan = load_playbook(Path(__file__).parent.parent)
     build = next(p for d in plan.decks.values() for p in d.prompts if p.id == "build-004")
     assert "dev-env-smoke-test skill" in build.prompt
+
+
+def test_branch_delivery_skill_exists() -> None:
+    """The branch-delivery skill ships and bundle-execution defers to it."""
+    skills_dir = Path(__file__).parent.parent / "skills" / "universal" / "process"
+    skill = skills_dir / "branch-delivery" / "SKILL.md"
+    assert skill.exists()
+    text = skill.read_text()
+    assert "standing" in text
+    assert "relay" in text
+    assert "delivery-routing" in text
+
+    bundle = skills_dir / "bundle-execution" / "SKILL.md"
+    assert "branch-delivery" in bundle.read_text()

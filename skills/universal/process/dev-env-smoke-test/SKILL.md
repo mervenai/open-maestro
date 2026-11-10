@@ -67,5 +67,6 @@ Once sections exist, keep their numbers stable: downstream artifacts cite `§x.y
 ## Relationship to other skills
 
 - **bundle-execution** — the per-bundle env-check appends its evidence here; a BLOCKED verdict gates dependent bundles.
+- **branch-delivery** — when the environment builds from git (CI relay + GitOps), document the code→env deploy path from the smoke run as structured config in `docs/delivery-routing.md` per that skill's template, and verify the path once end to end (a pointer swap or trivial relayed change shifts the served artifact). The routing config is then the source the per-push relay checks run against.
 - **traceability-matrix** — as-built and QA citations point at this doc's section numbers; stable numbering is part of the contract.
 - **milestones-authoring** — a BLOCKED verdict becomes a milestone blocker with an owner; do not leave it in the doc only.

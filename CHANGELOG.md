@@ -5,6 +5,19 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.0] - 2026-11-11
+
+### Added
+- **`branch-delivery` skill** (`skills/universal/process/`) — the standing-branch delivery machinery proven on PMS2DR (D-17, dev-smoke-test.md §3.4, and the B1–B10 bundle trail), generalized so the next project inherits it instead of rediscovering it. The ephemeral env is per-project; this is the invariant mechanics:
+  - **Standing-branch model** — one integration branch, same name in every impacted repo; branch naming as CI control (enumerate push/PR branch triggers before naming — PMS2DR's `merven/` prefix exists because `team-*/feature-*` triggered an unintended team-release deploy); story branches local-only, `--no-ff` merge per story after tests + prod build + review; one standing DRAFT PR per deploy repo with labels set at creation and the org's body tokens.
+  - **Push → deploy → verify loop** — relay-branch SHA check (`git ls-remote` before/after every push), including the silent failure it catches: PR builds run on the merge ref, so a conflicted PR relays nothing and the env keeps serving the last good build with no visible error; weekly + on-conflict main-merge rhythm; per-repo manual-dispatch fallback awareness.
+  - **Environment pointer mechanics** — GitOps values key per service, per-env; `sha` over `branch` precedence; chart-version-dependent key names (never copied from older env branches); relay keyed on the last branch segment only.
+  - **Repo onboarding checklist** — the entry gate a bundle runs when it pulls a repo into delivery for the first time (push rights, trigger enumeration, standing PR, relay confirmation, values key, gate baseline, fallback availability).
+  - **Final-merge protocol** — coordinated order, flag off, tag the integration head first (squash rulesets erase per-story history), never merge to `main` without explicit user approval, cleanup of orphaned relay branches.
+  - **Evidence conventions** — merge SHA with tree-equality to the story head, push range, build/PR numbers, relay SHA before→after, served-artifact byte comparison.
+  - **`docs/delivery-routing.md` config template** — the per-project parameters (branch name, relay pattern, values repo/env keys, labels/tokens, CI mechanism and fallback per repo) as structured config, seeded by the smoke-test deploy-path discovery.
+- **Wiring**: `bundle-execution` merge discipline and the per-bundle env-check defer to the skill (relay-moved proof blocks the env-check; new-repo onboarding gates the bundle); `dev-env-smoke-test` now writes the deploy path as delivery-routing config.
+
 ## [3.6.0] - 2026-11-11
 
 ### Added

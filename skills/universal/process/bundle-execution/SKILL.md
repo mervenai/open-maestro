@@ -29,9 +29,9 @@ Measured on a 38-story / 10-bundle project: ~43 agent rounds instead of 150–23
 1. **One implementation pass** for the whole bundle, on stacked local branches; checks run at the tip of each story's branch. For UI bundles, "done" additionally requires the render gate below before review is requested.
 2. **One independent review** of the bundle (two in parallel only over the sizing threshold). UI bundles additionally get the visual-fidelity review from the code-review-standards skill; a visual FAIL without a ruling blocks the bundle like any BLOCK.
 3. **One fix-and-merge pass.** Re-review only if the review blocks the bundle or finds HIGH issues — and then only those diffs. A fix that changes what the user sees (component choice, labels, placement, tabs, menus) must cite the prototype region or ruling it implements; if no source covers the change, raise a CR — never improvise a visual decision inside a fix prompt.
-4. **One env-check checklist per bundle**, not per story. UI bundles add one item: on the ephemeral/real environment, after login, a full-page screenshot of each new screen at the fixed reference viewport, compared against the local screenshots and the prototype. Every remaining difference is classified **data** (empty environment) or **build**; build differences block the env-check. The screenshots are appended to the smoke doc.
+4. **One env-check checklist per bundle**, not per story. UI bundles add one item: on the ephemeral/real environment, after login, a full-page screenshot of each new screen at the fixed reference viewport, compared against the local screenshots and the prototype. Every remaining difference is classified **data** (empty environment) or **build**; build differences block the env-check. The screenshots are appended to the smoke doc. Every bundle also appends the delivery proof from the branch-delivery skill: the relay branch moved (SHA before → after the push); an unmoved relay blocks the env-check like a build difference.
 
-Merge discipline is unchanged: one `--no-ff` merge per story per repo (or per bundle where stories stack).
+Merge discipline defers to the **branch-delivery** skill: one `--no-ff` merge per story per repo (or per bundle where stories stack) into the project's declared integration branch, then push — and the relay-moved check after every push. A bundle that pulls a repo into delivery for the first time runs the branch-delivery repo-onboarding checklist as an entry gate before any merge.
 
 ## UI bundles: carry the visual source of truth
 
@@ -66,6 +66,7 @@ Absorb feedback by revising the bundle doc, never by rewriting story rows: add a
 - [ ] UI bundles: render-gate screenshots planned before review; env-check screenshot item planned
 - [ ] Fix prompts that change what the user sees cite the prototype region or a ruling (else a CR)
 - [ ] One env checklist per bundle planned
+- [ ] Any repo new to delivery has its branch-delivery onboarding checklist run as an entry gate
 - [ ] Bundle doc written; milestones.yaml untouched except decision-layer one-liners
 
 ## Relationship to other skills
