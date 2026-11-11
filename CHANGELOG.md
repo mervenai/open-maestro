@@ -5,6 +5,11 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.5] - 2026-11-12
+
+### Changed
+- **ALL kickoff questions come to the project lead interactively — client/M3 ones included, tagged.** 3.7.4 let the agent file questions it judged "genuinely external" straight to Open register rows + outbox without stopping for the lead. That mismatches how Merven projects actually decide: the lead routinely rules provisionally on client questions (recommendation accepted as `Decided` with a not-yet-ratified marker, ratification arriving later — the standing PMS2DR pattern). Now: every kickoff question is asked directly in the agent's response, each tagged `[lead]` or `[client/M3]` with a recommendation and what it blocks; the lead rules now (provisional rulings carry the `[INTERNAL — not M3-ratified]` marker) or declines, and only declined questions become Open rows + an outbox message. decision-register skill documents the provisional-ruling lifecycle (external confirmation flips the marker without reopening the row).
+
 ## [3.7.4] - 2026-11-12
 
 ### Changed

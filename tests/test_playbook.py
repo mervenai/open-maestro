@@ -489,6 +489,7 @@ def test_bundle_execution_prompts(tmp_project: Path) -> None:
     assert "decision-register row" in kickoff.prompt
     assert "entry gate" in kickoff.prompt
     assert "project lead" in kickoff.prompt  # questions are asked synchronously
+    assert "[client/M3]" in kickoff.prompt  # all questions come to the lead, tagged
 
     impl4 = next(t for t in impl.prompts if t.id == "impl-004")
     assert "bundle-execution skill" in impl4.prompt
