@@ -5,6 +5,14 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.4] - 2026-11-12
+
+### Changed
+- **Bundle kickoff questions are now asked synchronously, not filed as async documents.** Found live in IntelInvoiceCoding: the B-01 kickoff followed the old impl-000 instruction ("record each question as a decision-register row, status Open") and opened **18 Open rows (OQ-37..OQ-54)** with recommendations in a kickoff note — questions the project lead could have answered in seconds sat queued in a CSV while the build pass started around them. The instruction conflated two different audiences:
+  - **Questions the project lead can answer** (contract ambiguities, permission/scope calls, UX copy, audit expectations — anything internal) are now **asked directly in the agent's response**: numbered, each with a concrete recommendation and exactly what it blocks; the agent ends its turn and waits — the lead answers in the next message, the session resumes natively, and the ruling is recorded as a `Decided` register row only after it arrives. Work a question blocks must not start until the answer lands.
+  - **Questions that genuinely need an external party** (client/M3) still become Open register rows (owner named) plus an outbox message — those are async by nature.
+  - Three surfaces updated: **impl-000 prompt** (sync-first questioning, no Open-row dumping), **bundle-execution skill step 0** (same split, checklist updated), **decision-register skill** ("An Open row is not a substitute for asking — ask directly when the person who can answer is in the room").
+
 ## [3.7.3] - 2026-11-11
 
 ### Fixed

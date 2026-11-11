@@ -25,7 +25,7 @@ Measured on a 38-story / 10-bundle project: ~43 agent rounds instead of 150–23
 
 ## The lean process per bundle
 
-0. **Kickoff: questions before coding.** List every product/client question the bundle's scope makes foreseeable *before* writing code, and record each as a decision-register row. Post-build questions are the most expensive kind — each one found after code has shipped cost a fix round. For UI bundles the kickoff list must also carry every template-spec-text-vs-prototype divergence for the screens in scope (see "UI bundles" below).
+0. **Kickoff: questions before coding, asked synchronously.** List every question the bundle's scope makes foreseeable *before* writing code. Questions the project lead can answer (contract ambiguities, permission/scope calls, UX copy, audit expectations — anything internal) are **asked directly in the agent's response, numbered, each with a recommendation and what it blocks**; the agent ends its turn and waits — the lead answers in the next message and the session resumes. Work a question blocks does not start until the answer arrives, and the ruling is recorded as a register row only after it lands. Only questions that genuinely need an external party (client/M3) become Open register rows and an outbox message, awaited outside the session. Post-build questions are the most expensive kind — each one found after code has shipped cost a fix round. For UI bundles the kickoff list must also carry every template-spec-text-vs-prototype divergence for the screens in scope (see "UI bundles" below).
 1. **One implementation pass** for the whole bundle, on stacked local branches; checks run at the tip of each story's branch. For UI bundles, "done" additionally requires the render gate below before review is requested.
 2. **One independent review** of the bundle (two in parallel only over the sizing threshold). UI bundles additionally get the visual-fidelity review from the code-review-standards skill; a visual FAIL without a ruling blocks the bundle like any BLOCK.
 3. **One fix-and-merge pass.** Re-review only if the review blocks the bundle or finds HIGH issues — and then only those diffs. A fix that changes what the user sees (component choice, labels, placement, tabs, menus) must cite the prototype region or ruling it implements; if no source covers the change, raise a CR — never improvise a visual decision inside a fix prompt.
@@ -61,7 +61,7 @@ Absorb feedback by revising the bundle doc, never by rewriting story rows: add a
 
 - [ ] Every remaining story is in exactly one bundle; bundles grouped by repo/stack/touch-point
 - [ ] Each bundle ≤ ~1,500 production lines (or two parallel reviewers planned)
-- [ ] Kickoff questions recorded as register rows before any code
+- [ ] Kickoff questions asked synchronously (internal) or opened as external-party rows before any code
 - [ ] UI bundle rows carry a filled visual-target block (prototype, reference render, rulings)
 - [ ] UI bundles: render-gate screenshots planned before review; env-check screenshot item planned
 - [ ] Fix prompts that change what the user sees cite the prototype region or a ruling (else a CR)
