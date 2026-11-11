@@ -479,6 +479,7 @@ def test_bundle_execution_prompts(tmp_project: Path) -> None:
     build = playbook.decks["build-planning"]
     b5 = next(t for t in build.prompts if t.id == "build-005")
     assert "bundle-execution skill" in b5.prompt
+    assert "every build plan and product epic" in b5.prompt
     assert b5.artifact_target == "docs/build-plan-bundles-{date}.md"
 
     impl = playbook.decks["implementation"]
@@ -500,6 +501,7 @@ def test_bundle_execution_skill_exists() -> None:
     text = skill.read_text()
     assert "1,500 production lines" in text
     assert "questions before coding" in text
+    assert "product epic" in text
 
 
 def test_dev_env_smoke_test_skill_exists() -> None:

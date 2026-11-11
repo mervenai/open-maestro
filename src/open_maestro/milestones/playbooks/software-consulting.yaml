@@ -355,7 +355,13 @@ milestone_prompts:
       tags: [plan, process]
       artifact_target: docs/build-plan-bundles-{date}.md
       prompt: |
-        Batch the {epic_name} build plan into bundles, following the bundle-execution skill.
+        Batch the build plan(s) for the {epic_name} epic into bundles, following the
+        bundle-execution skill.
+        First enumerate every build plan and product epic in scope (docs/build-plan*.md
+        plus any per-epic or per-track plans): a project often carries several product
+        epics inside one maestro epic. The bundle list must cover ALL of them — every
+        story of every epic lands in exactly one bundle, and a bundle that spans epics
+        names each epic it serves.
         Group the remaining stories by repo/stack/touch-point into bundles of at most ~1,500 production lines each; every story lands in exactly one bundle and the list covers the whole remaining plan.
         For each bundle record: id + name, member stories (mapped to FR/Jira rows), repos touched, entry gate (what must be answered or done first), estimated production lines, and status (proposed first).
         Mark which independent bundles may run two at a time, and which bundles need two parallel reviewers (over the size threshold or mixing two stacks).

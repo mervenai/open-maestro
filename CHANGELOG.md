@@ -5,6 +5,14 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.3] - 2026-11-11
+
+### Fixed
+- **build-005 bundled only the first product epic it found.** Found live in IntelInvoiceCoding: the prompt said "Batch **the** {epic_name} build plan", and the project carries four product epics (E1 Suggestion Experience, E2 DNA Integration Seam, E3 Customer Enablement, E4 Quality Safety Net) inside one maestro epic — the agent batched only E1's 7 stories and even named the file `build-plan-bundles-all-epics-…` for it. PMS2DR never surfaced this because one maestro epic equaled one track. Three closes:
+  - **build-005 prompt now requires total-coverage scoping**: enumerate every build plan and product epic in scope first; every story of every epic lands in exactly one bundle; a bundle that spans epics names each it serves (the IIC rerun proved the right shape: 10 bundles across 19 stories, with B-06 serving E1+E2 and B-09 serving all four).
+  - **bundle-execution skill**: "the whole remaining plan" is defined as every build-plan doc and product epic in scope — enumerate before grouping; bundles group by repo/stack/touch-point, not by epic.
+  - **Single-doc discipline**: one bundle doc per project at the artifact target; reruns update in place (or mark superseded per the rescoping rule), never a near-identical sibling — and a filename must never claim a scope ("all-epics") the content doesn't cover.
+
 ## [3.7.2] - 2026-11-11
 
 ### Fixed

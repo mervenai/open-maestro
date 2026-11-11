@@ -21,7 +21,7 @@ Measured on a 38-story / 10-bundle project: ~43 agent rounds instead of 150–23
 
 - **≤ ~1,500 production lines per bundle.** Above that, or when a bundle mixes two stacks (e.g. .NET + Angular), plan two independent reviewers in parallel; otherwise one review per bundle.
 - **Group by repo / stack / touch-point.** Stories that touch the same files, the same seam, or the same deployable ship together. Independent bundles (no shared files, no ordering dependency) may run two at a time.
-- Every story belongs to exactly one bundle, and the bundle list covers the whole remaining plan — no orphans.
+- Every story belongs to exactly one bundle, and the bundle list covers the whole remaining plan — no orphans. "The plan" means every build-plan doc and product epic in scope (a project can carry several product epics inside one maestro epic): enumerate them all before grouping, and batch across them — a bundle is grouped by repo/stack/touch-point, not by epic, so a bundle may serve several epics and must name each.
 
 ## The lean process per bundle
 
@@ -49,7 +49,7 @@ Render gate (step 1): before review is requested, render the screen locally with
 
 ## The bundle-plan doc
 
-Author it as `docs/build-plan-bundles-<yyyymmdd>.md`. Per bundle record: id + name, member stories, repos touched, entry gate (what must be answered or done first), estimated production lines, and status (proposed / in progress / merged / paused). UI bundle rows additionally carry the visual-target block above. Track per-bundle progress in the doc or a `docs/build-status.csv`.
+Author it as `docs/build-plan-bundles-<yyyymmdd>.md` — one bundle doc per project, at the prompt's artifact target. A rerun or a scope correction updates that doc in place (or marks it superseded per the rescoping rule below), never a near-identically-named sibling; and a filename must never claim a scope ("all-epics") the content doesn't cover. Per bundle record: id + name, member stories, repos touched, entry gate (what must be answered or done first), estimated production lines, and status (proposed / in progress / merged / paused). UI bundle rows additionally carry the visual-target block above. Track per-bundle progress in the doc or a `docs/build-status.csv`.
 
 Keep bundle state **out of `milestones.yaml`** — bundle composition churns fast; the yaml stays the slow decision layer (register rows, blockers, milestone notes).
 
