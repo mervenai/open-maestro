@@ -5,6 +5,14 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.6] - 2026-11-13
+
+### Fixed
+- **Agent questions now surface as an interactive ask instead of a wall of text.** The 3.7.4/3.7.5 kickoff flow told the agent to end its turn with its questions, but the REPL then dumped the entire agent output and dropped to a bare `> ` prompt — nothing detected that the turn ended awaiting the lead, so the questions (19 at the IIC B-01 kickoff) sat buried at the bottom of the scrollback. New awaiting-input handshake:
+  - **Marker file**: when a turn ends with questions, the agent (per the bundle-execution skill step 0 and the impl-000 prompt) also writes `.open-maestro/awaiting-input.yaml` as its last act — id, audience (`lead`/`client/M3`), question, recommendation, what it blocks, optional options. The human-readable list stays in the response.
+  - **REPL hook**: after each turn maestro looks for a fresh marker (older markers from killed sessions are ignored) and shows `[maestro] AGENT AWAITING INPUT` with a compact recap, then collects rulings three ways — **one-by-one** (recommendation and options shown per question), **bulk paste** (`Q1: store GUID; 2: defer` — multiple questions at once), or **decline all**. A confirmation summary precedes sending; skip keeps the marker for later.
+  - **Answers return through the same session**: the rulings go back as the next turn's message (each ruling restates its question; client/M3 rulings carry the `[INTERNAL — not M3-ratified]` reminder; declined questions instruct the agent to file Open rows + outbox). Synthesized ruling turns skip the repo-path clarification, and the marker is cleared only once rulings are sent.
+
 ## [3.7.5] - 2026-11-12
 
 ### Changed

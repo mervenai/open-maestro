@@ -25,7 +25,21 @@ Measured on a 38-story / 10-bundle project: ~43 agent rounds instead of 150–23
 
 ## The lean process per bundle
 
-0. **Kickoff: questions before coding, asked synchronously.** List every question the bundle's scope makes foreseeable *before* writing code, and ask them ALL directly in the agent's response — numbered, each tagged [lead] or [client/M3], each with a recommendation and what it blocks. The agent ends its turn and waits; the lead answers in the next message and the session resumes. Work a question blocks does not start until the answer arrives, and the ruling is recorded as a register row only after it lands (provisional rulings on [client/M3] questions carry the not-yet-ratified marker — the lead routinely pre-decides pending external ratification). Only a question the lead cannot or will not rule on becomes an Open register row plus an outbox message for the external party. Post-build questions are the most expensive kind — each one found after code has shipped cost a fix round. For UI bundles the kickoff list must also carry every template-spec-text-vs-prototype divergence for the screens in scope (see "UI bundles" below).
+0. **Kickoff: questions before coding, asked synchronously.** List every question the bundle's scope makes foreseeable *before* writing code, and ask them ALL directly in the agent's response — numbered, each tagged [lead] or [client/M3], each with a recommendation and what it blocks. The agent ends its turn and waits; the lead answers in the next message and the session resumes. Work a question blocks does not start until the answer arrives, and the ruling is recorded as a register row only after it lands (provisional rulings on [client/M3] questions carry the not-yet-ratified marker — the lead routinely pre-decides pending external ratification). Only a question the lead cannot or will not rule on becomes an Open register row plus an outbox message for the external party. Post-build questions are the most expensive kind — each one found after code has shipped cost a fix round. For UI bundles the kickoff list must also carry every template-spec-text-vs-prototype divergence for the screens in scope (see "UI bundles" below). **Also write the questions to `.open-maestro/awaiting-input.yaml`** (project root, overwrite any existing file) so the maestro REPL can surface the ask compactly instead of leaving it inside the turn output:
+
+```yaml
+created_at: 'YYYY-MM-DDTHH:MM:SS'
+source: bundle-kickoff        # bundle id or prompt id
+questions:
+  - id: Q1
+    audience: lead            # lead | client/M3
+    question: '<the question, one line>'
+    recommendation: '<your concrete recommendation>'
+    blocks: '<what it blocks>'
+    options: ['a) ...', 'b) ...']   # optional
+```
+
+Write this file as the LAST act before ending the turn — no writes may follow it. The lead's rulings then arrive as the next user message; a declined question is one whose ruling message says DECLINED.
 1. **One implementation pass** for the whole bundle, on stacked local branches; checks run at the tip of each story's branch. For UI bundles, "done" additionally requires the render gate below before review is requested.
 2. **One independent review** of the bundle (two in parallel only over the sizing threshold). UI bundles additionally get the visual-fidelity review from the code-review-standards skill; a visual FAIL without a ruling blocks the bundle like any BLOCK.
 3. **One fix-and-merge pass.** Re-review only if the review blocks the bundle or finds HIGH issues — and then only those diffs. A fix that changes what the user sees (component choice, labels, placement, tabs, menus) must cite the prototype region or ruling it implements; if no source covers the change, raise a CR — never improvise a visual decision inside a fix prompt.

@@ -26,6 +26,15 @@ import yaml
 
 from open_maestro.agents.loader import AgentLoader
 from open_maestro.agents.registry import AgentRegistry
+from open_maestro.awaiting_input import (
+    DEFER,
+    AwaitingInputBatch,
+    clear as clear_awaiting_input,
+    format_answers_message,
+    load as load_awaiting_input,
+    normalize_answer,
+    parse_bulk_answers,
+)
 from open_maestro.config.capabilities import (
     CodingStrength,
     CostLevel,
@@ -158,6 +167,10 @@ class InteractiveState:
     # Epic/milestone context for the most recently shown suggested prompts.
     current_epic_id: str | None = None
     current_milestone_id: str | None = None
+    # A synthesized user message queued by the awaiting-input handshake and
+    # consumed as the next turn's input (the lead's rulings on an agent's
+    # questions, sent back into the same backend session).
+    pending_user_message: str | None = None
 
 
 def _banner(
@@ -1692,6 +1705,116 @@ async def _ask_playbook_inputs(prompt_id: str, prompt_text: str) -> str:
     return apply_input_answers(prompt_text, template.inputs, answers)
 
 
+async def _ask_awaiting_questions(
+    batch: AwaitingInputBatch,
+    read_line: Any = None,
+) -> dict[str, str] | None:
+    """Collect the lead's rulings on an agent's awaiting-input questions.
+
+    Three ways to answer: one-by-one, a bulk paste (``Q1: a; 3: defer``), or
+    decline all. Returns {question_id: answer-or-DEFER}; None when the lead
+    postpones (the marker stays in place and nothing is sent back). The
+    ``read_line`` callable is injectable for tests.
+    """
+    if read_line is None:
+        read_line = _read_line
+
+    def _recap() -> None:
+        print(f"\n[maestro] AGENT AWAITING INPUT — {len(batch.questions)} question(s)"
+              + (f" from {batch.source}:" if batch.source else ":"))
+        for idx, question in enumerate(batch.questions, 1):
+            detail = f" ({question.id}, {question.audience})"
+            print(f"  {idx}{detail} {question.question}")
+            if question.recommendation:
+                extra = f" | blocks: {question.blocks}" if question.blocks else ""
+                print(f"      rec: {question.recommendation}{extra}")
+
+    def _summary(answers: dict[str, str]) -> None:
+        print("\nYour rulings:")
+        for question in batch.questions:
+            answer = answers.get(question.id, DEFER)
+            shown = "DEFER" if answer == DEFER else answer
+            print(f"  {question.id} → {shown}")
+
+    while True:
+        _recap()
+        try:
+            mode = (await read_line("[o]ne-by-one / [b]ulk paste / [d]ecline all / [s]kip now: ")).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+        if mode in {"s", "skip", ""}:
+            return None
+        if mode in {"d", "decline", "all"}:
+            answers = {question.id: DEFER for question in batch.questions}
+            _summary(answers)
+            try:
+                confirm = (await read_line("Send 'declined to rule' for all? [Y/n]: ")).strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return None
+            return answers if confirm in {"", "y", "yes"} else None
+        if mode not in {"o", "one", "one-by-one", "b", "bulk"}:
+            print("Please answer o, b, d, or s.")
+            continue
+
+        answers: dict[str, str] = {}
+        if mode in {"b", "bulk"}:
+            print(
+                "Paste rulings, one per line or separated by ';' —\n"
+                "  Q1: store GUID, email fallback\n"
+                "  2: defer\n"
+                "finish with an empty line or 'done'."
+            )
+            while True:
+                try:
+                    block = await read_line("bulk> ")
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    return None
+                if block.strip().lower() in {"", "done", "."}:
+                    break
+                parsed, unparsed = parse_bulk_answers(block)
+                for num, answer in parsed.items():
+                    if 1 <= num <= len(batch.questions):
+                        answers[batch.questions[num - 1].id] = answer
+                    else:
+                        unparsed.append(f"Q{num} (only {len(batch.questions)} questions)")
+                if unparsed:
+                    print("  unrecognized (retype or continue): " + " | ".join(unparsed))
+        else:
+            for idx, question in enumerate(batch.questions, 1):
+                print(f"\n── {idx}/{question.id} [{question.audience}] ──")
+                print(question.question)
+                if question.recommendation:
+                    extra = f" | blocks: {question.blocks}" if question.blocks else ""
+                    print(f"rec: {question.recommendation}{extra}")
+                for option in question.options:
+                    print(f"  {option}")
+                try:
+                    answer = (await read_line("answer (empty = defer): ")).strip()
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    return None
+                if answer:
+                    answers[question.id] = normalize_answer(answer)
+
+        # Unanswered questions are explicit deferrals, so callers and the
+        # summary never have to distinguish "missing" from "declined".
+        for question in batch.questions:
+            answers.setdefault(question.id, DEFER)
+
+        _summary(answers)
+        try:
+            confirm = (await read_line("Send these rulings to the agent? [Y/n]: ")).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+        if confirm in {"", "y", "yes"}:
+            return answers
+        # Declined confirmation: offer the mode menu again.
+
+
 def _resolve_suggested_prompt(
     user_input: str,
     suggested_prompts: list[tuple[str, str, str]],
@@ -2387,8 +2510,17 @@ async def run_interactive(args: Any) -> int:
         pending_edited = False
         pending_read_only = False
         selected_title: str | None = None
-        from_playbook = bool(state.pending_prompts)
-        if state.pending_prompts:
+        synthesized_input = False
+        from_playbook = False
+        if state.pending_user_message is not None:
+            # Rulings queued by the awaiting-input handshake; delivered as a
+            # normal turn (same session) without touching the TUI.
+            user_input = state.pending_user_message
+            state.pending_user_message = None
+            synthesized_input = True
+            _echo_user_prompt(user_input)
+        elif state.pending_prompts:
+            from_playbook = True
             (
                 pending_prompt_id,
                 user_input,
@@ -2474,11 +2606,13 @@ async def run_interactive(args: Any) -> int:
         # Ask for repo location when an analysis task's target is ambiguous.
         # Playbook prompts queued by /next are already scoped to the current
         # project, so skip the clarification unless they contain an explicit URL
-        # or filesystem path.
-        clarified_prompt, _ = await _maybe_clarify_repo_path(
-            user_input, state.history, memory, from_playbook=from_playbook
-        )
-        user_input = clarified_prompt
+        # or filesystem path. Synthesized awaiting-input rulings are lead prose
+        # that routinely names project files — never clarify those.
+        if not synthesized_input:
+            clarified_prompt, _ = await _maybe_clarify_repo_path(
+                user_input, state.history, memory, from_playbook=from_playbook
+            )
+            user_input = clarified_prompt
 
         profile = _build_task_profile(user_input, state, args)
 
@@ -2706,6 +2840,7 @@ async def run_interactive(args: Any) -> int:
             )
 
         try:
+            turn_started = time.time()
             result = await _run_with_interrupt(_execute_turn(), indicator=indicator)
         except TUICancelled:
             print("Cancelled by user.")
@@ -2779,6 +2914,25 @@ async def run_interactive(args: Any) -> int:
                     print(update_msg)
             except Exception as exc:
                 logger.debug("Failed to advance milestone status: %s", exc)
+
+        # Awaiting-input handshake: an agent that ended its turn with
+        # questions wrote a marker; surface the ask compactly (banner +
+        # one-by-one/bulk rulings) instead of leaving it buried in the turn
+        # output. Rulings are queued as the next turn's input so they land in
+        # the same backend session.
+        if not dry_run:
+            try:
+                batch = load_awaiting_input(Path.cwd(), since=turn_started)
+            except Exception as exc:  # never break the REPL on a bad marker
+                logger.warning("awaiting-input check failed: %s", exc)
+                batch = None
+            if batch is not None:
+                answers = await _ask_awaiting_questions(batch)
+                if answers is not None:
+                    clear_awaiting_input(Path.cwd())
+                    state.pending_user_message = format_answers_message(
+                        batch, answers
+                    )
 
         state.history.append({"role": "user", "content": user_input})
         state.history.append({"role": "assistant", "content": result.text})
