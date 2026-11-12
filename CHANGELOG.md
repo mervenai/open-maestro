@@ -5,6 +5,13 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.7] - 2026-11-13
+
+### Fixed
+- **The delivery-routing config can no longer be silently omitted at smoke-test time.** The branch-delivery skill (3.7.0) designated `build-004` as the discovery pass that authors `docs/delivery-routing.md`, but the obligation lived in a "Relationship to other skills" paragraph — background, not checklist — and the smoke doc template had no section for it. IntelInvoiceCoding ran build-004 after 3.7.0 shipped and reasonably produced no routing config: the smoke verified reachability but never probed the code→env path, so implementation started with delivery onboarding (G6) unplanned. Two closes in the dev-env-smoke-test skill:
+  - The smoke doc contract gains a **Deploy path** section: when the environment builds from git, author and cite `docs/delivery-routing.md` per the branch-delivery template and record the one-time path verification; when it is not git-backed, record that as a one-line verdict — "no routing config" is a verdict, not a default.
+  - The checklist gains the matching gate: deploy path settled (routing config authored, or "not git-backed" recorded explicitly).
+
 ## [3.7.6] - 2026-11-13
 
 ### Fixed

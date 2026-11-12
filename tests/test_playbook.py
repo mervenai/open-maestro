@@ -514,6 +514,13 @@ def test_dev_env_smoke_test_skill_exists() -> None:
     text = skill.read_text()
     assert "Liveness rules" in text
     assert "BLOCKED" in text
+    # 3.7.7: the routing config may never be silently omitted — the smoke
+    # doc contract carries a Deploy path section and the checklist a
+    # settle-it item (author docs/delivery-routing.md or record "not
+    # git-backed" as an explicit verdict).
+    assert "**Deploy path**" in text
+    assert "docs/delivery-routing.md" in text
+    assert "not git-backed" in text
 
     plan = load_playbook(Path(__file__).parent.parent)
     build = next(p for d in plan.decks.values() for p in d.prompts if p.id == "build-004")

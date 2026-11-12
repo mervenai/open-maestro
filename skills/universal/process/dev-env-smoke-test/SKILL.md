@@ -51,6 +51,7 @@ Author or update `docs/dev-smoke-test.md` with:
 - **Verdict vocabulary** — exactly `PASS` / `PASS WITH WORKAROUNDS` / `BLOCKED`. Three values, the same discipline as the traceability matrix: resist `mostly works`, `green except auth`.
 - **Per-service table** — service | how reached (URL:port or boot command) | startup/deploy steps | env var names | health check + result | failures/workarounds.
 - **Blocked table** — item | what is missing | evidence | proposed fix + owner.
+- **Deploy path** — if the environment builds from git (CI relay + GitOps values), author `docs/delivery-routing.md` per the branch-delivery skill's template from what this smoke run proves, cite it here, and record the one-time path verification (a pointer swap or trivial relayed change shifts the served artifact). If the environment is **not** git-backed (manual deploys, managed platform pipelines outside the project's control), record that in one line. The omission must be explicit — "no routing config" is a verdict, not a default.
 
 Once sections exist, keep their numbers stable: downstream artifacts cite `§x.y` of this doc as evidence, and renumbering breaks those citations.
 
@@ -58,6 +59,7 @@ Once sections exist, keep their numbers stable: downstream artifacts cite `§x.y
 
 - [ ] Target chosen (remote preferred) and stated; discovery findings recorded if the answer was blank
 - [ ] Every affected service has a health check proving dependency connectivity
+- [ ] Deploy path settled: `docs/delivery-routing.md` authored when the environment builds from git, or "not git-backed" recorded as a one-line verdict in the smoke doc
 - [ ] At most one boot attempt plus one articulated retry per service; no servers left running
 - [ ] Every check has a timeout; commands and outputs recorded as evidence
 - [ ] No secret values in the doc — names only
