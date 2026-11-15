@@ -23,7 +23,7 @@ from open_maestro.events.bus import EventBus
 from open_maestro.events.stream import StreamingHandler
 from open_maestro.interactive import run_interactive
 from open_maestro.mcp.config import load_mcp_config
-from open_maestro.memory.kuzu_client import KuzuMemoryClient
+from open_maestro.memory import MemoryClient, create_memory_client
 from open_maestro.dashboard_server import serve_remote_dashboard
 from open_maestro.milestones import (
     DashboardPublisher,
@@ -864,15 +864,16 @@ async def main_async() -> int:
 
     memory = None
     if args.memory:
-        try:
-            memory = KuzuMemoryClient(project_root=str(Path.cwd()))
-            if not await memory.ensure_initialized():
-                logger.warning(
-                    "Project memory could not be initialized for %s", Path.cwd()
-                )
-        except Exception as exc:
-            logger.warning("kuzu-memory unavailable: %s", exc)
-            memory = None
+        memory = create_memory_client(project_root=str(Path.cwd()))
+        if memory is not None:
+            try:
+                if not await memory.ensure_initialized():
+                    logger.warning(
+                        "Project memory could not be initialized for %s", Path.cwd()
+                    )
+            except Exception as exc:
+                logger.warning("memory backend unavailable: %s", exc)
+                memory = None
 
     search = VectorSearchClient() if args.search else None
     router = (

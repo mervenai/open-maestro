@@ -48,7 +48,7 @@ from open_maestro.events.bus import EventBus
 from open_maestro.events.progress import InteractiveProgressHandler, ProgressIndicator
 from open_maestro.events.stream import StreamingHandler
 from open_maestro.mcp.config import load_mcp_config
-from open_maestro.memory.kuzu_client import KuzuMemoryClient
+from open_maestro.memory import MemoryClient, create_memory_client
 from open_maestro.milestones import (
     DashboardPublishHistoryStore,
     MilestoneDetector,
@@ -245,7 +245,7 @@ def _build_task_profile(
 async def _store_turn_memory(
     state: InteractiveState,
     result: Any,
-    memory: KuzuMemoryClient,
+    memory: MemoryClient,
 ) -> None:
     """Store a concise summary of the just-completed turn to project memory."""
     user_prompt = ""
@@ -456,7 +456,7 @@ async def _handle_command(
     raw: str,
     state: InteractiveState,
     registry: AgentRegistry,
-    memory: KuzuMemoryClient | None,
+    memory: MemoryClient | None,
 ) -> str | None:
     """Parse a slash command and update state.
 
@@ -548,7 +548,7 @@ async def _handle_command(
         if not args:
             return "Usage: /remember <key decision or finding>"
         if memory is None:
-            return "Memory is not available (kuzu-memory CLI missing)."
+            return "Memory is not available (no memory backend installed)."
         note = " ".join(args)
         try:
             await memory.store(
@@ -563,7 +563,7 @@ async def _handle_command(
 
     if cmd == "memory":
         if memory is None:
-            return "Memory is not available (kuzu-memory CLI missing)."
+            return "Memory is not available (no memory backend installed)."
         query = " ".join(args) if args else " ".join(
             turn["content"]
             for turn in state.history[-6:]
@@ -1159,7 +1159,7 @@ def _looks_like_follow_up(
 async def _maybe_clarify_repo_path(
     prompt: str,
     history: list[dict[str, str]],
-    memory: KuzuMemoryClient | None,
+    memory: MemoryClient | None,
     from_playbook: bool = False,
 ) -> tuple[str, Path | None]:
     """Ask the user which repo to analyze when the target is ambiguous.
@@ -2441,16 +2441,18 @@ async def run_interactive(args: Any) -> int:
     # Interactive mode always tries to use memory for recall and storage.
     # Bind to the project directory where maestro was launched and ensure a
     # project-specific memory database exists.
-    memory = None
-    try:
-        memory = KuzuMemoryClient(project_root=str(Path.cwd()))
-        if not await memory.ensure_initialized():
-            logger.warning(
-                "Project memory could not be initialized for %s", Path.cwd()
-            )
-    except Exception as exc:
-        logger.warning("kuzu-memory unavailable: %s", exc)
-        memory = None
+    memory = create_memory_client(project_root=str(Path.cwd()))
+    if memory is not None:
+        try:
+            if not await memory.ensure_initialized():
+                logger.warning(
+                    "Project memory could not be initialized for %s", Path.cwd()
+                )
+        except Exception as exc:
+            logger.warning("memory backend unavailable: %s", exc)
+            memory = None
+    elif os.environ.get("MAESTRO_MEMORY_BACKEND", "").lower() not in {"", "none"}:
+        logger.warning("requested memory backend is not installed")
 
     search = VectorSearchClient() if args.search else None
 

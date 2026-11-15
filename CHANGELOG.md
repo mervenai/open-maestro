@@ -5,7 +5,18 @@ All notable changes to Open Maestro are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.0] - 2026-11-16
+
+### Changed
+- **Project memory backend is now Basic Memory; kuzu-memory becomes a legacy fallback.** kuzu-memory is discontinued (its Kùzu database engine was archived in Oct 2025), and its binary graph DBs locked accumulated decisions inside a dead format. Maestro now speaks to [Basic Memory](https://github.com/basicmachines-co/basic-memory) (`bm` CLI): memories live as plain Markdown notes in `<project>/memory/` with a local SQLite index — human-readable, git-committable, and impossible to strand in a discontinued format.
+  - **Same surface, new backend**: `memory/basic_memory_client.py` implements `recall`/`enhance`/`store`/`ensure_initialized` over the `bm` CLI (JSON output, hybrid semantic search, content-hash idempotency on store). `create_memory_client()` in `open_maestro.memory` picks the backend: `MAESTRO_MEMORY_BACKEND` (`basic-memory`|`kuzu`|`none`) overrides; otherwise `bm` when installed, falling back to `kuzu-memory`; none installed → memory disabled. All call sites (REPL, orchestrator, MCP server, CLI) go through the factory and a backend-agnostic `MemoryClient` protocol, so future swaps touch one module.
+  - **Notes for operators**: first recall per project downloads the local FastEmbed embedding model (~a few seconds once, cached); recall latency is ~2–4 s per turn (CLI startup) vs kuzu's milliseconds — acceptable at once-per-turn frequency, and the HTTP transport is the documented upgrade path if it ever matters. Registering a project creates `memory/` in the project root — add it to `.gitignore` if memory must stay local.
+
+### Added
+- `tests/test_basic_memory.py` (23 tests) — CLI argument shapes, JSON parsing, hash idempotency, project registration, backend auto-detection. The migration path for existing `.kuzu-memory` databases ships as `scripts/migrate_kuzu_memory.py` (see the repo).
+
 ## [3.7.7] - 2026-11-13
+
 
 ### Fixed
 - **The delivery-routing config can no longer be silently omitted at smoke-test time.** The branch-delivery skill (3.7.0) designated `build-004` as the discovery pass that authors `docs/delivery-routing.md`, but the obligation lived in a "Relationship to other skills" paragraph — background, not checklist — and the smoke doc template had no section for it. IntelInvoiceCoding ran build-004 after 3.7.0 shipped and reasonably produced no routing config: the smoke verified reachability but never probed the code→env path, so implementation started with delivery onboarding (G6) unplanned. Two closes in the dev-env-smoke-test skill:

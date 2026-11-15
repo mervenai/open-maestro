@@ -20,7 +20,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from open_maestro.memory.kuzu_client import KuzuMemoryClient
+from open_maestro.memory import MemoryClient, create_memory_client
 from open_maestro.milestones import mutations
 
 logger = logging.getLogger(__name__)
@@ -40,8 +40,11 @@ def _project_root() -> Path:
 async def _record_memory(root: Path, content: str) -> None:
     """Store the mutation's narrative line; never fail the mutation on this."""
     try:
-        client = KuzuMemoryClient(str(root))
-    except Exception as exc:  # kuzu-memory CLI not installed
+        client = create_memory_client(str(root))
+        if client is None:
+            logger.info("maestro-mcp: memory backend not available")
+            return
+    except Exception as exc:
         logger.info("maestro-mcp: memory not recorded (%s)", exc)
         return
     try:

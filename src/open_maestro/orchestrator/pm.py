@@ -57,7 +57,7 @@ from open_maestro.session.store import SessionRecord, SessionStore
 from open_maestro.todos.store import TodoStore
 
 if TYPE_CHECKING:
-    from open_maestro.memory.kuzu_client import KuzuMemoryClient
+    from open_maestro.memory import MemoryClient
     from open_maestro.orchestrator.router import LLMTaskRouter
     from open_maestro.search.vector_client import VectorSearchClient
 
@@ -128,7 +128,7 @@ class ProjectManager:
         self,
         runtime: AgentRuntime,
         registry: AgentRegistry,
-        memory: KuzuMemoryClient | None = None,
+        memory: MemoryClient | None = None,
         search: VectorSearchClient | None = None,
         router: LLMTaskRouter | None = None,
         session_store: SessionStore | None = None,
