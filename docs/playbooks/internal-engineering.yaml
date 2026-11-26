@@ -1,0 +1,558 @@
+# Internal-engineering milestone prompt playbook: Open Maestro developing itself.
+# Forked from the bundled software-consulting playbook v1.4.0
+# (src/open_maestro/milestones/playbooks/software-consulting.yaml).
+# Install: cp docs/playbooks/internal-engineering.yaml .open-maestro/playbook.yaml
+# A project override REPLACES the bundled playbook entirely (no merge), so this
+# file is complete. Differences from software-consulting:
+#   - removed client-only prompts design-004 (stories CSV is hand-maintained in
+#     docs/maestro-user-stories.csv), design-006 (client design approval) and
+#     demo-003 (client handoff);
+#   - client/M3 wording reworded to maintainers/reviewers/release;
+#   - added release-001 and story-sync-001 under demo-delivery.
+# See docs/build-plan-operator-console-2026-11-27.md.
+
+playbook_id: internal-engineering
+version: "1.0.0"
+source_project: open-maestro
+milestone_prompts:
+  intake-discovery:
+    - id: intake-001
+      title: Read and summarize the PRD/RFP
+      order: 1
+      agent_hint: research
+      tags: [discover]
+      read_only: true
+      artifact_target: docs/intake/synthesis-{date}.md
+      prompt: |
+        Read the PRD/RFP in the requirements/ folder and any linked documents.
+        Produce a concise synthesis that covers:
+        - Business goal and user value proposition
+        - Scope IN/OUT (what is explicitly included and excluded)
+        - Superseded decisions (anything the PRD marks resolved, rejected, or "must not be built" — state the decision and what it supersedes, so the team never re-litigates it)
+        - Top 5-8 open questions that could block design or implementation, ranked by blocking severity
+        - Any additional open questions (brief, uncapped — do not drop them)
+        - Top 5-8 risks with proposed mitigations
+        - Reuse opportunities in existing codebase or services
+        Follow the intake-synthesis skill for the canonical section set, the
+        question-vs-risk separation, and the superseded-decisions discipline.
+
+    - id: intake-002
+      title: Identify existing service/code reuse
+      order: 2
+      agent_hint: research
+      tags: [discover, architecture]
+      read_only: true
+      artifact_target: docs/intake/reuse-assessment.md
+      prompt: |
+        Search the codebase for existing capabilities that could be reused for this feature.
+        Look for: similar controllers, services, UI components, events, integration patterns, and auth/permissions models.
+        Produce a reuse assessment with file paths, estimated level of effort to reuse (High/Medium/Low), and any contract mismatches.
+        Follow the reuse-assessment skill for the six-category search pattern,
+        the LOE anchors, the contract-mismatch taxonomy, and the citation
+        discipline (re-read every file:line before claiming it).
+
+    - id: intake-003
+      title: Create a risk register
+      order: 3
+      agent_hint: research
+      tags: [discover, planning]
+      read_only: true
+      artifact_target: docs/intake/risk-register.md
+      prompt: |
+        Based on the PRD, synthesis, and reuse assessment, create a risk register.
+        For each risk include: description, likelihood, impact, owner, and mitigation.
+        Flag any risks that should block the design phase until resolved.
+        Follow the risk-register skill for the register shape, the RR-n ID discipline
+        (shared with the design-phase open-items register), and the rule that blocking
+        risks must be mirrored into .open-maestro/milestones.yaml.
+
+    - id: intake-004
+      title: Create the epic breakdown
+      order: 4
+      agent_hint: product-owner
+      tags: [discover, planning]
+      artifact_target: docs/intake/epics.md
+      prompt: |
+        Based on the PRD, synthesis, reuse assessment, and risk register, create the epic breakdown.
+        Consolidate the scope into 3-6 outcome-aligned epics (numbered CE-1, CE-2, ...). Each epic must:
+        - Own a user-visible outcome end-to-end, not a component slice (avoid one-epic-per-layer splits)
+        - Span the full stack it touches, with a repo/service coverage table
+        - Carry open gates and unresolved decisions as internal options or conditions, not as epic splits
+        - List dependencies on other epics explicitly
+        Do not re-baseline scope or success metrics inside the epics; reference the risk register IDs instead.
+        Write one '### CE-1 - <Name>' heading per epic (sequential numbering: CE-1, CE-2, ...) followed by goal, scope, service coverage, and gates.
+        Follow the epic-breakdown skill for the outcome-aligned split rules, the CE-n ID discipline, the gates-as-conditions rule, and the anti-patterns to reject.
+
+  execution-planning:
+    - id: plan-001
+      title: Verify architecture against real repos
+      order: 1
+      agent_hint: research
+      tags: [discover, architecture]
+      read_only: true
+      artifact_target: docs/execution-plan-{date}.md
+      prompt: |
+        First, re-verify the intake synthesis's load-bearing claims (reuse assets, contract assumptions, reuse instructions) against the actual repos; flag every claim that fails re-verification before proceeding.
+        Then verify the PRD's architectural assumptions against the actual codebase.
+        For each major assumption (data sources, auth, events, deployment topology):
+        - Confirm or correct it with file:line citations
+        - Note any contract mismatch or missing dependency
+        - Propose a ratified design decision
+        Produce an execution plan with the corrected architecture, repo/service impact map, and a go/no-go recommendation for design.
+        Follow the execution-plan skill for the two-phase verification method, the
+        assumption-verification table, the impact map shape, and the go/no-go
+        framing; follow the blueprint-contract skill's citation discipline
+        (re-read every file:line, prove the claim, flag mechanism mismatches).
+
+    - id: plan-002
+      title: Define ratified design decisions
+      order: 2
+      agent_hint: research
+      tags: [decide, architecture]
+      artifact_target: docs/design-decisions.md
+      default_track_only: true
+      prompt: |
+        From the execution plan, extract the 3-6 architectural decisions that must be frozen before design begins.
+        Use an ADR-style format: context, decision, consequences, rejected alternatives.
+        Ensure each decision is numbered (D1, D2, ...) and references real code or docs.
+        Follow the decision-register skill's ADR format section for the entry
+        template, the D-n ID discipline, the status lifecycle, and when an
+        entry is warranted at all.
+
+  design-blueprint:
+    - id: design-001
+      title: Draft data and API contract
+      order: 1
+      agent_hint: research
+      tags: [specify, backend]
+      artifact_target: docs/blueprint-design-and-data-contract.md
+      default_track_only: true
+      prompt: |
+        Draft the data and API contract for the {epic_name} epic.
+        Label the document as draft (e.g. v1.0-draft); this step drafts —
+        the contract is frozen by design-005 sign-off, never by this step.
+        Include:
+        - Request/response DTOs with field types and validation rules
+        - Idempotency, auth, and error-handling rules
+        - Endpoint URLs and methods
+        - Integration events and their payloads
+        Cite existing code patterns from the codebase.
+        Before finalizing, verify every citation and source:
+        - Citation verification: re-read each cited file:line and confirm the cited code actually supports the claim it anchors; drop or fix any citation that does not.
+        - Record the commit SHA (or HEAD date) of each repo checked in a short 'Sources checked' note at the end.
+        - Label each contract element with an explicit 'Anchor' notation: [existing] if it truly reuses a codebase pattern, or [net-new] if this contract introduces it; never present a net-new element as an existing pattern.
+        - Flag mechanism mismatches: if a cited pattern's underlying mechanism differs from what the contract assumes (e.g., a MongoDB document pattern cited for a SQL Server feature, a test double cited as production evidence), say so explicitly instead of citing it as-is.
+        - For UI-facing values (enums, states, actions), take them from the highest-authority source available: a ratified maintainer decision (a locked decision in the design doc or a D-n entry) beats a prototype/bundle/actual UI code, which beats the PRD; if PRD and prototype disagree and neither is ratified, use the prototype and note the discrepancy.
+        Give every open question a stable register ID (DT-n / OQ-n / RR-n,
+        never renumbered) in an open design tasks table with owner and
+        blocking status. Before finishing, mirror every blocking open item
+        into .open-maestro/milestones.yaml (design-blueprint blockers plus a
+        dated notes entry) — the dashboard and later design steps read the
+        milestone file, not this document. Follow the blueprint-contract
+        skill for the document shape and citation discipline, and the
+        decision-register skill for the decision trail: append a dated entry
+        to the design-decisions.md revision log (create the section if
+        absent), update its freeze-gate summary rows for every ID this
+        contract opens or closes, and create/update the
+        docs/decision-register-vX.Y.csv (open + closed rows).
+
+    - id: design-002
+      title: Diagram the blueprint — journey, repos, open questions
+      order: 2
+      agent_hint: documentation
+      tags: [specify, diagrams]
+      artifact_target: docs/diagrams/blueprint-user-journey.md
+      default_track_only: true
+      after: design-001
+      prompt: |
+        Create a Mermaid diagram of the drafted blueprint for the {epic_name} epic that considers the user journey in the prototype and the repos impacted.
+        Requirements:
+        - Number each of the boxes so reviewers can cross-reference them in review and Jira; numbering must stay stable across revisions (never renumber, add at the end).
+        - Apply the User-Journey Blueprint Diagram Standard from the mermaid-diagrams skill: the canonical color palette (amber=open gate, blue=net-new, green=verified existing, grey=user action, pink=external) rendered as an in-diagram legend subgraph; user-action nodes in grey; externals in pink.
+        - Label EVERY edge with its action or payload (e.g. `row click`, `GET /api/Activity`) and tag open/blocking decisions INLINE on the component they gate, using their register ID in that node's own label (e.g. a backend node labelled `OPEN (R-07)` with the open class) — never as a standalone node attached by a dotted edge; state the solid vs dotted arrow semantics in the doc.
+        - Tag every node with the repo it lives in; group nodes into swim-lanes per system area (browser, gateway, external services, backend, admin) with a repos-impacted summary legend. Parked / out-of-scope AND resolved / closed decisions do NOT go in the graph: record them in the node-reference / parked TABLES (and the decision-register CSV) with their disposition citation (DROPPED/EXCLUDED/REJECTED + source), not as graph nodes or edges. The graph shows only live journey/architecture nodes plus currently-open gates.
+        - Base every node and edge on the drafted contract and the prototype — do not invent components the sources do not describe.
+        - Follow the mermaid-diagrams skill: pick the narrowest diagram type for the content (flowchart for service/request flow), validate the syntax by rendering once before saving, and save a Markdown file whose body is a fenced mermaid block (docs/diagrams/<name>.md) plus a rendered PNG and SVG next to it (both rendered from the .md itself — regenerate from the source, never hand-edit).
+        - Under the diagram, include a short node-reference table (number → node → repo → status → anchor), an open-question hot-list (register ID → the node it tags → owner → resolution path), and a parked / out-of-scope table (ID → item → disposition → citation) — decisions live in these tables, not in the graph.
+
+    - id: design-003
+      title: Create UX/template spec
+      order: 3
+      agent_hint: research
+      tags: [specify, frontend]
+      artifact_target: docs/template-spec.md
+      default_track_only: true
+      prompt: |
+        Create a UX/template specification for the user-facing part of the {epic_name} epic.
+        Cover: screen/layout structure, user flow, validation messages, empty/error states, and any file/template formats (e.g., Excel columns).
+        Reference existing UI components and platform conventions.
+        Follow the ux-template-spec skill for the per-screen state blocks, the
+        validation-message table, the flow-branch rules, and the file/template
+        format conventions.
+
+    - id: design-005
+      title: Conduct design review and sign-off
+      order: 5
+      agent_hint: research
+      tags: [decide, verify]
+      artifact_target: docs/design-signoff.md
+      default_track_only: true
+      prompt: |
+        Conduct the design review and sign-off for {epic_name} across every
+        artifact this milestone produced — the data/API contract, the blueprint
+        diagram, the UX/template spec, and the MAE stories in
+        docs/maestro-user-stories.csv (whichever exist).
+
+        Per-artifact adversarial verification is already machine-enforced: the
+        artifact-critic gate re-checks citations, authority sources, and
+        net-new exposure on every artifact change, and the deep-review gate
+        (docs/blueprint*, *contract*, *spec*) blocks /complete until it passes.
+        Do NOT redo that work here. This step covers what those per-artifact
+        gates cannot see:
+
+        1) Cross-artifact consistency — the artifacts must agree with each
+           OTHER, not just with the code. Join on the artifact and register IDs
+           (MAE-n / CE-n-Sm stories, S-n screens, DT/OQ/RR-n items, D-n decisions) and
+           flag every disagreement: counts, names, statuses, enum/state values,
+           endpoint URLs, and items one artifact shows resolved while another
+           shows open.
+        2) Auth/permission claims — trace the actual attribute/policy code for
+           every auth claim the artifacts make, not name similarity.
+        3) Readiness review — unresolved open questions and risks (RR-n) that
+           must close before build planning; verify each blocking item's status
+           against the registers, not against memory.
+
+        Produce docs/design-signoff.md: the checklist with each artifact's pass
+        state, the must-close items cited by register ID, the consistency and
+        auth findings ordered by severity (P0/P1/P2) with evidence, and the
+        sign-off verdict. Mark findings that require a design decision
+        DECISION NEEDED and hand them to the decision-register skill (D-n).
+
+        Only this step may declare the design frozen — follow the
+        blueprint-contract skill's design-signoff section for the checklist
+        shape, the freeze language, and the mandatory decision-trail update
+        (design-decisions.md revision log + freeze-gate rows, decision-register
+        CSV, milestones.yaml blockers via the two-list invariant).
+
+  build-planning:
+    - id: build-001
+      title: Create phased implementation plan
+      order: 1
+      agent_hint: research
+      tags: [plan]
+      artifact_target: docs/build-plan-{epic_id}.md
+      prompt: |
+        Create a phased implementation plan for the {epic_name} epic.
+        Break work into sequenced phases with:
+        - Phase goal and Definition of Done
+        - Tasks mapped to FR/MAE story (Jira key)
+        - Target files and expected changes
+        - Dependencies and parallelization opportunities
+        Cite real file paths from the codebase.
+
+    - id: build-002
+      title: Build traceability matrix
+      order: 2
+      agent_hint: documentation
+      tags: [plan]
+      artifact_target: docs/traceability-matrix.md
+      prompt: |
+        Build a traceability matrix mapping each FR, measurable target, and NFR to:
+        - MAE story (Jira key)
+        - Implementation file(s)
+        - Unit/E2E test file(s)
+        - Status (Not Started / In Progress / Done)
+        Follow the traceability-matrix skill for the row shape, the
+        three-value status vocabulary, and the bidirectional coverage checks.
+
+    - id: build-003
+      title: Prepare test fixtures
+      order: 3
+      agent_hint: engineer
+      tags: [plan, verify]
+      artifact_target: tests/fixtures/
+      prompt: |
+        Create the test fixtures needed for the {epic_name} epic.
+        Include valid, invalid, edge-case, and regression examples.
+        For file-based inputs (e.g., uploads), provide the actual files in tests/fixtures/.
+        Document each fixture's purpose and expected behavior.
+
+    - id: build-004
+      title: Smoke-test dev environments
+      order: 4
+      agent_hint: local-ops
+      tags: [plan, verify]
+      artifact_target: docs/dev-smoke-test.md
+      inputs:
+        - name: dev_env
+          question: Dev environment to smoke-test — local path or preview/deployment URL (blank = discover from repo)
+      prompt: |
+        Smoke-test the dev environment for the {epic_name} epic and record the result.
+        Follow the dev-env-smoke-test skill for target selection, the liveness rules,
+        and the required sections of the smoke doc.
+        Target environment: {dev_env}
+        If the target is local, verify each affected service boots and can talk to
+        its dependencies. If it is remote (shared dev or ephemeral per-branch/preview
+        deployment), verify via its URL and any available deploy/health endpoints —
+        remote environments carry the real database, auth broker, and service
+        networking, so prefer them when both are reachable.
+        For each affected service record: how the environment is reached, startup/deploy
+        steps, required env vars (names only, never values), a health check proving it
+        can talk to its dependencies, and any failures or workarounds.
+
+    - id: build-005
+      title: Batch the build plan into bundles
+      order: 5
+      agent_hint: research
+      tags: [plan, process]
+      artifact_target: docs/build-plan-bundles-{date}.md
+      prompt: |
+        Batch the build plan(s) for the {epic_name} epic into bundles, following the
+        bundle-execution skill.
+        First enumerate every build plan and product epic in scope (docs/build-plan*.md
+        plus any per-epic or per-track plans): a project often carries several product
+        epics inside one maestro epic. The bundle list must cover ALL of them — every
+        story of every epic lands in exactly one bundle, and a bundle that spans epics
+        names each epic it serves.
+        Group the remaining stories by repo/stack/touch-point into bundles of at most ~1,500 production lines each; every story lands in exactly one bundle and the list covers the whole remaining plan.
+        For each bundle record: id + name, member stories (mapped to FR/Jira rows), repos touched, entry gate (what must be answered or done first), estimated production lines, and status (proposed first).
+        Mark which independent bundles may run two at a time, and which bundles need two parallel reviewers (over the size threshold or mixing two stacks).
+        Include the lean process section per the skill: kickoff questions before coding, one implementation pass on stacked branches, one independent review, one fix-and-merge pass (re-review only on BLOCK/HIGH diffs), one env-check checklist per bundle.
+
+  implementation:
+    - id: impl-000
+      title: Bundle kickoff — questions before coding
+      order: 0
+      agent_hint: engineer
+      tags: [build, plan]
+      artifact_target: docs/build-notes/{epic_id}-bundle-kickoff.md
+      prompt: |
+        Kick off the next bundle for the {epic_name} epic before any code is written.
+        Read the bundle plan (docs/build-plan-bundles-*.md) and list every product/maintainer question the bundle's scope makes foreseeable: contract ambiguities the bundle must resolve, permission and scope questions, UX copy decisions, audit/observability expectations, anything a reviewer could raise as a product question.
+        Then ASK the project lead directly, in your response: numbered questions, each tagged with its audience — [lead] or [maintainers] — each with your concrete recommendation and exactly what it blocks. Ask ALL of them, including the [maintainers] ones: the lead frequently rules provisionally on those (accept a recommendation as not-yet-ratified), so nothing is filed away before the lead has seen it. End your turn with the questions — the lead answers in the next message and this session resumes. As the last act before ending the turn, also write the questions to .open-maestro/awaiting-input.yaml (overwrite any existing file; one entry per question with id, audience, question, recommendation, blocks, optional options list) so the maestro REPL can ask them interactively; no writes may follow it. Do not bury questions in a document or in Open register rows and continue: work a question blocks must not start until its answer arrives. A [maintainers] question the lead cannot or chooses not to rule on becomes a decision-register row (status Open, owner named) per the decision-register skill, plus a comment on the story's PR for the other maintainers and reviewers. The lead's rulings are recorded as Decided rows only AFTER they arrive — provisional rulings on [maintainers] questions carry the not-yet-ratified marker (e.g. [PROVISIONAL — not maintainer-ratified]) — never as Open rows beforehand. Post-build questions are the most expensive kind — each one found after code has shipped costs a fix round.
+        For bundles that add or change screens, also list every difference between the template-spec text and the prototype for those screens (counts, components, layout, states); each difference needs a named ruling or becomes a CR before coding starts — the prototype is the visual authority, and unlisted divergences become silently wrong screens.
+        Also confirm the bundle's entry gate from the plan is met (answers received, dependencies merged, visual-target block and mock coverage for UI bundles); if it is not, stop and report instead of building.
+
+    - id: impl-001
+      title: Scaffold key endpoints and services
+      order: 1
+      agent_hint: engineer
+      tags: [build, backend]
+      artifact_target: ""
+      prompt: |
+        Implement the controller endpoints and service methods for the {epic_name} epic according to the frozen data contract.
+        Read the frozen design first — docs/blueprint-design-and-data-contract.md if present, otherwise the feature design doc named in docs/build-plan-{epic_id}.md — and implement exactly what it specifies.
+        If the real code contradicts the contract (a field, route, or validation rule cannot work as specified), record the deviation in docs/spec-deviations.md and flag it - do not silently implement something different.
+        Start with thin controllers, validation, and happy-path stubs; return 501 for unimplemented branches.
+        Add unit tests as you go.
+
+    - id: impl-002
+      title: Implement frontend components
+      order: 2
+      agent_hint: web-ui-engineer
+      tags: [build, frontend]
+      artifact_target: ""
+      prompt: |
+        Implement the frontend components and user flow for the {epic_name} epic.
+        Read the frozen design first — docs/blueprint-design-and-data-contract.md and docs/template-spec.md if present, otherwise the feature design doc named in docs/build-plan-{epic_id}.md — and implement exactly what it specifies.
+        Follow existing component conventions and reuse platform services.
+        If the real code contradicts the specs, record the deviation in docs/spec-deviations.md and flag it - do not silently implement something different.
+        Add unit/component tests as you go.
+
+    - id: impl-003
+      title: Wire integration and events
+      order: 3
+      agent_hint: engineer
+      tags: [build, integration]
+      artifact_target: ""
+      prompt: |
+        Wire cross-service integration for the {epic_name} epic: EventBus events, SSE streams, MCP tools, background tasks, or whatever seam is defined in the design.
+        Read the frozen design first (docs/blueprint-design-and-data-contract.md, or the feature design doc named in docs/build-plan-{epic_id}.md); it defines the integration seams and event payloads.
+        If the real services contradict the contract, record the deviation in docs/spec-deviations.md and flag it - do not silently implement something different.
+        Ensure idempotency, error handling, and observability.
+
+    - id: impl-004
+      title: Fill implementation gaps from build plan
+      order: 4
+      agent_hint: engineer
+      tags: [build]
+      artifact_target: ""
+      prompt: |
+        Work through the {epic_name} build plan phase by phase, replacing each 501 stub and unimplemented branch from impl-001 with real logic.
+        If the plan has been batched into bundles (docs/build-plan-bundles-*.md), work bundle by bundle per the bundle-execution skill instead: one pass per bundle, checks at each story's branch tip.
+        Deliver one story per branch (feat/MAE-nnn-<slug> off main), one PR per story, squash-merged; never commit straight to main.
+        After each phase or bundle, run `uv run ruff check` and `uv run pytest` before moving on, and update the traceability matrix.
+
+    - id: impl-005
+      title: Run security scan gate
+      order: 5
+      agent_hint: security
+      tags: [build, verify, security]
+      artifact_target: docs/security/scan-report-{date}.md
+      prompt: |
+        Run the security scan suite for the {epic_name} epic before QA entry.
+        For each tool below: if it is not installed on this machine, skip it and record the skip in the report — do not fail the gate.
+        - Secrets: gitleaks detect --no-banner. Record findings with file:line; if a secret is in a git-tracked file, flag it for immediate rotation.
+        - SAST: semgrep scan --config auto. Record findings by severity and rule.
+        - SCA: npm audit --json if package.json exists, otherwise pip-audit if requirements.txt or pyproject.toml exists. Record critical/high CVEs.
+        - SBOM: syft . -o cyclonedx-json=docs/security/sbom-{date}.json
+        Group findings by severity (critical/high/medium/low), note which tool produced each, and give a go/no-go recommendation for QA entry.
+        Critical or high findings are blockers until triaged with an owner.
+        Follow the security-scanning skill's milestone scan gate section for
+        the exact tool commands, the skip-not-fail policy, and the report
+        shape.
+
+  qa-integration:
+    - id: qa-001
+      title: Author backend unit tests
+      order: 1
+      agent_hint: qa
+      tags: [verify, backend]
+      artifact_target: tests/unit/
+      prompt: |
+        Author unit tests for the {epic_name} backend code.
+        Cover every branch called out in the traceability matrix, including error cases and idempotency.
+        Run the tests and fix failures before moving on.
+
+    - id: qa-002
+      title: Author E2E tests from BDD scenarios
+      order: 2
+      agent_hint: qa
+      tags: [verify, frontend]
+      artifact_target: tests/e2e/
+      prompt: |
+        Author E2E tests for the {epic_name} epic derived 1:1 from the BDD acceptance criteria.
+        Include happy path, validation errors, auth/permissions, and edge cases.
+        Run the tests and fix failures.
+
+    - id: qa-003
+      title: Create UAT playbook
+      order: 3
+      agent_hint: qa
+      tags: [verify, planning]
+      artifact_target: docs/qa/{epic_id}-uat-playbook.md
+      prompt: |
+        Create a UAT playbook for the {epic_name} epic.
+        Include: prerequisites, test scenarios with steps, expected results, known issues, and sign-off checklist.
+
+    - id: qa-004
+      title: Produce test report and sign-off
+      order: 4
+      agent_hint: qa
+      tags: [verify]
+      artifact_target: docs/qa/{epic_id}-test-report.md
+      prompt: |
+        Run the full test suite for {epic_name} and produce a test report.
+        Include: scope tested, pass/fail counts, linked failures, risks, and a go/no-go recommendation.
+
+  demo-delivery:
+    - id: demo-001
+      title: Prepare demo script
+      order: 1
+      agent_hint: documentation
+      tags: [present]
+      artifact_target: docs/demo/{epic_id}-demo-script.md
+      prompt: |
+        Write a demo script for the {epic_name} epic.
+        Include: setup steps, narrative flow, key clicks/inputs, expected outcomes, and fallback notes.
+
+    - id: demo-002
+      title: Conduct dry-run and capture notes
+      order: 2
+      agent_hint: qa
+      tags: [present, verify]
+      artifact_target: docs/demo/{epic_id}-dry-run-notes.md
+      prompt: |
+        Run through the demo script for {epic_name} and capture dry-run notes.
+        Record any issues, timing, and fixes needed before the release.
+
+    - id: release-001
+      title: Cut the release — lint, test, version, CHANGELOG, tag
+      order: 3
+      agent_hint: local-ops
+      tags: [present, release]
+      artifact_target: CHANGELOG.md
+      inputs:
+        - name: version
+          question: Release version (semver X.Y.Z, e.g. 3.9.0)
+        - name: headline
+          question: One-line release headline for the tag and CHANGELOG (e.g. "Operator Console backend seams")
+      prompt: |
+        Cut the {version} release for the {epic_name} epic from an up-to-date main
+        with every story PR of the epic already squash-merged.
+        1. Run `uv run ruff check` and `uv run pytest`. Stop and report on any
+           failure — never release red.
+        2. Bump `version` in pyproject.toml to {version}. The version lives only
+           there; do not add it anywhere else.
+        3. Add a `## [{version}] - {date}` section at the top of CHANGELOG.md
+           (Keep a Changelog: Added / Changed / Fixed / Removed). Lead each entry
+           with a bold one-sentence summary and cite its MAE story ids.
+        4. Create ONE release commit containing the version bump and the
+           CHANGELOG entry (plus any code, tests and docs still on the release
+           branch), message `release: v{version} — {headline}`.
+        5. Create an annotated tag: `git tag -a v{version} -m "v{version} — {headline}"`.
+        Do not push and do not open a PR: report the commit SHA, the tag, and
+        the test counts, and leave pushing to the maintainer.
+
+    - id: story-sync-001
+      title: Move the epic's stories to Done and sync Jira
+      order: 4
+      agent_hint: documentation
+      tags: [present, release]
+      artifact_target: docs/maestro-user-stories.csv
+      after: release-001
+      prompt: |
+        Sync the backlog for the {epic_name} epic after its release tag.
+        1. In docs/maestro-user-stories.csv, set Status to Done for every MAE
+           story the epic shipped (cross-check against the CHANGELOG entry and
+           merged PRs). Change nothing else: keep CRLF line endings, never
+           rename a Summary (the Jira sync matches on exact summary text), and
+           append a new Done story for any shipped feature that has none.
+        2. Run `./scripts/sync_jira.sh --dry-run` and report every create and
+           transition it would make.
+        3. Only if the dry run is clean (each transition is one you intended, no
+           unexpected regression of a Jira status) run
+           `./scripts/sync_jira.sh --create-missing`. Otherwise stop and report.
+        4. Commit the CSV change as `docs: mark <epic> stories Done (MAE-...)`.
+        Follow docs/jira-sync.md.
+
+  retrospective-findings:
+    - id: retro-001
+      title: Document lessons learned
+      order: 1
+      agent_hint: documentation
+      tags: [reflect]
+      artifact_target: docs/findings/{epic_id}-lessons-learned.md
+      prompt: |
+        Facilitate a lessons-learned review for the {epic_name} epic.
+        Document what went well, what did not, root causes, and actionable improvements.
+
+    - id: retro-002
+      title: Capture known issues and backlog
+      order: 2
+      agent_hint: documentation
+      tags: [reflect]
+      artifact_target: docs/findings/{epic_id}-known-issues.md
+      prompt: |
+        Capture known issues, deferred work, and follow-up backlog items for the {epic_name} epic.
+        Prioritize by impact and effort; link to existing tickets if available.
+
+    - id: retro-003
+      title: Update team playbooks
+      order: 3
+      agent_hint: documentation
+      tags: [reflect]
+      artifact_target: docs/playbook-updates.md
+      prompt: |
+        Update relevant team playbooks with lessons from the {epic_name} epic.
+        Focus on repeatable procedures, environment setup, debugging recipes, and conventions.
+
+placeholders:
+  - name: date
+    description: Current date in ISO format (YYYY-MM-DD)
+  - name: epic_id
+    description: Slug ID of the current epic
+  - name: epic_name
+    description: Human-readable name of the current epic
+  - name: artifact_target
+    description: Target file path for the prompt's primary artifact
