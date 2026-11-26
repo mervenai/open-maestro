@@ -58,7 +58,7 @@ Every reference below was checked against the code at commit `8564f25`.
 | Drift-guarded mutations already exist: `open_session`, `commit` (which raises `DriftError` on an mtime change), `set_milestone_status`, `add_blocker` and `resolve_blocker`. Already used by MCP. | `src/open_maestro/milestones/mutations.py:58-227`; `src/open_maestro/mcp/server.py:24` | The milestone board is wrap-only. |
 | A human-in-the-loop protocol is ready to use: `awaiting-input.yaml` with `load`/`clear`/`parse_bulk_answers`/`format_answers_message`. | `src/open_maestro/awaiting_input.py:19,51,100,121,143` | The Inbox is mostly wrap-only. |
 | Playbook templates already carry `agent_hint`, `read_only`, `after` and `inputs`. Answers persist in `.open-maestro/prompt_inputs.yaml`. | `src/open_maestro/milestones/playbook.py:32-56`; `src/open_maestro/interactive.py:1618`; `src/open_maestro/milestones/commands.py:57-85` | Launch can show prerequisites and remembered inputs. |
-| There is no `fake` runtime under `src/`; `FakeRuntime` exists only in `tests/test_pm.py` and `tests/test_router.py`. The runtime registry is in `src/open_maestro/runtime/factory.py:27-31`. | as cited | Demo mode needs a new scripted runtime. |
+| There is no `fake` runtime under `src/`; `FakeRuntime` is defined across test modules (`tests/test_pm.py`, `tests/test_router.py`, `tests/test_context.py`, `tests/test_review.py`, `tests/test_chain.py`), not under `src/`. The runtime registry is in `src/open_maestro/runtime/factory.py:27-31`. | as cited | Demo mode needs a new scripted runtime. |
 | `prompt_toolkit` (lazy import at `interactive.py:1952`) and `mcp` (`src/open_maestro/mcp/client.py`, `server.py`) are imported but not declared in `pyproject.toml`. | `pyproject.toml` | Declare them in Phase 0. |
 | `SessionStore.prune(keep=50)` exists but nothing calls it. | `src/open_maestro/session/store.py:167` | Wire run-record pruning explicitly. |
 
@@ -97,7 +97,7 @@ Tags: **R** = real today (wrap only), **B** = backend work required, **A** = asp
 |---|---|---|---|---|
 | Projects (picker) | Projects list / New project | New `~/.open-maestro/projects.yaml`; each project's `milestones.yaml` summary | Registry upsert; Initialize calls the `--discover-milestones` path (`cli.py:232`) | B |
 | Dashboard | KPIs, live runs, awaiting action, LLM usage | `MilestonePlan.summary`, active run, `awaiting-input.yaml`, run cost rollup | — | R (KPIs) / B (live, usage) |
-| Milestones board (8 lifecycle columns per epic) | Audit & Blueprint progress | `milestones.yaml`, `gate_advisory` (`milestones/commands.py:168`), `exit_criteria`, artifact globs (`milestones/models.py:65-66`) | `mutations.set_milestone_status`, `add_blocker`, `resolve_blocker` | R |
+| Milestones board (8 lifecycle columns per epic) | Audit & Blueprint progress | `milestones.yaml`, `gate_advisory` (`milestones/commands.py:168`), `exit_criteria`, artifact globs (`milestones/models.py:65-66`). GET path depends on `MilestoneStore.load(create_if_missing=False)` (MAE-115, Phase 0) because `load()` currently auto-creates default plans (`src/open_maestro/milestones/store.py:103-115`). Mutations are real today. | `mutations.set_milestone_status`, `add_blocker`, `resolve_blocker` | R |
 | Launch (playbook prompt picker) | Orchestration tabs + launch confirm | `get_current_or_next_milestone_prompts` (`milestones/commands.py:85`), `PromptHistoryStore` (`milestones/prompt_history.py:119`), `prompt_inputs.yaml`, template `inputs/agent_hint/read_only/after` | Start a turn via TurnService; save inputs | B |
 | Ask (free-form, with agent/model/chain/swarm/dry-run toggles) | Skill toggles | Agents registry, `models.yaml` | Start a turn | B |
 | Runs list | Agent runs | New `runs/*.yaml`, `sessions/*.yaml` | — | B |
@@ -291,6 +291,7 @@ All stories are in `docs/maestro-user-stories.csv` with Status `Backlog`.
 | `orchestrator/swarm.py` | `swarm.started`, `swarm.worker_started`, `swarm.worker_completed` |
 | `runtime/claude_cli.py`, `runtime/kimi_cli.py`, `runtime/openai_sdk.py` | `runtime.working` |
 | `runtime/claude_sdk.py`, `runtime/kimi_acp.py`, `runtime/openai_sdk.py` | `tool.call`, `tool.result` |
+| `runtime/kimi_cli.py` | `session.resume_hint` |
 
 **New events** (Phases 0-1):
 
