@@ -8,7 +8,7 @@
 
 ## 1. Context
 
-The Operator Console design merged in PR #10 (`5652453`) with backlog stories MAE-110..137. This plan schedules that work through Maestro's own 8-milestone lifecycle (`src/open_maestro/milestones/templates.py`): intake-discovery, execution-planning, design-blueprint, build-planning, implementation, qa-integration, demo-delivery, retrospective-findings. Statuses are `not_started | in_progress | blocked | completed | skipped` (`milestones/models.py`). Using Maestro to build Maestro's UI checks the lifecycle on a real project and leaves an audit trail.
+The Operator Console design merged in PR #10 (`5652453`) with backlog stories MAE-110..137 (MAE-138..141 were added during design review-gate remediation). This plan schedules that work through Maestro's own 8-milestone lifecycle (`src/open_maestro/milestones/templates.py`): intake-discovery, execution-planning, design-blueprint, build-planning, implementation, qa-integration, demo-delivery, retrospective-findings. Statuses are `not_started | in_progress | blocked | completed | skipped` (`milestones/models.py`). Using Maestro to build Maestro's UI checks the lifecycle on a real project and leaves an audit trail.
 
 Two hygiene defects found during research would interfere with the plan, so they become stories:
 
