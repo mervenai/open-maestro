@@ -1,7 +1,7 @@
 # Operator Console UI Wrapper Design for Open Maestro
 
-- **Date:** 2026-11-26 (v0.1); revised 2026-11-27 (v0.2)
-- **Status:** Draft v0.2 (decisions locked; open items listed in §13.1)
+- **Date:** 2026-11-26 (v0.1); revised 2026-11-27 (v0.2), 2026-11-28 (v0.3)
+- **Status:** Draft v0.3 (decisions locked; open items listed in §13.1)
 - **Related:** `docs/milestone-guided-experience-design.md`, `docs/DASHBOARD.md`, `docs/code-critic-gate-plan.md`, `docs/requirements/Merven platform prototype.html` and `docs/requirements/AutonomyAI.png` (both untracked; they exist only in the primary checkout, see the note below)
 
 > The two `docs/requirements/` inputs are directional material. At the time of writing they are not committed to the repository.
@@ -13,7 +13,7 @@
 - **Unresolved items by severity (§13.1):** 11 non-decision items (4 with Status Open: OQ-1, OQ-2, OQ-3, R-1; 7 with Mitigation planned). By severity: Critical 0, High 4 (OQ-3, R-1, R-3, R-8), Medium 4 (OQ-1, R-2, R-5, R-7), Low 3 (OQ-2, R-4, R-6).
 - **Design-freeze blockers:** none. No item is Critical. Each High item must be closed before the phase named in its "Target phase" column exits; that is a phase-exit condition, not a design-freeze blocker. The first High **risk**, R-1, is fixed by verifying cancel on `kimi-acp`/`openai-sdk` in MAE-126 and recording partial artifacts in the run record.
 - **Owners:** decisions and open items are owned by role, not by name: **Product owner (Operator Console)**, **Tech lead (Operator Console)** and **Security reviewer**. The owner of each item is in §13.1.
-- **What changed since the previous round:** see §15 Change history (v0.1 → v0.2, review gate `068da645211d8f00`).
+- **What changed since the previous round:** see §15 Change history (v0.1 → v0.2, review gate `068da645211d8f00`; v0.3, review gate `9763756ce6380ea2`).
 - **Final vs conditional:** three classes. **Final (locked):** the "Locked decisions" paragraph in §1, the §2 non-goals, §5.1, §7.2, §7.7, §7.10, and register rows D-1 … D-9. **Conditional:** §11 Phases 2-4 (re-planned at each phase start), the OQ-n and R-n rows of §13.1, and Appendix C payloads (illustrative, finalised by the OpenAPI schema). **Plan of record** (everything else, including §5.2, §6-§10, §11 Phases 0-1, §12, §14 and Appendices A-B): current and binding, changed only through an entry in §15.
 - **Corrections:** open a pull request against this file, or comment on the relevant MAE story in `docs/maestro-user-stories.csv` / Jira. The Tech lead (design owner) triages corrections.
 
@@ -69,7 +69,7 @@ Every reference below was checked against the code at commit `8564f25`; referenc
 | Drift-guarded mutations already exist: `open_session`, `commit` (which raises `DriftError` on an mtime change), `set_milestone_status`, `add_blocker` and `resolve_blocker`. Already used by MCP. | `src/open_maestro/milestones/mutations.py:58-277`; `src/open_maestro/mcp/server.py:24` | The milestone board is wrap-only. |
 | A human-in-the-loop protocol is ready to use: `awaiting-input.yaml` with `load`/`clear`/`parse_bulk_answers`/`format_answers_message`. | `src/open_maestro/awaiting_input.py:19,51,100,121,143` | The Inbox is mostly wrap-only. |
 | Playbook templates already carry `agent_hint`, `read_only`, `after` and `inputs`. Answers persist in `.open-maestro/prompt_inputs.yaml`. | `src/open_maestro/milestones/playbook.py:32-56`; `src/open_maestro/interactive.py:1618`; `src/open_maestro/milestones/commands.py:57-85` | Launch can show prerequisites and remembered inputs. |
-| There is no `fake` runtime under `src/`; `FakeRuntime` is defined across test modules (`tests/test_pm.py`, `tests/test_router.py`, `tests/test_context.py`, `tests/test_review.py`, `tests/test_chain.py`), not under `src/`. The runtime registry is in `src/open_maestro/runtime/factory.py:27-31`. | as cited | Demo mode needs a new scripted runtime. |
+| There is no `fake` runtime under `src/`; `FakeRuntime` is defined across test modules (`tests/test_pm.py`, `tests/test_router.py`, `tests/test_context.py`, `tests/test_review.py`, `tests/test_chain.py`), not under `src/`. The runtime registry is in `src/open_maestro/runtime/factory.py:27-33`. | as cited | Demo mode needs a new scripted runtime. |
 | `prompt_toolkit` (lazy import at `interactive.py:1952`) and `mcp` (`src/open_maestro/mcp/client.py`, `server.py`) are imported but not declared in `pyproject.toml`. | `pyproject.toml` | Declare them in Phase 0. |
 | `SessionStore.prune(keep=50)` exists but has no production caller (only `tests/test_session_store.py:150`). | `src/open_maestro/session/store.py:167` | Wire run-record pruning explicitly. |
 
@@ -96,7 +96,7 @@ The console takes the **Merven Operator surface's shape**: a 200 px sidebar, KPI
 
 | Merven gate | Maestro equivalent | Mechanism today | Console tag |
 |---|---|---|---|
-| Agent config | Launch confirm sheet: agent, model, runtime, inputs, and the permission mode shown read-only (`auto`, or `read-only` for read-only prompts; D-6) | Real in REPL, as process-wide CLI flags and REPL state | **B**: console exposure needs per-turn `TurnRequest` fields (MAE-110, Phase 0). `TurnRequest.permission_mode` carries the D-6 value; v1 offers no mode picker |
+| Agent config | Launch confirm sheet: agent, model, runtime, inputs, and the permission mode shown read-only: always `auto` (D-6). Read-only prompts are constrained by the blocked-tool set (`src/open_maestro/orchestrator/pm.py:274-277`), not by a different permission mode | Real in REPL, as process-wide CLI flags and REPL state | **B**: console exposure needs per-turn `TurnRequest` fields (MAE-110, Phase 0). `TurnRequest.permission_mode` carries the D-6 value; v1 offers no mode picker |
 | Blueprint approval | "Design Blueprint" milestone completed, plus the `review/` gate ledger | Real backend (`src/open_maestro/review/gate.py`, `src/open_maestro/milestones/mutations.py`) | **B**: Gates & review screen, Phase 2 (MAE-133) |
 | Code review | Critic verdict plus diff | Advisory (`src/open_maestro/orchestrator/chain.py:711`) | **B**: Phase 2 (MAE-132); opt-in blocking |
 | Low-confidence escalation | Prefer-local escalation confirm plus awaiting-input | Real in REPL (`interactive.py:2077`, `src/open_maestro/awaiting_input.py`) | **B**: console exposure needs `OperatorIO` (MAE-111, Phase 0) |
@@ -220,7 +220,7 @@ At start-up the server generates a token with `secrets.token_urlsafe(32)` and pu
 
 ## 9. Demo mode and walkthrough
 
-`maestro --ui --demo` copies `src/open_maestro/ui/demo/fixture-project/` (a seeded "Acme Claims Portal" at ~30%: 2 milestones done, prompt history, 1 blocker, sample persona reviews) to a temp directory. It forces a new **`runtime/scripted.py`** runtime, registered in `runtime/factory.py`, that replays `demo/script.yaml`: timed tool events, an artifact write, an optional awaiting-input batch and a canned critic WARN. No network, no tokens; a persistent Demo banner; the same runtime drives Playwright. The scripted runtime itself ships in Phase 0 (§11); the fixture, `--demo` flag and banner ship in Phase 1.
+`maestro --ui --demo` copies `src/open_maestro/ui/demo/fixture-project/` (a seeded "Acme Claims Portal" at ~30%: 2 milestones done, prompt history, 1 blocker, sample persona reviews) to a temp directory. It forces a new **`runtime/scripted.py`** runtime, registered in `runtime/factory.py`, that replays `demo/script.yaml`: timed tool events, an artifact write, an optional awaiting-input batch and a canned critic WARN. No network, no tokens; a persistent Demo banner; the same runtime drives Playwright. The scripted runtime itself ships in Phase 0 (§11) with only a minimal unit-test script (for example `tests/fixtures/scripted/minimal.yaml`); the demo fixture project, `demo/script.yaml`, the `--demo` flag and the banner ship in Phase 1 (the rest of MAE-130).
 
 In the Phase 1 demo, steps 8-9 are skipped: the fixture's persona reviews and canned WARN are seeded data, but the Gates and Artifacts screens that show them ship in Phase 2. From Phase 2 the demo walks all 10 steps, still on the scripted runtime.
 
@@ -250,8 +250,8 @@ The frontend source lives in a top-level `ui/` directory as a Vite project. `scr
 
 | Phase | Scope | Exit criteria | Main risk |
 |---|---|---|---|
-| 0 Backend seams (no UI) | **Delivered first, in order:** (1) dependency declaration — `prompt_toolkit` in core deps, `[mcp]` extra (the deps part of MAE-131); (2) scripted runtime `runtime/scripted.py` registered in `runtime/factory.py` (the runtime part of MAE-130); (3) the REPL golden-transcript test. **Then:** TurnService (incl. `TurnRequest.permission_mode`), OperatorIO/TerminalIO, stream→bus bridge, `run_id` contextvar, run records, `run.lock`, `load(create_if_missing)` | `prompt_toolkit` and `mcp` declared; scripted runtime replays deterministically with no network; `tests/test_interactive_golden.py` added in Phase 0 before extraction, and it must remain green and unchanged thereafter; all tests green; REPL turns write run records; claude-cli tool events visible via the existing `--stream` flag (`cli.py:382`) | Regressions in the 2.9k-line REPL. Write characterization tests first. |
-| 1 Console MVP | `[ui]` extra and wheel packaging (rest of MAE-131), `--ui`, auth, registry, Dashboard, Milestones, Launch, Ask, Runs, Run detail + Cancel, Inbox, demo mode UI: fixture, `--demo`, banner (rest of MAE-130) | Operator completes intake→blueprint without a terminal; demo steps 1-7 and 10 on the scripted runtime; Playwright smoke test; SPA < 3 MB in wheel | Headless permission denials; SSE drops |
+| 0 Backend seams (no UI) | **Delivered first, in order:** (1) dependency declaration — `prompt_toolkit` in core deps, `[mcp]` extra (the deps part of MAE-131); (2) scripted runtime `runtime/scripted.py` registered in `runtime/factory.py`, with a minimal unit-test script `tests/fixtures/scripted/minimal.yaml` (the runtime part of MAE-130); (3) the REPL golden-transcript test. **Then:** TurnService (incl. `TurnRequest.permission_mode`), OperatorIO/TerminalIO, stream→bus bridge, `run_id` contextvar, run records, `run.lock`, `load(create_if_missing)` | `prompt_toolkit` and `mcp` declared; scripted runtime replays the minimal unit-test script (`tests/fixtures/scripted/minimal.yaml`) deterministically with no network (the demo fixture project and `demo/script.yaml` are Phase 1); `tests/test_interactive_golden.py` added in Phase 0 before extraction, and it must remain green and unchanged thereafter; all tests green; REPL turns write run records; claude-cli tool events visible via the existing `--stream` flag (`cli.py:382`) | Regressions in the 2.9k-line REPL. Write characterization tests first. |
+| 1 Console MVP | `[ui]` extra and wheel packaging (rest of MAE-131), `--ui`, auth, registry, Dashboard, Milestones, Launch, Ask, Runs, Run detail + Cancel, Inbox, demo mode UI: fixture project, `demo/script.yaml`, `--demo`, banner (rest of MAE-130) | Operator completes intake→blueprint without a terminal; demo steps 1-7 and 10 on the scripted runtime; Playwright smoke test; SPA < 3 MB in wheel | Headless permission denials; SSE drops |
 | 2 Gates & review | Critic panel + ack/override; optional blocking critic (`--critic-blocking` pauses the chain via `confirm("critic.gate")`); persona reviews + GateLedger; artifact diff; blockers, todos, memory notes | Demo steps 8-9 real; BLOCK can pause a chain | A blocking critic changes chain semantics |
 | 3 Admin | Models/capabilities/latency/quota + pins; agents browser; sources; skills; MCP view; usage rollups; hub-mode investigation | Operator changes the default model; per-milestone spend visible | Safe YAML editing |
 | 4 Aspirational | Client portal round-trip via the merven.ai dashboard; chat + live-preview workbench; Jira/Linear connectors; audit log; multiple users; non-loopback binding / hosting | Separate design | Trust-model change (hosting) |
@@ -260,7 +260,7 @@ The frontend source lives in a top-level `ui/` directory as a Vite project. `scr
 
 For the eventual implementation:
 
-- **Characterization first:** `tests/test_interactive_golden.py` does not exist yet. It is added in Phase 0, before any extraction, and records a REPL transcript against a deterministic runtime, plus prompt-history and milestone side effects. Once added it must remain green and unchanged for the rest of Phase 0 and after.
+- **Characterization first:** `tests/test_interactive_golden.py` does not exist yet. It is added in Phase 0, before any extraction, and records a REPL transcript against a deterministic runtime (the Phase 0 scripted runtime with a minimal script, not the Phase 1 demo fixture), plus prompt-history and milestone side effects. Once added it must remain green and unchanged for the rest of Phase 0 and after.
 - **`tests/test_turn_service.py`:** hint routing; `TurnRequest.permission_mode` reaches `AgentConfig.permission_mode`; escalation through a stub IO; the awaiting batch is returned, not asked; a stale marker is ignored; a run record is written; cancel yields `cancelled`.
 - **Stream bridge:** fixture tests on `parse_claude_stream_line` (text, tool_use, tool_result, permission denials).
 - **`tests/test_ui_api.py`** (`httpx.AsyncClient(ASGITransport)`, `pytest.importorskip("fastapi")`): 401/403; 404 when uninitialised; PATCH drift; 409 single-flight; cancel; awaiting-input POST clears the marker and queues a follow-up; interaction resolve; redaction.
@@ -271,7 +271,7 @@ For the eventual implementation:
 
 ## 13. Risks and open questions
 
-**Headless permissions — decision D-6 (v1 behaviour).** v1 runs every non-read-only prompt with `--permission-mode auto`; read-only playbook prompts additionally keep the mutating-tool block that `PMAgent.handle` already applies (`orchestrator/pm.py:274-277`). `claude -p` never prompts, so a denied tool call does not pause the run: denials are listed on Run detail and stored in the run record (`permission_denials`, Appendix B). The Launch confirm sheet shows this mode but does not let the operator change it; a mode picker would need OQ-3 resolved first. **v1 does not offer "re-run with a widened allowlist".** Turning a denial into an Interaction that re-runs the turn with extra allowed tools is open question OQ-1 (owner: Product owner with Security reviewer; decide by Phase 2 start). It is not v1 behaviour, and nothing in Phases 0-1 depends on it.
+**Headless permissions — decision D-6 (v1 behaviour).** v1 runs every non-read-only prompt with `--permission-mode auto`; read-only playbook prompts also run with `auto` and are constrained by the mutating-tool block that `PMAgent.handle` already applies (`orchestrator/pm.py:274-277`), not by a different permission mode. `claude -p` never prompts, so a denied tool call does not pause the run: denials are listed on Run detail and stored in the run record (`permission_denials`, Appendix B). The Launch confirm sheet shows this mode but does not let the operator change it; a mode picker would need OQ-3 (MAE-141) resolved first. **v1 does not offer "re-run with a widened allowlist".** Turning a denial into an Interaction that re-runs the turn with extra allowed tools is open question OQ-1 (owner: Product owner with Security reviewer; decide by Phase 2 start). It is not v1 behaviour, and nothing in Phases 0-1 depends on it.
 
 ### 13.1 Decision and open-question register
 
@@ -284,13 +284,13 @@ Severity: **Critical** blocks the design; **High** must be closed before its tar
 | D-3 | Stack: FastAPI in-process with uvicorn on Maestro's asyncio loop, plus a React/Vite SPA (§7, §8). | High | Tech lead | 1 | Locked |
 | D-4 | Live updates use SSE, not WebSocket (§7.7). | Medium | Tech lead | 1 | Locked |
 | D-5 | One project per process (80 `Path.cwd()` sites, singleton bus); hub mode revisited in Phase 3 (§7.3). | Medium | Tech lead | 1 | Locked (Phase 3 may open a new decision for hub mode) |
-| D-6 | Permission default: `auto` for non-read-only prompts, shown read-only on the Launch sheet (no picker), denials displayed, no interactive re-run in v1 (§13 above). | High | Product owner + Security reviewer | 1 | Locked |
-| D-7 | Phase 0 delivers dependency declaration (deps part of MAE-131) and the scripted runtime (runtime part of MAE-130) first, before the golden test and the TurnService extraction (§11). | Medium | Tech lead | 0 | Locked (v0.2) |
+| D-6 | Permission mode: always `auto`, shown read-only on the Launch sheet (no picker); read-only prompts are constrained by the blocked-tool set (`pm.py:274-277`), not by a different mode; denials displayed, no interactive re-run in v1 (§13 above). | High | Product owner + Security reviewer | 1 | Locked |
+| D-7 | Phase 0 delivers dependency declaration (deps part of MAE-131) and the scripted runtime with a minimal unit-test script (runtime part of MAE-130; demo fixture and `demo/script.yaml` are Phase 1) first, before the golden test and the TurnService extraction (§11). | Medium | Tech lead | 0 | Locked (v0.2) |
 | D-8 | No numeric critic confidence: show `PASS/WARN/BLOCK`; do not invent a score (§5.1). | Low | Product owner | 2 | Locked |
 | D-9 | Deliverable of this design round: this document plus backlog stories MAE-110 … MAE-137; no code (§1). | Low | Product owner | — | Locked |
 | OQ-1 | Should a permission denial become a "re-run with widened allowlist" Interaction? | Medium | Product owner + Security reviewer | 2 | Open |
 | OQ-2 | Interactions time out after 30 minutes and cancel. Should the console also raise an OS notification? | Low | Product owner | 2 | Open |
-| OQ-3 | `--permission-mode` values are forwarded to `claude` unmapped (`claude_cli.py:222-223`). The `claude --help` text on the review machine lists `acceptEdits, auto, bypassPermissions, manual, dontAsk, plan`, so of Maestro's `allow\|auto\|yolo\|read-only` only `auto` appears valid there (not exercised). Map or validate per runtime. | High | Tech lead | 0 (MAE-110) | Open |
+| OQ-3 | `--permission-mode` values are forwarded to `claude` unmapped (`claude_cli.py:222-223`). The `claude --help` text on the review machine lists `acceptEdits, auto, bypassPermissions, manual, dontAsk, plan`, so of Maestro's `allow\|auto\|yolo\|read-only` only `auto` appears valid there (not exercised). Map or validate per runtime; tracked by MAE-141. Until then v1 sends only `auto` (D-6). | High | Tech lead | 0 (MAE-141) | Open |
 | R-1 | Cancel semantics for `kimi-acp`/`openai-sdk`, and partial artifacts. claude-cli is proven (`claude_cli.py:318-349`); the others need verification. Partial artifacts go in the run record. | High | Tech lead | 1 (MAE-126) | Open |
 | R-2 | Concurrent REPL+UI writes to `prompt_inputs.yaml`/`prompt_history.yaml`: atomic write plus re-read before merge. The run lock (MAE-116) covers turns, not these files; the first story where both surfaces write them is MAE-123 (Launch saves inputs), which owns this mitigation. | Medium | Tech lead | 1 (MAE-123) | Mitigation planned |
 | R-3 | Secrets leaking via `/api` or SSE: bridge redaction, `config.yaml` never served, a redaction test. | High | Security reviewer | 1 (MAE-118, MAE-125) | Mitigation planned |
@@ -302,14 +302,14 @@ Severity: **Critical** blocks the design; **High** must be closed before its tar
 
 Non-decision items (all OQ-n and R-n rows): 11 — 4 Open, 7 Mitigation planned; by severity Critical 0, High 4, Medium 4, Low 3. "Locked" with a later revisit means the decision holds for v1 and any change is a new register entry.
 
-## 14. Story index (MAE-110 … MAE-137)
+## 14. Story index (MAE-110 … MAE-141)
 
 All stories are in `docs/maestro-user-stories.csv` with Status `Backlog`. MAE-130 and MAE-131 are delivered in two parts across Phases 0 and 1 (D-7); the CSV rows are not split, and the build plan records the split by pull request.
 
 | Phase | Stories |
 |---|---|
-| 0 Backend seams | **First:** MAE-131 (dependency-declaration part), MAE-130 (scripted-runtime part). **Then:** MAE-110 TurnService, MAE-111 OperatorIO, MAE-112 stream→EventBus bridge, MAE-113 run records, MAE-114 run-id tagging, MAE-115 side-effect-free milestone reads, MAE-116 cross-surface run lock |
-| 1 Console MVP | MAE-117 `maestro --ui` launcher, MAE-118 loopback token auth, MAE-119 project registry/picker, MAE-120 Initialize from UI, MAE-121 Dashboard KPIs, MAE-122 milestone board, MAE-123 Launch with inputs, MAE-124 free-form Ask, MAE-125 live run log over SSE, MAE-126 cancel, MAE-127 Inbox rulings, MAE-128 mid-turn interactions, MAE-129 runs list/detail, MAE-130 demo mode (fixture, `--demo`, banner), MAE-131 wheel packaging (`[ui]` extra, SPA bundle) |
+| 0 Backend seams | **Hygiene / pre-work:** MAE-138 test-session isolation, MAE-139 `add_epic`, MAE-140 review gate passable via `maestro --review`, MAE-141 permission-mode mapping to Claude CLI values (closes OQ-3). **First:** MAE-131 (dependency-declaration part), MAE-130 (scripted-runtime part, minimal unit-test script only). **Then:** MAE-110 TurnService, MAE-111 OperatorIO, MAE-112 stream→EventBus bridge, MAE-113 run records, MAE-114 run-id tagging, MAE-115 side-effect-free milestone reads, MAE-116 cross-surface run lock |
+| 1 Console MVP | MAE-117 `maestro --ui` launcher, MAE-118 loopback token auth, MAE-119 project registry/picker, MAE-120 Initialize from UI, MAE-121 Dashboard KPIs, MAE-122 milestone board, MAE-123 Launch with inputs, MAE-124 free-form Ask, MAE-125 live run log over SSE, MAE-126 cancel, MAE-127 Inbox rulings, MAE-128 mid-turn interactions, MAE-129 runs list/detail, MAE-130 demo mode (fixture project, `demo/script.yaml`, `--demo`, banner), MAE-131 wheel packaging (`[ui]` extra, SPA bundle) |
 | 2 Gates & review | MAE-132 critic gate review + optional blocking, MAE-133 persona reviews + gate ledger, MAE-134 artifact diff, MAE-135 blockers, todos, memory notes |
 | 3 Admin | MAE-136 models, agents, sources, usage admin |
 | 4 Aspirational | MAE-137 client portal approvals + chat/preview workbench (design spike only) |
@@ -361,7 +361,7 @@ runtime: claude-cli
 model: claude-opus-5-5
 session_id: 3b1c...                    # backend session, reused by follow-ups
 tokens: {input: 41210, output: 6893}
-cost: 0.83                             # USD, display only
+cost: 0.30                             # USD, display only
 critic_verdict: WARN                   # PASS|WARN|BLOCK|null
 permission_denials:
   - {tool: Bash, input_summary: "git push origin ..."}
@@ -386,9 +386,13 @@ result_excerpt: "Wrote docs/blueprint-design-and-data-contract.md ..."
   "chain": true,
   "swarm": false,
   "dry_run": false,
-  "prefer_local": false
+  "prefer_local": false,
+  "runtime": null,
+  "permission_mode": "auto"
 }
 ```
+
+`runtime: null` means the project default. In v1 the server accepts only `permission_mode: "auto"` and rejects any other value with `422` (D-6); the field exists so MAE-110's `TurnRequest.permission_mode` is expressible once MAE-141 lands.
 
 The response is `202 {"run_id": "run-20261126-142233-7f3a"}`, or `409 {"error": "run_active", "run_id": "..."}` if a run is already active.
 
@@ -420,3 +424,4 @@ The server formats the answers with `format_answers_message`, clears the marker,
 |---|---|---|
 | 2026-11-26 | v0.1 | Initial design (PR #10). |
 | 2026-11-27 | v0.2 | Review-gate remediation (gate `068da645211d8f00`: fidelity and blind-reader findings). Removed `--ui-allow-remote`; v1 binds to loopback only, hosting moves to Phase 4 (D-2). §5.2 split into "Mechanism today" and "Console tag" so it agrees with §6 (escalation needs `OperatorIO`, MAE-111; agent config needs per-turn `TurnRequest` fields, MAE-110). Chose to keep the scripted runtime and dependency declaration in Phase 0 and deliver them first, as the runtime part of MAE-130 and the deps part of MAE-131, rather than moving them to Phase 1 (D-7; §11, §14). Golden test is now "added in Phase 0 before extraction; must remain green and unchanged thereafter". `session.resume_hint` moved out of the emitter table (parsed metadata). Permission-mode wiring stated with file:line, per-turn override marked as new work, value mapping raised as OQ-3. Headless-permission behaviour made an explicit decision (D-6) with re-run-with-widened-allowlist as OQ-1. Added the document-status block, the §13.1 register with severity and owner roles, and this history. Second gate round (`cb121c3577634bd4`): Playwright scope matched to the Phase 1/2 demo split; D-6 made explicit that the Launch sheet shows the mode read-only with no picker; R-2 re-owned by MAE-123; D-9 added for the "no code" deliverable so §1's four locked decisions all have IDs; status-block counts, final/conditional classes and header date clarified. Smaller clarifications: blocking-prompt count, startup range 2412-2512, Initialize path, config file paths, Todos tag, `create_if_missing` default, run-record pruning, Phase 1 demo steps 8-9, merven.ai status, Jira/Linear "out of scope for v1". |
+| 2026-11-28 | v0.3 | Fidelity round-3 fixes (gate `9763756ce6380ea2`). §5.2 Agent config: the mode shown is always `auto`; read-only prompts are constrained by the blocked-tool set (`pm.py:274-277`), not by a `read-only` mode; D-6 and OQ-3 aligned, OQ-3 now tracked by MAE-141. §11 Phase 0 exit criterion now requires only a minimal unit-test script shipped with the runtime (`tests/fixtures/scripted/minimal.yaml`); the demo fixture project and `demo/script.yaml` are Phase 1 (rest of MAE-130); §9, §12, §14 and D-7 aligned. Appendix B `cost` recomputed at configured prices (`config/default_capabilities.yaml:82-83`: 41,210 × $4/M + 6,893 × $20/M = $0.30). `factory.py:27-31` → `27-33`. Appendix C `POST /api/runs` gains `runtime` and `permission_mode`. §14 adds MAE-138..141. |

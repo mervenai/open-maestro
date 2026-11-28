@@ -15,10 +15,15 @@ Two hygiene defects found during research would interfere with the plan, so they
 - **MAE-138.** The tests leak `runtime_name: fake` sessions into the real repo's `.open-maestro/sessions/` (208 files). Also, `MilestoneStore.update()` writes `dashboard.html` to the repo root, and `.gitignore` does not cover it.
 - **MAE-139.** No `add_epic` mutation or MCP tool exists (`milestones/mutations.py`, `mcp/server.py`), so phase epics can only be added by hand-editing `milestones.yaml`.
 
+Two more gaps surfaced while running the review gate on the design doc:
+
+- **MAE-140.** The `review` gate profile requires `noise` and `panel` personas (`review/gate.py:62`) that `maestro --review` never runs (`cli.py:488`, `review/blueprint.py:58`), and quote-context self-references a document with no PRD/blueprint companion (`review/blueprint.py:441-478`), so a design doc cannot pass the gate without hand-editing the ledger.
+- **MAE-141.** Maestro forwards `--permission-mode allow|yolo|read-only|auto` to `claude` unmapped (`runtime/claude_cli.py:222-223`); only `auto` is a valid `claude` value, so the other modes fail silently (design OQ-3).
+
 ## 2. Objective
 
 - Map design-doc phases 0-3 to four work epics. Give each epic all 8 milestones, plus playbook prompts, required artifacts, checkable exit criteria and the gate that applies.
-- Sequence MAE-110..139 into branches, with dependencies, primary files and verification.
+- Sequence MAE-110..141 into branches, with dependencies, primary files and verification.
 - Fix one release and story-sync procedure per epic.
 - Ship a forked playbook, `docs/playbooks/internal-engineering.yaml`, written for Maestro developing itself.
 
@@ -58,9 +63,9 @@ The `default` epic covers the project-wide phases, which run once.
 | 2 | execution-planning | skipped | — | — | — | Uses the default track by reference | — |
 | 3 | design-blueprint | skipped | — (design §7.1-§7.9 is the spec) | — | — | Uses the default design-blueprint by reference | Review gate (default track) |
 | 4 | build-planning | not_started | build-001; build-002; **build-003 produces the REPL golden-transcript fixture**; build-004 (local `uv sync` plus a `pytest` baseline); build-005 | research, documentation, engineer, local-ops | `docs/build-plan-e0-backend-seams.md`, `tests/fixtures/golden/**`, `tests/test_interactive_golden.py` | The golden test passes on unmodified `main`; the baseline test count is recorded | Artifact check, artifact-critic |
-| 5 | implementation | not_started | impl-000 (kickoff questions, in `awaiting-input.yaml`); impl-001; impl-003; impl-004; impl-005. impl-002 does not apply (no frontend). | engineer, security | `src/open_maestro/turns/**`, `src/open_maestro/bootstrap.py`, `tests/test_turn_service.py`, `docs/security/scan-report-*.md` | The golden transcript is **unchanged**; REPL turns write `.open-maestro/runs/<id>.yaml`; `--stream` shows claude-cli `tool.call` events; `prompt_toolkit` is declared and an `[mcp]` extra exists; `runtime/scripted.py` replays deterministically with no network | Code-critic, CI |
+| 5 | implementation | not_started | impl-000 (kickoff questions, in `awaiting-input.yaml`); impl-001; impl-003; impl-004; impl-005. impl-002 does not apply (no frontend). | engineer, security | `src/open_maestro/turns/**`, `src/open_maestro/bootstrap.py`, `tests/test_turn_service.py`, `docs/security/scan-report-*.md` | The golden transcript is **unchanged**; REPL turns write `.open-maestro/runs/<id>.yaml`; `--stream` shows claude-cli `tool.call` events; `prompt_toolkit` is declared and an `[mcp]` extra exists; `runtime/scripted.py` replays the minimal unit-test script `tests/fixtures/scripted/minimal.yaml` deterministically with no network (the demo fixture project and `demo/script.yaml` are e1) | Code-critic, CI |
 | 6 | qa-integration | not_started | qa-001; qa-002 is replaced by the golden plus stream-fixture tests; qa-003 (manual REPL checklist, a second terminal watching `run.lock`); qa-004 | qa | `docs/qa/e0-backend-seams-test-report.md`, `docs/qa/e0-backend-seams-uat-playbook.md` | All tests green; after the suite, `git status` is clean and `.open-maestro/sessions/` gains no new files | Artifact check |
-| 7 | demo-delivery | not_started | demo-001 (REPL run plus `--stream` tool log plus run record); demo-002; release-001 (3.9.0); story-sync-001 | documentation, qa, local-ops | `docs/demo/e0-backend-seams-demo-script.md`, `CHANGELOG.md` | Tag `v3.9.0` exists; MAE-110..116, 138 and 139 are Done in the CSV, and the Phase 0 parts of MAE-130 (scripted runtime) and MAE-131 (dependency declaration) are merged (both stories stay open until e1); the Jira dry-run is clean | Artifact check |
+| 7 | demo-delivery | not_started | demo-001 (REPL run plus `--stream` tool log plus run record); demo-002; release-001 (3.9.0); story-sync-001 | documentation, qa, local-ops | `docs/demo/e0-backend-seams-demo-script.md`, `CHANGELOG.md` | Tag `v3.9.0` exists; MAE-110..116 and 138..141 are Done in the CSV, and the Phase 0 parts of MAE-130 (scripted runtime) and MAE-131 (dependency declaration) are merged (both stories stay open until e1); the Jira dry-run is clean | Artifact check |
 | 8 | retrospective-findings | not_started | retro-001..003 | documentation | `docs/findings/e0-backend-seams-lessons-learned.md` | Lessons recorded; refactor surprises fed back to e1 impl-000 | — |
 
 **e0 exit criterion: REPL behaviour unchanged.** build-003 produces the proof, a characterization transcript (new in e0; `tests/test_interactive_golden.py` does not exist today) run against a deterministic runtime that includes prompt-history and milestone side effects (design §12). Commit that transcript **before** any extraction. Every e0 PR must leave it byte-identical.
@@ -71,8 +76,10 @@ The `default` epic covers the project-wide phases, which run once.
 |---|---|---|---|---|---|---|
 | MAE-138 | Test-session isolation; dashboard.html ignored | **First**; it blocks the golden fixture | `feat/MAE-138-test-session-isolation` | `tests/conftest.py`, `.gitignore` | Suite run → no new `.open-maestro/sessions/*`; `git check-ignore dashboard.html` | impl-001 |
 | MAE-139 | `add_epic` mutation plus MCP tool | Independent; early, so the epics need no hand edits | `feat/MAE-139-add-epic` | `milestones/mutations.py`, `mcp/server.py`, `tests/test_milestones.py`, `tests/test_mcp_server.py` | N+1 epics with 8 milestones; DriftError honoured; MCP round-trip | impl-001 |
+| MAE-140 | Review gate passable via `maestro --review` | Hygiene; independent; before any design-blueprint `/complete` | `fix/MAE-140-review-gate-profile` | `review/gate.py:62`, `cli.py:488`, `review/blueprint.py:58,441-478` | `--review` passing all personas it runs → gate PASS; no-PRD document → quote-context skipped/scoped with a message, not INPUT-1 | impl-001 |
+| MAE-141 | Map Maestro permission modes to Claude CLI values | Hygiene; before MAE-110 exposes `TurnRequest.permission_mode` | `fix/MAE-141-permission-mode-map` | `runtime/claude_cli.py:222-223`, `tests/` | Each Maestro mode maps to a valid `claude` value (documented); invalid value fails loudly; one test per mode | impl-001 |
 | MAE-131 (deps part) | Declare `prompt_toolkit` in core deps; add the `[mcp]` extra | **Early** (design D-7); after 138 | `feat/MAE-131-declare-deps` | `pyproject.toml` | `uv sync` clean; `import prompt_toolkit, mcp` works from a fresh venv with `[mcp]` | impl-001 |
-| MAE-130 (runtime part) | Scripted runtime `runtime/scripted.py`, registered in `runtime/factory.py` | **Early** (design D-7); after 138, before the golden fixture | `feat/MAE-130-scripted-runtime` | `runtime/scripted.py`, `runtime/factory.py`, `tests/test_scripted_runtime.py` | No network; deterministic replay of a script fixture | impl-001 |
+| MAE-130 (runtime part) | Scripted runtime `runtime/scripted.py`, registered in `runtime/factory.py` | **Early** (design D-7); after 138, before the golden fixture | `feat/MAE-130-scripted-runtime` | `runtime/scripted.py`, `runtime/factory.py`, `tests/test_scripted_runtime.py`, `tests/fixtures/scripted/minimal.yaml` | No network; deterministic replay of the minimal unit-test script (demo fixture and `demo/script.yaml` are e1) | impl-001 |
 | (fixture) | Golden transcript | After 138 and the two early parts above, before 110 | `feat/MAE-110-golden-transcript` | `tests/test_interactive_golden.py`, `tests/fixtures/golden/` | Green on main | build-003 |
 | MAE-115 | Side-effect-free milestone reads | Independent; it must land before MAE-120/122 | `feat/MAE-115-load-create-if-missing` | `milestones/store.py` | `load(create_if_missing=False)` writes nothing; 404 path tested | impl-001 |
 | MAE-112 | Stream → EventBus bridge | Independent (parallel) | `feat/MAE-112-stream-bridge` | `runtime/claude_cli.py`, `runtime/stream_printer.py` (`parse_claude_stream_line`, kimi parser) | Fixture tests: text, tool_use, tool_result, permission denials | impl-003 |
@@ -120,7 +127,7 @@ After the merges, run impl-005 (scan) and qa-001 (branch coverage from the trace
 |---|---|---|---|---|---|---|
 | MAE-117 | `maestro --ui` launcher | **Before any screen story** | `feat/MAE-117-ui-launcher` | `cli.py` (`--ui*`, `--no-browser`, `--demo`), `ui/app.py` | Free-port allocation; non-loopback host refused | impl-001 |
 | MAE-118 | Loopback token auth | **Before any screen story**; security review | `feat/MAE-118-loopback-auth` | `ui/auth.py` | 401/403; foreign Host and bad Origin rejected; `config.yaml` never served | impl-001, impl-005 |
-| MAE-130 (demo part) | Demo mode: fixture project, `--demo`, banner (the scripted runtime landed in e0) | Before Playwright work; **MAE-125 tests and all Playwright use the e0 runtime** | `feat/MAE-130-demo-mode` | `ui/demo/`, `cli.py` (`--demo`) | No network; seeded fixture copied to a temp dir | impl-001 |
+| MAE-130 (demo part) | Demo mode: fixture project, `--demo`, banner (the scripted runtime landed in e0) | Before Playwright work; **MAE-125 tests and all Playwright use the e0 runtime** | `feat/MAE-130-demo-mode` | `ui/demo/` (fixture project, `demo/script.yaml`), `cli.py` (`--demo`) | No network; seeded fixture copied to a temp dir | impl-001 |
 | MAE-131 (packaging part) | Wheel packaging (`[ui]` extra; deps were declared in e0) | Skeleton early; size check last | `feat/MAE-131-ui-packaging` | `pyproject.toml`, `scripts/build_ui.sh`, hatch `force-include` | Install with and without `[ui]`; SPA < 3 MB; instructive page when assets are missing | impl-003 |
 | MAE-119 | Project registry and picker | After 117/118 | `feat/MAE-119-project-registry` | `ui/registry.py`, `~/.open-maestro/projects.yaml` | Upsert; `ui-servers.yaml` reuse | impl-001, impl-002 |
 | MAE-120 | Initialize from the UI | After MAE-115 | `feat/MAE-120-ui-init` | `routes/project`, explicit `MilestoneStore.load(create_if_missing=True)` (not `--discover-milestones`, which only prints suggestions) | 404 `not_initialized` → init | impl-001, impl-002 |
@@ -226,14 +233,14 @@ Each epic closes demo-delivery with `release-001` and then `story-sync-001`. The
 - **The session leak must be fixed before the e0 golden tests.** Otherwise fixture runs pollute `.open-maestro/sessions/` and the golden side-effect assertions go non-deterministic. MAE-138 goes first.
 - **Untracked requirements.** `docs/requirements/` is not in git, so agents in worktrees need an absolute path to the prototype.
 - **Scripted runtime and dependency placement (resolved, design v0.2 D-7).** The scripted runtime (runtime part of MAE-130) and the dependency declaration (deps part of MAE-131) land first in e0, before the golden fixture. The demo UI and `[ui]` packaging parts stay in e1. The CSV rows are not split; the split is by PR as listed in §5.2 and §6.2.
-- **Permission mode.** `--permission-mode` already reaches the claude-cli subprocess unmapped (`claude_cli.py:222-223`); only `auto` appears in the installed `claude --help` choices. MAE-110 must map or validate the value per runtime (design OQ-3), and v1 defaults non-read-only prompts to `auto` and the Launch sheet shows the mode read-only, with no picker (design D-6). Remote binding is not a v1 option (design D-2): MAE-117 refuses non-loopback hosts with no override.
+- **Permission mode.** `--permission-mode` already reaches the claude-cli subprocess unmapped (`claude_cli.py:222-223`); only `auto` appears in the installed `claude --help` choices. MAE-141 maps or validates the value per runtime (design OQ-3). v1 always sends `auto`, and the Launch sheet shows it read-only with no picker; read-only prompts are constrained by the blocked-tool set (`pm.py:274-277`), not by a different permission mode (design D-6). Remote binding is not a v1 option (design D-2): MAE-117 refuses non-loopback hosts with no override.
 - **Stale local plan.** The primary checkout holds a 2026-10-01 default-only `milestones.yaml` with every milestone `not_started`. Back it up before adopting the Appendix.
 
-## 12. Story index (MAE-110 … MAE-139)
+## 12. Story index (MAE-110 … MAE-141)
 
 | Epic | Stories |
 |---|---|
-| e0-backend-seams | MAE-138 test-session isolation, MAE-139 add_epic, MAE-131 deps declaration (part), MAE-130 scripted runtime (part), MAE-110 TurnService, MAE-111 OperatorIO, MAE-112 stream bridge, MAE-113 run records, MAE-114 run-id tagging, MAE-115 side-effect-free reads, MAE-116 run lock |
+| e0-backend-seams | MAE-138 test-session isolation, MAE-139 add_epic, MAE-140 review gate via `--review`, MAE-141 permission-mode mapping, MAE-131 deps declaration (part), MAE-130 scripted runtime (part), MAE-110 TurnService, MAE-111 OperatorIO, MAE-112 stream bridge, MAE-113 run records, MAE-114 run-id tagging, MAE-115 side-effect-free reads, MAE-116 run lock |
 | e1-console-mvp | MAE-117 launcher, MAE-118 auth, MAE-119 registry, MAE-120 init, MAE-121 dashboard, MAE-122 milestone board, MAE-123 launch, MAE-124 ask, MAE-125 SSE log, MAE-126 cancel, MAE-127 inbox, MAE-128 mid-turn interactions, MAE-129 runs, MAE-130 demo mode (rest), MAE-131 packaging (rest) |
 | e2-gates-review | MAE-132 critic blocking, MAE-133 persona reviews and ledger, MAE-134 artifact diff, MAE-135 blockers, todos and notes |
 | e3-admin | MAE-136 models, agents, sources and usage admin |
@@ -283,7 +290,7 @@ epics:
   - {id: implementation, name: Implementation, order: 5, weight: 30,
      artifacts: [{path: src/open_maestro/turns/**}, {path: tests/test_turn_service.py},
                  {path: docs/security/scan-report-*.md}],
-     exit_criteria: [Golden transcript unchanged, REPL turns write run records, scripted runtime replays offline,
+     exit_criteria: [Golden transcript unchanged, REPL turns write run records, scripted runtime replays minimal unit-test script offline,
                      claude-cli tool events visible via --stream]}
   - {id: qa-integration, name: QA & Integration, order: 6, weight: 15,
      artifacts: [{path: docs/qa/e0-backend-seams-test-report.md}],
